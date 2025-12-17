@@ -84,3 +84,50 @@ pub unsafe fn loword(v: usize) -> u16 {
 pub unsafe fn hiword(v: usize) -> u16 {
     ((v >> 16) & 0xffff) as u16
 }
+
+pub fn default_window_pos(window_w: i32, window_h: i32) -> (i32, i32) {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+
+    let sw = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let sh = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+
+    #[cfg(debug_assertions)]
+    {
+        // 3x3 grid, cell 7 (left bottom), centered inside that cell
+        let cell_w = sw / 3;
+        let cell_h = sh / 3;
+
+        let cx = cell_w / 2;
+        let cy = cell_h * 2 + cell_h / 2;
+
+        let mut x = cx - window_w / 2;
+        let mut y = cy - window_h / 2;
+
+        // Manual tweak for удобного места на твоем сетапе
+        x -= 100;
+        y -= 95;
+
+        // Clamp to screen
+        if x < 0 {
+            x = 0;
+        }
+        if y < 0 {
+            y = 0;
+        }
+        if x + window_w > sw {
+            x = sw - window_w;
+        }
+        if y + window_h > sh {
+            y = sh - window_h;
+        }
+
+        return (x, y);
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let x = (sw - window_w) / 2;
+        let y = (sh - window_h) / 2;
+        (x, y)
+    }
+}

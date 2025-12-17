@@ -7,6 +7,7 @@
 // (`win`).  The `mod` declarations below make the modules available
 // throughout the crate.
 mod app;
+mod config;
 mod helpers;
 mod ui;
 mod visuals;
