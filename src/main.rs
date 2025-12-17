@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use windows::{
     Win32::{
@@ -6,27 +7,91 @@ use windows::{
             CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, RECT,
             WPARAM,
         },
+        Graphics::Gdi::{CreateFontIndirectW, DeleteObject, HFONT, HGDIOBJ, LOGFONTW},
         System::{LibraryLoader::GetModuleHandleW, Threading::CreateMutexW},
-        UI::WindowsAndMessaging::{
-            AdjustWindowRectEx, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW,
-            DispatchMessageW, GetMessageW, GetSystemMetrics, MSG, RegisterClassW, SM_CXSCREEN,
-            SM_CYSCREEN, SW_SHOW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WNDCLASSW,
-            WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+        UI::{
+            Controls::{
+                ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, SetWindowTheme,
+            },
+            WindowsAndMessaging::{
+                AdjustWindowRectEx, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW,
+                DispatchMessageW, GetMessageW, GetSystemMetrics, MSG, NONCLIENTMETRICSW,
+                RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SPI_GETNONCLIENTMETRICS, SW_SHOW,
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, ShowWindow,
+                SystemParametersInfoW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_SETFONT,
+                WNDCLASSW, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+            },
         },
     },
     core::{Error, HRESULT, PCWSTR, Result, w},
 };
 
-use windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE;
-
 fn ws_i32(base: WINDOW_STYLE, extra: i32) -> WINDOW_STYLE {
     WINDOW_STYLE(base.0 | extra as u32)
+}
+
+unsafe fn init_visuals() {
+    let icc = INITCOMMONCONTROLSEX {
+        dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+        dwICC: ICC_STANDARD_CLASSES,
+    };
+    let _ = unsafe { InitCommonControlsEx(&icc) };
+}
+
+unsafe fn create_message_font() -> windows::core::Result<HFONT> {
+    let mut ncm = NONCLIENTMETRICSW::default();
+    ncm.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
+
+    (unsafe {
+        SystemParametersInfoW(
+            SPI_GETNONCLIENTMETRICS,
+            ncm.cbSize,
+            Some(&mut ncm as *mut _ as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+        .ok()
+    });
+
+    let lf: LOGFONTW = ncm.lfMessageFont;
+    Ok(unsafe { CreateFontIndirectW(&lf) })
+}
+
+unsafe fn apply_modern_look(state: &AppState) {
+    let handles = [
+        state.chk_autostart,
+        state.chk_tray,
+        state.edit_delay_ms,
+        state.edit_hotkey_last_word,
+        state.edit_hotkey_pause,
+        state.edit_hotkey_selection,
+        state.edit_hotkey_switch_layout,
+        state.btn_apply,
+        state.btn_cancel,
+        state.btn_exit,
+    ];
+
+    for h in handles {
+        if h.0.is_null() {
+            continue;
+        }
+        let _ = unsafe { SetWindowTheme(h, w!("Explorer"), None) };
+        let _ = unsafe {
+            SendMessageW(
+                h,
+                WM_SETFONT,
+                Some(WPARAM(state.font.0 as usize)),
+                Some(LPARAM(1)),
+            )
+        };
+    }
 }
 
 fn main() -> Result<()> {
     let _guard = single_instance_guard()?;
 
     unsafe {
+        init_visuals();
+
         let class_name = w!("RustSwitcherMainWindow");
 
         let hinstance = GetModuleHandleW(PCWSTR::null())?.into();
@@ -140,10 +205,21 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESUL
     match msg {
         WM_CREATE => unsafe {
             let mut state = Box::new(AppState::default());
+
             if let Err(_) = create_controls(hwnd, &mut state) {
                 let _ = DestroyWindow(hwnd);
                 return LRESULT(0);
             }
+
+            match create_message_font() {
+                Ok(font) => state.font = font,
+                Err(_) => state.font = HFONT::default(),
+            }
+
+            if !state.font.0.is_null() {
+                apply_modern_look(&state);
+            }
+
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
             LRESULT(0)
         },
@@ -184,13 +260,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESUL
                 windows::Win32::UI::WindowsAndMessaging::GWLP_USERDATA,
             ) as *mut AppState;
             if !p.is_null() {
+                if !(*p).font.0.is_null() {
+                    let _ = DeleteObject(HGDIOBJ((*p).font.0));
+                }
+
                 drop(Box::from_raw(p));
-                windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(
-                    hwnd,
-                    windows::Win32::UI::WindowsAndMessaging::GWLP_USERDATA,
-                    0,
-                );
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             }
+
             LRESULT(0)
         },
 
@@ -200,6 +277,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESUL
 
 #[derive(Default)]
 struct AppState {
+    font: HFONT,
+
     chk_autostart: HWND,
     chk_tray: HWND,
     edit_delay_ms: HWND,
@@ -256,7 +335,7 @@ fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Result<()
         let _grp_settings = CreateWindowExW(
             windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE(0),
             w!("BUTTON"),
-            w!("RustSwitcher Settings"),
+            w!("Settings"),
             ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
             left_x,
             top_y,
@@ -271,7 +350,7 @@ fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Result<()
         state.chk_autostart = CreateWindowExW(
             windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE(0),
             w!("BUTTON"),
-            w!("Start on windows startup"),
+            w!("Start on startup"),
             ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
             left_x + 12,
             top_y + 28,
