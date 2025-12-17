@@ -9,18 +9,17 @@ use crate::app::{AppState, ID_APPLY, ID_CANCEL, ID_EXIT};
 use crate::helpers;
 use crate::ui;
 use crate::visuals;
-use windows::core::{Result, PCWSTR, w};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{DeleteObject, HGDIOBJ, HFONT};
+use windows::Win32::Graphics::Gdi::{DeleteObject, HFONT, HGDIOBJ};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DispatchMessageW,
-    GetMessageW, GetSystemMetrics, RegisterClassW, TranslateMessage, WNDCLASSW,
-    WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_THICKFRAME, WS_MAXIMIZEBOX,
-    CS_HREDRAW, CS_VREDRAW, MSG, SM_CXSCREEN, SM_CYSCREEN, ShowWindow, SW_SHOW,
-    WM_COMMAND, WM_CREATE, WM_DESTROY, GWLP_USERDATA, SetWindowLongPtrW,
-    DestroyWindow, PostQuitMessage, GetWindowLongPtrW, BN_CLICKED,
+    AdjustWindowRectEx, BN_CLICKED, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW,
+    DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetSystemMetrics,
+    GetWindowLongPtrW, MSG, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_SHOW,
+    SetWindowLongPtrW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WM_COMMAND, WM_CREATE,
+    WM_DESTROY, WNDCLASSW, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
 };
+use windows::core::{PCWSTR, Result, w};
 
 /// Start the main window and enter the message loop.
 ///
@@ -55,7 +54,12 @@ pub fn run() -> Result<()> {
         const CLIENT_W: i32 = 540;
         const CLIENT_H: i32 = 230;
         let style = WS_OVERLAPPEDWINDOW & !WS_THICKFRAME & !WS_MAXIMIZEBOX;
-        let mut rect = RECT { left: 0, top: 0, right: CLIENT_W, bottom: CLIENT_H };
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: CLIENT_W,
+            bottom: CLIENT_H,
+        };
         let _ = AdjustWindowRectEx(&mut rect, style, false, WINDOW_EX_STYLE(0));
         let window_w = rect.right - rect.left;
         let window_h = rect.bottom - rect.top;
@@ -107,12 +111,7 @@ pub fn run() -> Result<()> {
 /// The window procedure.  Handles creation, command and destroy
 /// messages.  Any unhandled messages are forwarded to the default
 /// procedure.
-pub extern "system" fn wndproc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     const WM_NCDESTROY: u32 = 0x0082;
     unsafe {
         match msg {
@@ -130,7 +129,7 @@ pub extern "system" fn wndproc(
                     Err(_) => state.font = HFONT::default(),
                 }
                 if !state.font.0.is_null() {
-                    visuals::apply_modern_look(&state);
+                    visuals::apply_modern_look(hwnd, state.font);
                 }
                 // Store the state pointer in the window user data so
                 // subsequent messages can retrieve it.

@@ -5,17 +5,16 @@
 //! controls.  Separating these routines keeps the window creation
 //! logic in `win` clear of stylistic concerns.
 
-use crate::app::AppState;
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateFontIndirectW, HFONT, LOGFONTW};
 use windows::Win32::UI::Controls::{
     ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, SetWindowTheme,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    NONCLIENTMETRICSW, SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW,
-    SystemParametersInfoW, WM_SETFONT,
+    EnumChildWindows, NONCLIENTMETRICSW, SPI_GETNONCLIENTMETRICS,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, SystemParametersInfoW, WM_SETFONT,
 };
-use windows::core::{Result, w};
+use windows::core::{BOOL, Result, w};
 
 /// Register common control classes so that modern UI elements (e.g.
 /// group boxes, push buttons) can be created.
@@ -59,32 +58,39 @@ pub unsafe fn create_message_font() -> Result<HFONT> {
 /// Iterates over every control stored in the `AppState` and calls
 /// `SetWindowTheme` and `SendMessageW` with `WM_SETFONT` to ensure
 /// consistent theming and typography.
-pub unsafe fn apply_modern_look(state: &AppState) {
-    let handles = [
-        state.chk_autostart,
-        state.chk_tray,
-        state.edit_delay_ms,
-        state.edit_hotkey_last_word,
-        state.edit_hotkey_pause,
-        state.edit_hotkey_selection,
-        state.edit_hotkey_switch_layout,
-        state.btn_apply,
-        state.btn_cancel,
-        state.btn_exit,
-    ];
+pub unsafe fn apply_modern_look(hwnd: windows::Win32::Foundation::HWND, font: HFONT) {
+    if font.0.is_null() {
+        return;
+    }
 
-    for h in handles {
-        if h.0.is_null() {
-            continue;
-        }
-        let _ = unsafe { SetWindowTheme(h, w!("Explorer"), None) };
+    // Main window too
+    let _ = unsafe {
+        SendMessageW(
+            hwnd,
+            WM_SETFONT,
+            Some(WPARAM(font.0 as usize)),
+            Some(LPARAM(1)),
+        )
+    };
+
+    unsafe extern "system" fn enum_proc(
+        child: windows::Win32::Foundation::HWND,
+        l: LPARAM,
+    ) -> BOOL {
+        let font = HFONT(l.0 as isize as *mut _);
+
+        let _ = unsafe { SetWindowTheme(child, w!("Explorer"), None) };
         let _ = unsafe {
             SendMessageW(
-                h,
+                child,
                 WM_SETFONT,
-                Some(WPARAM(state.font.0 as usize)),
+                Some(WPARAM(font.0 as usize)),
                 Some(LPARAM(1)),
             )
         };
+
+        BOOL(1)
     }
+
+    let _ = unsafe { EnumChildWindows(Some(hwnd), Some(enum_proc), LPARAM(font.0 as isize)) };
 }
