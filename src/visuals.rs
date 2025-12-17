@@ -1,0 +1,90 @@
+//! Visual styling and common control initialization.
+//!
+//! Functions in this module deal with preparing Windows common
+//! controls and applying theming information to the application's
+//! controls.  Separating these routines keeps the window creation
+//! logic in `win` clear of stylistic concerns.
+
+use crate::app::AppState;
+use windows::Win32::Foundation::{LPARAM, WPARAM};
+use windows::Win32::Graphics::Gdi::{CreateFontIndirectW, HFONT, LOGFONTW};
+use windows::Win32::UI::Controls::{
+    ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, SetWindowTheme,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    NONCLIENTMETRICSW, SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW,
+    SystemParametersInfoW, WM_SETFONT,
+};
+use windows::core::{Result, w};
+
+/// Register common control classes so that modern UI elements (e.g.
+/// group boxes, push buttons) can be created.
+///
+/// This function should be called once before any controls are
+/// instantiated.  Without it some controls may revert to legacy
+/// appearances on older versions of Windows.
+pub unsafe fn init_visuals() {
+    let icc = INITCOMMONCONTROLSEX {
+        dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+        dwICC: ICC_STANDARD_CLASSES,
+    };
+    let _ = unsafe { InitCommonControlsEx(&icc) };
+}
+
+/// Create a font matching the system message font.
+///
+/// Many Windows applications use the message font for consistency.
+/// This helper returns an `HFONT` handle which must be deleted
+/// manually once it is no longer needed.  The caller is responsible
+/// for freeing the returned font using `DeleteObject` on destruction.
+pub unsafe fn create_message_font() -> Result<HFONT> {
+    let mut ncm = NONCLIENTMETRICSW::default();
+    ncm.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
+    unsafe {
+        SystemParametersInfoW(
+            SPI_GETNONCLIENTMETRICS,
+            ncm.cbSize,
+            Some(&mut ncm as *mut _ as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+        .ok()
+    };
+    let lf: LOGFONTW = ncm.lfMessageFont;
+    Ok(unsafe { CreateFontIndirectW(&lf) })
+}
+
+/// Apply a modern visual theme and the configured font to the
+/// application's controls.
+///
+/// Iterates over every control stored in the `AppState` and calls
+/// `SetWindowTheme` and `SendMessageW` with `WM_SETFONT` to ensure
+/// consistent theming and typography.
+pub unsafe fn apply_modern_look(state: &AppState) {
+    let handles = [
+        state.chk_autostart,
+        state.chk_tray,
+        state.edit_delay_ms,
+        state.edit_hotkey_last_word,
+        state.edit_hotkey_pause,
+        state.edit_hotkey_selection,
+        state.edit_hotkey_switch_layout,
+        state.btn_apply,
+        state.btn_cancel,
+        state.btn_exit,
+    ];
+
+    for h in handles {
+        if h.0.is_null() {
+            continue;
+        }
+        let _ = unsafe { SetWindowTheme(h, w!("Explorer"), None) };
+        let _ = unsafe {
+            SendMessageW(
+                h,
+                WM_SETFONT,
+                Some(WPARAM(state.font.0 as usize)),
+                Some(LPARAM(1)),
+            )
+        };
+    }
+}
