@@ -15,9 +15,11 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, BN_CLICKED, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW,
     DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetSystemMetrics,
-    GetWindowLongPtrW, MSG, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_SHOW,
-    SetWindowLongPtrW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WM_COMMAND, WM_CREATE,
-    WM_DESTROY, WNDCLASSW, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+    GetWindowLongPtrW, HICON, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED,
+    LoadImageW, MSG, PostQuitMessage, RegisterClassExW, SM_CXICON, SM_CXSCREEN, SM_CXSMICON,
+    SM_CYICON, SM_CYSCREEN, SM_CYSMICON, SW_SHOW, SendMessageW, SetWindowLongPtrW, ShowWindow,
+    TranslateMessage, WINDOW_EX_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_SETICON, WNDCLASSEXW,
+    WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -35,16 +37,31 @@ pub fn run() -> Result<()> {
         let class_name = w!("RustSwitcherMainWindow");
         let hinstance = GetModuleHandleW(PCWSTR::null())?.into();
 
+        let icon = LoadImageW(
+            Some(hinstance),
+            PCWSTR(1usize as *const u16),
+            IMAGE_ICON,
+            0,
+            0,
+            LR_DEFAULTSIZE | LR_SHARED,
+        )
+        .ok()
+        .map(|h| HICON(h.0))
+        .unwrap_or_default();
+
         // Define the window class with our custom window procedure.
-        let wc = WNDCLASSW {
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wndproc),
             lpszClassName: class_name,
             hInstance: hinstance,
+            hIcon: icon,
+            hIconSm: icon,
             ..Default::default()
         };
 
-        if RegisterClassW(&wc) == 0 {
+        if RegisterClassExW(&wc) == 0 {
             return Err(helpers::last_error());
         }
 
@@ -85,6 +102,47 @@ pub fn run() -> Result<()> {
             Some(hinstance),
             None,
         )?;
+
+        let big = LoadImageW(
+            Some(hinstance),
+            PCWSTR(1usize as *const u16),
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXICON),
+            GetSystemMetrics(SM_CYICON),
+            LR_SHARED,
+        )
+        .ok()
+        .map(|h| HICON(h.0))
+        .unwrap_or_default();
+
+        let small = LoadImageW(
+            Some(hinstance),
+            PCWSTR(1usize as *const u16),
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON),
+            GetSystemMetrics(SM_CYSMICON),
+            LR_SHARED,
+        )
+        .ok()
+        .map(|h| HICON(h.0))
+        .unwrap_or_default();
+
+        if big.0 != std::ptr::null_mut() {
+            let _ = SendMessageW(
+                hwnd,
+                WM_SETICON,
+                Some(WPARAM(ICON_BIG as usize)),
+                Some(LPARAM(big.0 as isize)),
+            );
+        }
+        if small.0 != std::ptr::null_mut() {
+            let _ = SendMessageW(
+                hwnd,
+                WM_SETICON,
+                Some(WPARAM(ICON_SMALL as usize)),
+                Some(LPARAM(small.0 as isize)),
+            );
+        }
 
         // Show the window after creation.  Without this call it will
         // remain hidden.
