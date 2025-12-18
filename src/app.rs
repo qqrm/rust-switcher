@@ -23,6 +23,7 @@ pub struct AppState {
     pub edits: Edits,
     pub hotkeys: HotkeyEdits,
     pub buttons: Buttons,
+    pub paused: bool,
 }
 
 #[derive(Debug, Default)]
@@ -79,7 +80,7 @@ impl ControlId {
             _ => None,
         }
     }
-    
+
     #[inline]
     pub const fn hmenu(self) -> Option<HMENU> {
         Some(HMENU(self as i32 as usize as *mut c_void))

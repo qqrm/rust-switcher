@@ -21,6 +21,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL;
 use windows::Win32::UI::Input::KeyboardAndMouse::MOD_SHIFT;
 use windows::Win32::UI::Input::KeyboardAndMouse::MOD_WIN;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_CANCEL, VK_PAUSE};
+use windows::Win32::UI::WindowsAndMessaging::WM_HOTKEY;
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, BN_CLICKED, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW,
     DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetSystemMetrics,
@@ -299,6 +300,7 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
             LRESULT(0)
         }
         WM_NCDESTROY => unsafe { on_ncdestroy(hwnd) },
+        WM_HOTKEY => on_hotkey(hwnd, wparam, lparam),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }
@@ -357,4 +359,31 @@ fn with_state_mut<R>(hwnd: HWND, f: impl FnOnce(&mut AppState) -> R) -> Option<R
         let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
         (!p.is_null()).then(|| f(&mut *p))
     }
+}
+
+fn on_hotkey(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+    let id = wparam.0 as i32;
+
+    let Some(action) = crate::hotkeys::action_from_id(id) else {
+        return LRESULT(0);
+    };
+
+    match action {
+        crate::hotkeys::HotkeyAction::PauseToggle => {
+            with_state_mut(hwnd, |state| {
+                state.paused = !state.paused;
+            });
+        }
+        crate::hotkeys::HotkeyAction::ConvertLastWord => {
+            // TODO
+        }
+        crate::hotkeys::HotkeyAction::ConvertSelection => {
+            // TODO
+        }
+        crate::hotkeys::HotkeyAction::SwitchLayout => {
+            // TODO
+        }
+    }
+
+    LRESULT(0)
 }

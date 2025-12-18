@@ -9,6 +9,7 @@
 mod app;
 mod config;
 mod helpers;
+mod hotkeys;
 mod ui;
 mod visuals;
 mod win;

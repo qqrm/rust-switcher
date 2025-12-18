@@ -125,7 +125,7 @@ pub fn default_window_pos(window_w: i32, window_h: i32) -> (i32, i32) {
             y = sh - window_h;
         }
 
-        return (x, y);
+        (x, y)
     }
 
     #[cfg(not(debug_assertions))]
