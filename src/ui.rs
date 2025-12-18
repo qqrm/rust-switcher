@@ -16,328 +16,324 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::PCWSTR;
 use windows::core::w;
 
-fn create_child(
-    parent: HWND,
+#[derive(Clone, Copy, Debug)]
+struct Pt {
+    x: i32,
+    y: i32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Sz {
+    w: i32,
+    h: i32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RectI {
+    pos: Pt,
+    size: Sz,
+}
+
+impl RectI {
+    const fn new(x: i32, y: i32, w: i32, h: i32) -> Self {
+        Self {
+            pos: Pt { x, y },
+            size: Sz { w, h },
+        }
+    }
+    const fn offset(self, dx: i32, dy: i32) -> Self {
+        Self::new(self.pos.x + dx, self.pos.y + dy, self.size.w, self.size.h)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ControlSpec {
     ex_style: WINDOW_EX_STYLE,
     class: PCWSTR,
     text: PCWSTR,
     style: WINDOW_STYLE,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
+    rect: RectI,
     menu: Option<windows::Win32::UI::WindowsAndMessaging::HMENU>,
-) -> windows::core::Result<HWND> {
+}
+
+fn create(parent: HWND, s: ControlSpec) -> windows::core::Result<HWND> {
     unsafe {
         CreateWindowExW(
-            ex_style,
-            class,
-            text,
-            style,
-            x,
-            y,
-            w,
-            h,
+            s.ex_style,
+            s.class,
+            s.text,
+            s.style,
+            s.rect.pos.x,
+            s.rect.pos.y,
+            s.rect.size.w,
+            s.rect.size.h,
             Some(parent),
-            menu,
+            s.menu,
             None,
             None,
         )
     }
 }
 
-/// Internal helper which draws a label and a read‑only edit control on
-/// the same horizontal row.  A mutable reference to an `HWND` is
-/// passed so that the created edit control handle can be stored in
-/// the caller's state.
-fn hotkey_row(
-    parent: HWND,
+struct HotkeyRowSpec {
+    label: ControlSpec,
+    edit: ControlSpec,
+}
+
+fn hotkey_row_spec(
     x: i32,
     y: i32,
     w_label: i32,
     w_edit: i32,
     label: PCWSTR,
     value: PCWSTR,
-) -> windows::core::Result<HWND> {
-    unsafe {
-        let _label_hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("STATIC"),
-            label,
-            WS_CHILD | WS_VISIBLE,
-            x,
-            y + 3,
-            w_label,
-            18,
-            Some(parent),
-            None,
-            None,
-            None,
-        )?;
+) -> HotkeyRowSpec {
+    let label_spec = ControlSpec {
+        ex_style: WINDOW_EX_STYLE(0),
+        class: w!("STATIC"),
+        text: label,
+        style: WS_CHILD | WS_VISIBLE,
+        rect: RectI::new(x, y + 3, w_label, 18),
+        menu: None,
+    };
 
-        let edit_hwnd = CreateWindowExW(
-            WS_EX_CLIENTEDGE,
-            w!("EDIT"),
-            value,
-            ws_i32(WS_CHILD | WS_VISIBLE, ES_READONLY),
-            x + w_label + 8,
-            y,
-            w_edit,
-            22,
-            Some(parent),
-            None,
-            None,
-            None,
-        )?;
+    let edit_spec = ControlSpec {
+        ex_style: WS_EX_CLIENTEDGE,
+        class: w!("EDIT"),
+        text: value,
+        style: ws_i32(WS_CHILD | WS_VISIBLE, ES_READONLY),
+        rect: RectI::new(x + w_label + 8, y, w_edit, 22),
+        menu: None,
+    };
 
-        Ok(edit_hwnd)
+    HotkeyRowSpec {
+        label: label_spec,
+        edit: edit_spec,
     }
 }
 
-/// Create all of the controls for the settings window.
-///
-/// The main window owns all child controls; therefore the `hwnd`
-/// parameter is the parent for every control.  Coordinates are
-/// specified relative to the client area of the parent.  Upon
-/// completion the `state` structure contains the handles of all
-/// created controls.
+#[derive(Clone, Copy)]
+struct Layout {
+    margin: i32,
+    group_h: i32,
+    group_w_left: i32,
+    gap: i32,
+    group_w_right: i32,
+}
+
+impl Layout {
+    const fn new() -> Self {
+        Self {
+            margin: 12,
+            group_h: 170,
+            group_w_left: 240,
+            gap: 12,
+            group_w_right: 260,
+        }
+    }
+    const fn left_x(self) -> i32 {
+        self.margin
+    }
+    const fn top_y(self) -> i32 {
+        self.margin
+    }
+    const fn right_x(self) -> i32 {
+        self.margin + self.group_w_left + self.gap
+    }
+}
 pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Result<()> {
-    unsafe {
-        // Determine the size of the client area for reference.  The
-        // values are not currently used but retained for potential
-        // dynamic layout adjustments in the future.
+    // Determine client size for possible future dynamic layout
+    let (_w, _h) = unsafe {
         let mut rc = RECT::default();
         let _ = GetClientRect(hwnd, &mut rc);
-        let _w = rc.right - rc.left;
-        let _h = rc.bottom - rc.top;
+        (rc.right - rc.left, rc.bottom - rc.top)
+    };
 
-        // Layout constants
-        let margin = 12;
-        let group_h = 170;
-        let group_w_left = 240;
-        let gap = 12;
-        let group_w_right = 260;
+    let l = Layout::new();
 
-        let left_x = margin;
-        let top_y = margin;
-        let right_x = left_x + group_w_left + gap;
+    let left_x = l.left_x();
+    let top_y = l.top_y();
+    let right_x = l.right_x();
 
-        // Settings group box
-        let _grp_settings = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("BUTTON"),
-            w!("Settings"),
-            ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
-            left_x,
-            top_y,
-            group_w_left,
-            group_h,
-            Some(hwnd),
-            None,
-            None,
-            None,
-        )?;
+    let group_h = l.group_h;
+    let group_w_left = l.group_w_left;
+    let group_w_right = l.group_w_right;
 
-        // Autostart checkbox
-        state.checkboxes.autostart = create_child(
-            hwnd,
-            WINDOW_EX_STYLE(0),
-            w!("BUTTON"),
-            w!("Start on startup"),
-            ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
-            left_x + 12,
-            top_y + 28,
-            group_w_left - 24,
-            20,
-            ControlId::Autostart.hmenu(),
-        )?;
+    // Settings group box
+    let _grp_settings = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Settings"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
+            rect: RectI::new(left_x, top_y, group_w_left, group_h),
+            menu: None,
+        },
+    )?;
 
-        // Tray icon checkbox
-        state.checkboxes.tray = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("BUTTON"),
-            w!("Show tray icon"),
-            ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
-            left_x + 12,
-            top_y + 52,
-            group_w_left - 24,
-            20,
-            Some(hwnd),
-            ControlId::Tray.hmenu(),
-            None,
-            None,
-        )?;
+    // Autostart checkbox
+    state.checkboxes.autostart = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Start on startup"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
+            rect: RectI::new(left_x + 12, top_y + 28, group_w_left - 24, 20),
+            menu: ControlId::Autostart.hmenu(),
+        },
+    )?;
 
-        // Delay label
-        let _lbl_delay = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("STATIC"),
-            w!("Delay before switching:"),
-            WS_CHILD | WS_VISIBLE,
-            left_x + 12,
-            top_y + 82,
-            group_w_left - 24,
-            18,
-            Some(hwnd),
-            None,
-            None,
-            None,
-        )?;
+    // Tray icon checkbox
+    state.checkboxes.tray = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Show tray icon"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
+            rect: RectI::new(left_x + 12, top_y + 52, group_w_left - 24, 20),
+            menu: ControlId::Tray.hmenu(),
+        },
+    )?;
 
-        // Delay input
-        state.edits.delay_ms = CreateWindowExW(
-            WS_EX_CLIENTEDGE,
-            w!("EDIT"),
-            w!("100"),
-            ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, ES_NUMBER),
-            left_x + 12,
-            top_y + 104,
-            60,
-            22,
-            Some(hwnd),
-            ControlId::DelayMs.hmenu(),
-            None,
-            None,
-        )?;
+    // Delay label
+    let _lbl_delay = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("STATIC"),
+            text: w!("Delay before switching:"),
+            style: WS_CHILD | WS_VISIBLE,
+            rect: RectI::new(left_x + 12, top_y + 82, group_w_left - 24, 18),
+            menu: None,
+        },
+    )?;
 
-        // Milliseconds label
-        let _lbl_ms = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("STATIC"),
-            w!("ms"),
-            WS_CHILD | WS_VISIBLE,
-            left_x + 78,
-            top_y + 107,
-            24,
-            18,
-            Some(hwnd),
-            None,
-            None,
-            None,
-        )?;
+    // Delay input
+    state.edits.delay_ms = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WS_EX_CLIENTEDGE,
+            class: w!("EDIT"),
+            text: w!("100"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, ES_NUMBER),
+            rect: RectI::new(left_x + 12, top_y + 104, 60, 22),
+            menu: ControlId::DelayMs.hmenu(),
+        },
+    )?;
 
-        // Hotkeys group box
-        let _grp_hotkeys = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("BUTTON"),
-            w!("Hotkeys"),
-            ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
-            right_x,
-            top_y,
-            group_w_right,
-            group_h,
-            Some(hwnd),
-            None,
-            None,
-            None,
-        )?;
+    // Milliseconds label
+    let _lbl_ms = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("STATIC"),
+            text: w!("ms"),
+            style: WS_CHILD | WS_VISIBLE,
+            rect: RectI::new(left_x + 78, top_y + 107, 24, 18),
+            menu: None,
+        },
+    )?;
 
-        // Position and sizes for hotkey rows
-        let hx = right_x + 12;
-        let mut hy = top_y + 28;
-        let w_label = 130;
-        let w_edit = group_w_right - 12 - 12 - w_label - 8;
+    // Hotkeys group box
+    let _grp_hotkeys = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Hotkeys"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
+            rect: RectI::new(right_x, top_y, group_w_right, group_h),
+            menu: None,
+        },
+    )?;
 
-        // Convert last word hotkey
-        state.hotkeys.last_word = hotkey_row(
-            hwnd,
-            hx,
-            hy,
-            w_label,
-            w_edit,
-            w!("Convert last word:"),
-            w!(""),
-        )?;
+    // Hotkey rows
+    let hx = right_x + 12;
+    let mut hy = top_y + 28;
+    let w_label = 130;
+    let w_edit = group_w_right - 12 - 12 - w_label - 8;
 
+    {
+        let row = hotkey_row_spec(hx, hy, w_label, w_edit, w!("Convert last word:"), w!(""));
+        let _ = create(hwnd, row.label)?;
+        state.hotkeys.last_word = create(hwnd, row.edit)?;
         hy += 28;
+    }
 
-        // Pause hotkey
-        state.hotkeys.pause = hotkey_row(hwnd, hx, hy, w_label, w_edit, w!("Pause:"), w!(""))?;
-
+    {
+        let row = hotkey_row_spec(hx, hy, w_label, w_edit, w!("Pause:"), w!(""));
+        let _ = create(hwnd, row.label)?;
+        state.hotkeys.pause = create(hwnd, row.edit)?;
         hy += 28;
+    }
 
-        // Convert selection hotkey
-        state.hotkeys.selection = hotkey_row(
-            hwnd,
-            hx,
-            hy,
-            w_label,
-            w_edit,
-            w!("Convert selection:"),
-            w!(""),
-        )?;
-
+    {
+        let row = hotkey_row_spec(hx, hy, w_label, w_edit, w!("Convert selection:"), w!(""));
+        let _ = create(hwnd, row.label)?;
+        state.hotkeys.selection = create(hwnd, row.edit)?;
         hy += 28;
+    }
 
-        // Switch layout hotkey
-        state.hotkeys.switch_layout = hotkey_row(
-            hwnd,
+    {
+        let row = hotkey_row_spec(
             hx,
             hy,
             w_label,
             w_edit,
             w!("Switch keyboard layout:"),
             w!(""),
-        )?;
-
-        // Common button layout
-        let btn_y = top_y + group_h + 10;
-        let btn_h = 28;
-        let btn_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
-
-        // Exit button
-        state.buttons.exit = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("BUTTON"),
-            w!("Exit"),
-            btn_style,
-            left_x + 12,
-            btn_y,
-            110,
-            btn_h,
-            Some(hwnd),
-            ControlId::Exit.hmenu(),
-            None,
-            None,
-        )?;
-
-        // Apply button
-        state.buttons.apply = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("BUTTON"),
-            w!("Apply"),
-            btn_style,
-            right_x + 40,
-            btn_y,
-            90,
-            btn_h,
-            Some(hwnd),
-            ControlId::Apply.hmenu(),
-            None,
-            None,
-        )?;
-
-        // Cancel button
-        state.buttons.cancel = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("BUTTON"),
-            w!("Cancel"),
-            btn_style,
-            right_x + 140,
-            btn_y,
-            90,
-            btn_h,
-            Some(hwnd),
-            ControlId::Cancel.hmenu(),
-            None,
-            None,
-        )?;
-
-        // Optionally set the default button text again – the returned
-        // handle already contains the caption, but the original code
-        // did this as a safety measure.
-        let _ = SetWindowTextW(state.buttons.apply, w!("Apply"));
-
-        Ok(())
+        );
+        let _ = create(hwnd, row.label)?;
+        state.hotkeys.switch_layout = create(hwnd, row.edit)?;
     }
+
+    // Buttons
+    let btn_y = top_y + group_h + 10;
+    let btn_h = 28;
+    let btn_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
+
+    state.buttons.exit = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Exit"),
+            style: btn_style,
+            rect: RectI::new(left_x + 12, btn_y, 110, btn_h),
+            menu: ControlId::Exit.hmenu(),
+        },
+    )?;
+
+    state.buttons.apply = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Apply"),
+            style: btn_style,
+            rect: RectI::new(right_x + 40, btn_y, 90, btn_h),
+            menu: ControlId::Apply.hmenu(),
+        },
+    )?;
+
+    state.buttons.cancel = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Cancel"),
+            style: btn_style,
+            rect: RectI::new(right_x + 140, btn_y, 90, btn_h),
+            menu: ControlId::Cancel.hmenu(),
+        },
+    )?;
+
+    unsafe {
+        let _ = SetWindowTextW(state.buttons.apply, w!("Apply"));
+    }
+
+    Ok(())
 }
