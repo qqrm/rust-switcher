@@ -5,7 +5,7 @@
 //! routines, the application state, and the UI construction code to
 //! present a settings window and respond to user actions.
 
-use crate::app::{AppState, ID_APPLY, ID_CANCEL, ID_EXIT};
+use crate::app::{AppState};
 use crate::config;
 use crate::helpers;
 use crate::ui;
@@ -14,14 +14,14 @@ use crate::visuals;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{DeleteObject, HFONT, HGDIOBJ};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Controls::{BST_CHECKED, BST_UNCHECKED};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectEx, BM_SETCHECK, BN_CLICKED, CS_HREDRAW, CS_VREDRAW, CreateWindowExW,
-    DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetSystemMetrics,
+    AdjustWindowRectEx, BN_CLICKED, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW,
+    DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetSystemMetrics,
     GetWindowLongPtrW, HICON, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_SHARED, LoadImageW, MSG,
     PostQuitMessage, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SW_SHOW, SendMessageW,
-    SetWindowLongPtrW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_COMMAND,
-    WM_CREATE, WM_DESTROY, WM_SETICON, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+    SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_SETICON, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW,
+    WS_THICKFRAME,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -159,38 +159,60 @@ fn message_loop() -> Result<()> {
     Ok(())
 }
 
+fn format_hotkey(hk: &Option<config::Hotkey>) -> String {
+    let Some(hk) = hk else {
+        return "None".to_string();
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+
+    let mods = hk.mods;
+    if (mods & 0x0002) != 0 {
+        parts.push("Ctrl".to_string());
+    }
+    if (mods & 0x0001) != 0 {
+        parts.push("Alt".to_string());
+    }
+    if (mods & 0x0004) != 0 {
+        parts.push("Shift".to_string());
+    }
+    if (mods & 0x0008) != 0 {
+        parts.push("Win".to_string());
+    }
+
+    let key = match hk.vk {
+        0x13 => "Pause".to_string(),  // VK_PAUSE
+        0x03 => "Cancel".to_string(), // VK_CANCEL (Break)
+        _ => format!("VK 0x{:02X}", hk.vk),
+    };
+
+    parts.push(key);
+    parts.join(" + ")
+}
+
+unsafe fn set_hwnd_text(hwnd: windows::Win32::Foundation::HWND, s: &str) {
+    let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
+    let _ = unsafe { SetWindowTextW(hwnd, windows::core::PCWSTR(wide.as_ptr())) };
+}
+
 fn apply_config_to_ui(state: &AppState, cfg: &config::Config) {
     unsafe {
-        let autostart = if cfg.start_on_startup {
-            BST_CHECKED
-        } else {
-            BST_UNCHECKED
-        };
-        let tray = if cfg.show_tray_icon {
-            BST_CHECKED
-        } else {
-            BST_UNCHECKED
-        };
+        helpers::set_checkbox(state.checkboxes.autostart, cfg.start_on_startup);
+        helpers::set_checkbox(state.checkboxes.tray, cfg.show_tray_icon);
+        helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms);
 
-        let _ = SendMessageW(
-            state.chk_autostart,
-            BM_SETCHECK,
-            Some(WPARAM(autostart.0 as usize)),
-            Some(LPARAM(0)),
+        set_hwnd_text(
+            state.hotkeys.last_word,
+            &format_hotkey(&cfg.hotkey_convert_last_word),
         );
-
-        let _ = SendMessageW(
-            state.chk_tray,
-            BM_SETCHECK,
-            Some(WPARAM(tray.0 as usize)),
-            Some(LPARAM(0)),
+        set_hwnd_text(state.hotkeys.pause, &format_hotkey(&cfg.hotkey_pause));
+        set_hwnd_text(
+            state.hotkeys.selection,
+            &format_hotkey(&cfg.hotkey_convert_selection),
         );
-
-        let delay = cfg.delay_ms.to_string();
-        let delay_w: Vec<u16> = delay.encode_utf16().chain(std::iter::once(0)).collect();
-        let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowTextW(
-            state.edit_delay_ms,
-            PCWSTR(delay_w.as_ptr()),
+        set_hwnd_text(
+            state.hotkeys.switch_layout,
+            &format_hotkey(&cfg.hotkey_switch_layout),
         );
     }
 }
@@ -258,53 +280,73 @@ pub fn run() -> Result<()> {
 /// procedure.
 pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     const WM_NCDESTROY: u32 = 0x0082;
-    unsafe {
-        match msg {
-            WM_CREATE => on_create(hwnd),
-            WM_COMMAND => {
-                // Decode the command and notification codes.
-                let id = helpers::loword(wparam.0);
-                let notif = helpers::hiword(wparam.0);
-                if u32::from(notif) == BN_CLICKED {
-                    match id as i32 {
-                        ID_EXIT => {
-                            let _ = DestroyWindow(hwnd);
-                            return LRESULT(0);
-                        }
-                        ID_APPLY => {
-                            // TODO: read values from controls, update
-                            // configuration and apply settings.
-                            return LRESULT(0);
-                        }
-                        ID_CANCEL => {
-                            // TODO: revert UI changes or hide the
-                            // window when system tray support is
-                            // implemented.
-                            return LRESULT(0);
-                        }
-                        _ => {}
-                    }
-                }
-                LRESULT(0)
-            }
-            WM_DESTROY => {
-                // Request termination of the message loop.
-                PostQuitMessage(0);
-                LRESULT(0)
-            }
-            WM_NCDESTROY => {
-                // Clean up application state stored in the window.
-                let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
-                if !p.is_null() {
-                    if !(*p).font.0.is_null() {
-                        let _ = DeleteObject(HGDIOBJ((*p).font.0));
-                    }
-                    drop(Box::from_raw(p));
-                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                }
-                LRESULT(0)
-            }
-            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+
+    match msg {
+        WM_CREATE => on_create(hwnd),
+        WM_COMMAND => on_command(hwnd, wparam, lparam),
+        WM_DESTROY => {
+            unsafe { PostQuitMessage(0) };
+            LRESULT(0)
         }
+        WM_NCDESTROY => unsafe { on_ncdestroy(hwnd) },
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+fn on_command(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+    let id = unsafe { helpers::loword(wparam.0) };
+    let notif = unsafe { helpers::hiword(wparam.0) };
+
+    if u32::from(notif) != BN_CLICKED {
+        return LRESULT(0);
+    }
+
+    match id as i32 {
+        ID_EXIT => {
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+            LRESULT(0)
+        }
+        ID_APPLY => {
+            // TODO
+            LRESULT(0)
+        }
+        ID_CANCEL => {
+            with_state_mut(hwnd, |state| {
+                if let Ok(cfg) = config::load() {
+                    apply_config_to_ui(state, &cfg);
+                }
+            });
+            LRESULT(0)
+        }
+        _ => LRESULT(0),
+    }
+}
+
+unsafe fn on_ncdestroy(hwnd: HWND) -> LRESULT {
+    let p = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut AppState;
+    if p.is_null() {
+        return LRESULT(0);
+    }
+
+    let state = unsafe { &mut *p };
+
+    if !state.font.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ(state.font.0)) };
+    }
+
+    drop(unsafe { Box::from_raw(p) });
+    unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) };
+    LRESULT(0)
+}
+
+fn with_state_mut<F: FnOnce(&mut AppState)>(hwnd: HWND, f: F) {
+    unsafe {
+        let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
+        if p.is_null() {
+            return;
+        }
+        f(&mut *p);
     }
 }

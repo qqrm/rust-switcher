@@ -3,10 +3,14 @@
 //! retrieving the last OS error.  A RAII guard is provided for
 //! enforcing a single application instance.
 
-use windows::Win32::Foundation::ERROR_ALREADY_EXISTS;
-use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, LPARAM, WPARAM};
+use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, HWND};
 use windows::Win32::System::Threading::CreateMutexW;
-use windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE;
+use windows::Win32::UI::Controls::{BST_CHECKED, BST_UNCHECKED};
+use windows::Win32::UI::WindowsAndMessaging::{
+    BM_GETCHECK, BM_SETCHECK, GetWindowTextLengthW, GetWindowTextW, SendMessageW, SetWindowTextW,
+    WINDOW_STYLE,
+};
 use windows::core::{Error, HRESULT, Result};
 use windows::core::{PCWSTR, w};
 
@@ -130,4 +134,50 @@ pub fn default_window_pos(window_w: i32, window_h: i32) -> (i32, i32) {
         let y = (sh - window_h) / 2;
         (x, y)
     }
+}
+
+pub unsafe fn set_checkbox(hwnd: HWND, value: bool) {
+    let v = if value { BST_CHECKED } else { BST_UNCHECKED };
+    let _ = unsafe {
+        SendMessageW(
+            hwnd,
+            BM_SETCHECK,
+            Some(WPARAM(v.0 as usize)),
+            Some(LPARAM(0)),
+        )
+    };
+}
+
+pub unsafe fn get_checkbox(hwnd: HWND) -> bool {
+    let r = unsafe { SendMessageW(hwnd, BM_GETCHECK, Some(WPARAM(0)), Some(LPARAM(0))) };
+    r.0 as u32 == BST_CHECKED.0
+}
+
+pub unsafe fn set_edit_text(hwnd: HWND, s: &str) {
+    let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
+    let _ = unsafe { SetWindowTextW(hwnd, PCWSTR(wide.as_ptr())) };
+}
+
+pub unsafe fn get_edit_text(hwnd: HWND) -> String {
+    let len = unsafe { GetWindowTextLengthW(hwnd) };
+    if len <= 0 {
+        return String::new();
+    }
+    let mut buf: Vec<u16> = vec![0; (len as usize) + 1];
+    let n = unsafe { GetWindowTextW(hwnd, &mut buf) };
+    let n = n.max(0) as usize;
+    String::from_utf16_lossy(&buf[..n])
+}
+
+pub unsafe fn set_edit_u32(hwnd: HWND, value: u32) {
+    unsafe { set_edit_text(hwnd, &value.to_string()) };
+}
+
+pub unsafe fn get_edit_u32(hwnd: HWND) -> Option<u32> {
+    let s = unsafe { get_edit_text(hwnd) };
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    s.parse::<u32>().ok()
 }

@@ -5,11 +5,11 @@
 //! creation are kept here to keep the message loop free of UI
 //! details.
 
-use crate::app::{AppState, ID_APPLY, ID_AUTOSTART, ID_CANCEL, ID_DELAY_MS, ID_EXIT, ID_TRAY};
+use crate::app::{AppState, ControlId};
 use crate::helpers::ws_i32;
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BS_AUTOCHECKBOX, BS_GROUPBOX, CreateWindowExW, ES_NUMBER, ES_READONLY, GetClientRect, HMENU,
+    BS_AUTOCHECKBOX, BS_GROUPBOX, CreateWindowExW, ES_NUMBER, ES_READONLY, GetClientRect,
     SetWindowTextW, WINDOW_EX_STYLE, WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP, WS_VISIBLE,
 };
 use windows::core::PCWSTR;
@@ -111,7 +111,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         )?;
 
         // Autostart checkbox
-        state.chk_autostart = CreateWindowExW(
+        state.checkboxes.autostart = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             w!("BUTTON"),
             w!("Start on startup"),
@@ -121,13 +121,13 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             group_w_left - 24,
             20,
             Some(hwnd),
-            Some(HMENU(ID_AUTOSTART as *mut _)),
+            ControlId::Autostart.hmenu(),
             None,
             None,
         )?;
 
         // Tray icon checkbox
-        state.chk_tray = CreateWindowExW(
+        state.checkboxes.tray = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             w!("BUTTON"),
             w!("Show tray icon"),
@@ -137,7 +137,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             group_w_left - 24,
             20,
             Some(hwnd),
-            Some(HMENU(ID_TRAY as *mut _)),
+            ControlId::Tray.hmenu(),
             None,
             None,
         )?;
@@ -159,7 +159,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         )?;
 
         // Delay input
-        state.edit_delay_ms = CreateWindowExW(
+        state.edits.delay_ms = CreateWindowExW(
             WS_EX_CLIENTEDGE,
             w!("EDIT"),
             w!("100"),
@@ -169,7 +169,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             60,
             22,
             Some(hwnd),
-            Some(HMENU(ID_DELAY_MS as *mut _)),
+            ControlId::DelayMs.hmenu(),
             None,
             None,
         )?;
@@ -220,8 +220,8 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             w_label,
             w_edit,
             w!("Convert last word:"),
-            w!("DoubleShift"),
-            &mut state.edit_hotkey_last_word,
+            w!(""),
+            &mut state.hotkeys.last_word,
         )?;
         hy += 28;
 
@@ -234,7 +234,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             w_edit,
             w!("Pause:"),
             w!(""),
-            &mut state.edit_hotkey_pause,
+            &mut state.hotkeys.pause,
         )?;
         hy += 28;
 
@@ -246,8 +246,8 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             w_label,
             w_edit,
             w!("Convert selection:"),
-            w!("Ctrl + Cancel"),
-            &mut state.edit_hotkey_selection,
+            w!(""),
+            &mut state.hotkeys.selection,
         )?;
         hy += 28;
 
@@ -260,7 +260,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             w_edit,
             w!("Switch keyboard layout:"),
             w!(""),
-            &mut state.edit_hotkey_switch_layout,
+            &mut &mut state.hotkeys.switch_layout,
         )?;
 
         // Common button layout
@@ -269,7 +269,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         let btn_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
 
         // Exit button
-        state.btn_exit = CreateWindowExW(
+        state.buttons.exit = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             w!("BUTTON"),
             w!("Exit"),
@@ -279,13 +279,13 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             110,
             btn_h,
             Some(hwnd),
-            Some(HMENU(ID_EXIT as *mut _)),
+            ControlId::Exit.hmenu(),
             None,
             None,
         )?;
 
         // Apply button
-        state.btn_apply = CreateWindowExW(
+        state.buttons.apply = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             w!("BUTTON"),
             w!("Apply"),
@@ -295,13 +295,13 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             90,
             btn_h,
             Some(hwnd),
-            Some(HMENU(ID_APPLY as *mut _)),
+            ControlId::Apply.hmenu(),
             None,
             None,
         )?;
 
         // Cancel button
-        state.btn_cancel = CreateWindowExW(
+        state.buttons.cancel = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             w!("BUTTON"),
             w!("Cancel"),
@@ -311,7 +311,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
             90,
             btn_h,
             Some(hwnd),
-            Some(HMENU(ID_CANCEL as *mut _)),
+            ControlId::Cancel.hmenu(),
             None,
             None,
         )?;
@@ -319,7 +319,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         // Optionally set the default button text again – the returned
         // handle already contains the caption, but the original code
         // did this as a safety measure.
-        let _ = SetWindowTextW(state.btn_apply, w!("Apply"));
+        let _ = SetWindowTextW(state.buttons.apply, w!("Apply"));
 
         Ok(())
     }
