@@ -8,6 +8,9 @@
 use crate::app::AppState;
 use crate::config;
 use crate::helpers;
+use crate::hotkeys;
+use crate::hotkeys::HotkeyAction;
+use crate::hotkeys::action_from_id;
 use crate::ui;
 use crate::visuals;
 
@@ -251,6 +254,14 @@ fn on_create(hwnd: HWND) -> LRESULT {
 
         let cfg = config::load().unwrap_or_default();
         apply_config_to_ui(&state, &cfg);
+        // Регистрируем хоткеи из config
+        if let Err(_) = hotkeys::register_from_config(hwnd, &cfg) {
+            // Если регистрация провалилась, закрываем окно
+
+            let _ = DestroyWindow(hwnd);
+
+            return LRESULT(0);
+        }
 
         init_font_and_visuals(hwnd, &mut state);
 
@@ -295,12 +306,12 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
     match msg {
         WM_CREATE => on_create(hwnd),
         WM_COMMAND => on_command(hwnd, wparam, lparam),
+        WM_HOTKEY => on_hotkey(hwnd, wparam, lparam),
         WM_DESTROY => {
             unsafe { PostQuitMessage(0) };
             LRESULT(0)
         }
         WM_NCDESTROY => unsafe { on_ncdestroy(hwnd) },
-        WM_HOTKEY => on_hotkey(hwnd, wparam, lparam),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }
@@ -362,28 +373,33 @@ fn with_state_mut<R>(hwnd: HWND, f: impl FnOnce(&mut AppState) -> R) -> Option<R
 }
 
 fn on_hotkey(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+    // Определяем действие по id
     let id = wparam.0 as i32;
-
-    let Some(action) = crate::hotkeys::action_from_id(id) else {
+    let Some(action) = action_from_id(id) else {
         return LRESULT(0);
     };
 
-    match action {
-        crate::hotkeys::HotkeyAction::PauseToggle => {
-            with_state_mut(hwnd, |state| {
-                state.paused = !state.paused;
-            });
+    // Получаем mutable state
+    with_state_mut(hwnd, |state| match action {
+        HotkeyAction::PauseToggle => {
+            state.paused = !state.paused;
         }
-        crate::hotkeys::HotkeyAction::ConvertLastWord => {
-            // TODO
+        HotkeyAction::ConvertLastWord => {
+            if !state.paused {
+                crate::conversion::convert_last_word(state, hwnd);
+            }
         }
-        crate::hotkeys::HotkeyAction::ConvertSelection => {
-            // TODO
+        HotkeyAction::ConvertSelection => {
+            if !state.paused {
+                crate::conversion::convert_selection(state, hwnd);
+            }
         }
-        crate::hotkeys::HotkeyAction::SwitchLayout => {
-            // TODO
+        HotkeyAction::SwitchLayout => {
+            if !state.paused {
+                crate::conversion::switch_keyboard_layout();
+            }
         }
-    }
+    });
 
     LRESULT(0)
 }

@@ -8,6 +8,7 @@
 // throughout the crate.
 mod app;
 mod config;
+mod conversion;
 mod helpers;
 mod hotkeys;
 mod ui;
