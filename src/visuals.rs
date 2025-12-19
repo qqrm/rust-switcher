@@ -5,8 +5,8 @@
 //! controls.  Separating these routines keeps the window creation
 //! logic in `win` clear of stylistic concerns.
 
-use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::Graphics::Gdi::{CreateFontIndirectW, HFONT, LOGFONTW};
+use windows::Win32::Foundation::{E_FAIL, LPARAM, WPARAM};
+use windows::Win32::Graphics::Gdi::{CreateFontIndirectW, HFONT};
 use windows::Win32::UI::Controls::{
     ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, SetWindowTheme,
 };
@@ -37,19 +37,28 @@ pub unsafe fn init_visuals() {
 /// manually once it is no longer needed.  The caller is responsible
 /// for freeing the returned font using `DeleteObject` on destruction.
 pub unsafe fn create_message_font() -> Result<HFONT> {
-    let mut ncm = NONCLIENTMETRICSW::default();
-    ncm.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
+    let mut non_client_metrics = NONCLIENTMETRICSW {
+        cbSize: std::mem::size_of::<NONCLIENTMETRICSW>() as u32,
+        ..Default::default()
+    };
+
+    let pv_param = (&mut non_client_metrics as *mut NONCLIENTMETRICSW).cast::<core::ffi::c_void>();
+
     unsafe {
         SystemParametersInfoW(
             SPI_GETNONCLIENTMETRICS,
-            ncm.cbSize,
-            Some(&mut ncm as *mut _ as *mut _),
+            non_client_metrics.cbSize,
+            Some(pv_param),
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-        .ok()
-    };
-    let lf: LOGFONTW = ncm.lfMessageFont;
-    Ok(unsafe { CreateFontIndirectW(&lf) })
+        )?;
+    }
+
+    let font = unsafe { CreateFontIndirectW(&non_client_metrics.lfMessageFont) };
+    if font.0.is_null() {
+        return Err(windows::core::Error::from_hresult(E_FAIL));
+    }
+
+    Ok(font)
 }
 
 /// Apply a modern visual theme and the configured font to the
@@ -77,7 +86,7 @@ pub unsafe fn apply_modern_look(hwnd: windows::Win32::Foundation::HWND, font: HF
         child: windows::Win32::Foundation::HWND,
         l: LPARAM,
     ) -> BOOL {
-        let font = HFONT(l.0 as isize as *mut _);
+        let font = HFONT(l.0 as *mut _);
 
         let _ = unsafe { SetWindowTheme(child, w!("Explorer"), None) };
         let _ = unsafe {

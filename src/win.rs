@@ -114,6 +114,7 @@ fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
     unsafe {
         let big = LoadImageW(
             Some(hinstance),
+            #[allow(clippy::manual_dangling_ptr)]
             PCWSTR(1usize as *const u16),
             IMAGE_ICON,
             GetSystemMetrics(SM_CXICON),
@@ -126,6 +127,7 @@ fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
 
         let small = LoadImageW(
             Some(hinstance),
+            #[allow(clippy::manual_dangling_ptr)]
             PCWSTR(1usize as *const u16),
             IMAGE_ICON,
             GetSystemMetrics(SM_CXSMICON),

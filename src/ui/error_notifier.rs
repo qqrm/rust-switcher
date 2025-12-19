@@ -6,10 +6,10 @@ pub const WM_APP_ERROR: u32 = WM_APP + 1;
 
 pub const T_UI: &str = "UI";
 pub const T_CONFIG: &str = "Config";
-pub const T_HOTKEYS: &str = "Hotkeys";
-pub const T_TRAY: &str = "Tray";
-pub const T_CONVERSION: &str = "Conversion";
-pub const T_STARTUP: &str = "Startup";
+// pub const T_HOTKEYS: &str = "Hotkeys";
+// pub const T_TRAY: &str = "Tray";
+// pub const T_CONVERSION: &str = "Conversion";
+// pub const T_STARTUP: &str = "Startup";
 
 pub fn push(
     hwnd: HWND,
@@ -44,22 +44,6 @@ pub fn report_unit(
 ) {
     if let Err(e) = r {
         push(hwnd, state, title, user_text, &e);
-    }
-}
-
-pub fn report<T>(
-    hwnd: HWND,
-    state: &mut AppState,
-    title: &str,
-    user_text: &str,
-    r: windows::core::Result<T>,
-) -> Option<T> {
-    match r {
-        Ok(v) => Some(v),
-        Err(e) => {
-            push(hwnd, state, title, user_text, &e);
-            None
-        }
     }
 }
 

@@ -1,9 +1,7 @@
-use crate::helpers;
-
 use windows::Win32::Foundation::{HINSTANCE, HWND};
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_ERROR, NIIF_USER, NIM_ADD, NIM_DELETE,
-    NIM_MODIFY, NIM_SETVERSION, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_ERROR, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+    NIM_SETVERSION, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GWLP_HINSTANCE, GetWindowLongPtrW, IMAGE_ICON, LR_SHARED, LoadImageW, WM_APP,
@@ -56,6 +54,7 @@ unsafe fn default_icon(
     let h = unsafe {
         LoadImageW(
             Some(hinst),
+            #[allow(clippy::manual_dangling_ptr)]
             PCWSTR(1usize as *const u16),
             IMAGE_ICON,
             0,
@@ -70,19 +69,26 @@ unsafe fn default_icon(
 
 pub fn remove_icon(hwnd: HWND) {
     unsafe {
-        let mut nid = NOTIFYICONDATAW::default();
-        nid.cbSize = core::mem::size_of::<NOTIFYICONDATAW>() as u32;
-        nid.hWnd = hwnd;
-        nid.uID = TRAY_UID;
+        let nid = NOTIFYICONDATAW {
+            cbSize: core::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: hwnd,
+            uID: TRAY_UID,
+            ..Default::default()
+        };
+
         let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
     }
 }
+
 pub fn ensure_icon(hwnd: HWND) -> windows::core::Result<()> {
     unsafe {
-        let mut nid = NOTIFYICONDATAW::default();
-        nid.cbSize = core::mem::size_of::<NOTIFYICONDATAW>() as u32;
-        nid.hWnd = hwnd;
-        nid.uID = TRAY_UID;
+        let mut nid = NOTIFYICONDATAW {
+            cbSize: core::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: hwnd,
+            uID: TRAY_UID,
+            ..Default::default()
+        };
+
         nid.uCallbackMessage = WM_APP_TRAY;
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
 
@@ -113,10 +119,12 @@ pub fn ensure_icon(hwnd: HWND) -> windows::core::Result<()> {
 pub fn balloon_error(hwnd: HWND, title: &str, text: &str) -> windows::core::Result<()> {
     ensure_icon(hwnd)?;
 
-    let mut nid = NOTIFYICONDATAW::default();
-    nid.cbSize = core::mem::size_of::<NOTIFYICONDATAW>() as u32;
-    nid.hWnd = hwnd;
-    nid.uID = TRAY_UID;
+    let mut nid = NOTIFYICONDATAW {
+        cbSize: core::mem::size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: hwnd,
+        uID: TRAY_UID,
+        ..Default::default()
+    };
 
     nid.uFlags = NIF_INFO;
     nid.dwInfoFlags = NIIF_ERROR; // важно: без NIIF_USER
