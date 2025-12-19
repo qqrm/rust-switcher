@@ -114,7 +114,7 @@ fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
     unsafe {
         let big = LoadImageW(
             Some(hinstance),
-            PCWSTR(std::ptr::dangling::<u16>()),
+            PCWSTR(1usize as *const u16),
             IMAGE_ICON,
             GetSystemMetrics(SM_CXICON),
             GetSystemMetrics(SM_CYICON),
@@ -126,7 +126,7 @@ fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
 
         let small = LoadImageW(
             Some(hinstance),
-            PCWSTR(std::ptr::dangling::<u16>()),
+            PCWSTR(1usize as *const u16),
             IMAGE_ICON,
             GetSystemMetrics(SM_CXSMICON),
             GetSystemMetrics(SM_CYSMICON),
@@ -318,7 +318,6 @@ fn on_create(hwnd: HWND) -> LRESULT {
     #[cfg(debug_assertions)]
     with_state_mut_do(hwnd, |state| {
         helpers::debug_startup_notification(hwnd, state);
-        on_app_error(hwnd);
     });
 
     LRESULT(0)
@@ -530,7 +529,10 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
 fn on_app_error(hwnd: HWND) -> LRESULT {
     with_state_mut(hwnd, |state| {
         if let Some(e) = crate::ui::error_notifier::drain_one(state) {
-            let _ = crate::tray::balloon_error(hwnd, &e.title, &e.user_text);
+            if let Err(te) = crate::tray::balloon_error(hwnd, &e.title, &e.user_text) {
+                #[cfg(debug_assertions)]
+                eprintln!("tray balloon failed: {:?}", te);
+            }
 
             #[cfg(debug_assertions)]
             eprintln!("{}: {}", e.title, e.debug_text);
