@@ -1,10 +1,3 @@
-//! Construction of the graphical user interface.
-//!
-//! This module contains routines for laying out the settings window
-//! and populating it with controls.  Layout values and control
-//! creation are kept here to keep the message loop free of UI
-//! details.
-
 mod geom;
 use self::geom::*;
 
@@ -119,7 +112,6 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         },
     )?;
 
-    // Autostart checkbox
     state.checkboxes.autostart = create(
         hwnd,
         ControlSpec {
@@ -132,7 +124,6 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         },
     )?;
 
-    // Tray icon checkbox
     state.checkboxes.tray = create(
         hwnd,
         ControlSpec {
@@ -145,7 +136,6 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         },
     )?;
 
-    // Delay label
     let _lbl_delay = create(
         hwnd,
         ControlSpec {
@@ -158,7 +148,6 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         },
     )?;
 
-    // Delay input
     state.edits.delay_ms = create(
         hwnd,
         ControlSpec {
@@ -171,7 +160,6 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
         },
     )?;
 
-    // Milliseconds label
     let _lbl_ms = create(
         hwnd,
         ControlSpec {

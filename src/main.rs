@@ -11,7 +11,7 @@ mod visuals;
 mod win;
 
 fn main() -> windows::core::Result<()> {
-    helpers::init_app_user_model_id();
+    helpers::init_app_user_model_id()?;
 
     let _guard = helpers::single_instance_guard()?;
 

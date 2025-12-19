@@ -9,10 +9,13 @@ use crate::app::AppState;
 use crate::app::ControlId;
 use crate::config;
 use crate::helpers;
-use crate::hotkeys;
 use crate::hotkeys::HotkeyAction;
 use crate::hotkeys::action_from_id;
+use crate::hotkeys::register_from_config;
 use crate::ui;
+use crate::ui::error_notifier::T_CONFIG;
+use crate::ui::error_notifier::T_UI;
+use crate::ui_call;
 use crate::visuals;
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -29,9 +32,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetSystemMetrics,
     GetWindowLongPtrW, HICON, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_SHARED, LoadImageW, MSG,
     PostQuitMessage, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SW_SHOW, SendMessageW,
-    SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_SETICON, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW,
-    WS_THICKFRAME,
+    SetWindowLongPtrW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_COMMAND,
+    WM_CREATE, WM_DESTROY, WM_SETICON, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -60,7 +62,7 @@ fn register_main_class(
     Ok(())
 }
 
-fn compute_window_size(style: WINDOW_STYLE) -> (i32, i32) {
+fn compute_window_size(style: WINDOW_STYLE) -> Result<(i32, i32)> {
     const CLIENT_W: i32 = 540;
     const CLIENT_H: i32 = 230;
 
@@ -72,12 +74,10 @@ fn compute_window_size(style: WINDOW_STYLE) -> (i32, i32) {
     };
 
     unsafe {
-        let _ = AdjustWindowRectEx(&mut rect, style, false, WINDOW_EX_STYLE(0));
+        AdjustWindowRectEx(&mut rect, style, false, WINDOW_EX_STYLE(0))?;
     }
 
-    let window_w = rect.right - rect.left;
-    let window_h = rect.bottom - rect.top;
-    (window_w, window_h)
+    Ok((rect.right - rect.left, rect.bottom - rect.top))
 }
 
 fn create_main_window(
@@ -111,7 +111,7 @@ fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
     unsafe {
         let big = LoadImageW(
             Some(hinstance),
-            PCWSTR(1usize as *const u16),
+            PCWSTR(std::ptr::dangling::<u16>()),
             IMAGE_ICON,
             GetSystemMetrics(SM_CXICON),
             GetSystemMetrics(SM_CYICON),
@@ -123,7 +123,7 @@ fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
 
         let small = LoadImageW(
             Some(hinstance),
-            PCWSTR(1usize as *const u16),
+            PCWSTR(std::ptr::dangling::<u16>()),
             IMAGE_ICON,
             GetSystemMetrics(SM_CXSMICON),
             GetSystemMetrics(SM_CYSMICON),
@@ -133,7 +133,7 @@ fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
         .map(|h| HICON(h.0))
         .unwrap_or_default();
 
-        if big.0 != std::ptr::null_mut() {
+        if !big.0.is_null() {
             let _ = SendMessageW(
                 hwnd,
                 WM_SETICON,
@@ -142,7 +142,7 @@ fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
             );
         }
 
-        if small.0 != std::ptr::null_mut() {
+        if !small.0.is_null() {
             let _ = SendMessageW(
                 hwnd,
                 WM_SETICON,
@@ -202,34 +202,30 @@ fn format_hotkey(hk: Option<config::Hotkey>) -> String {
         .join(" + ")
 }
 
-fn set_hwnd_text(hwnd: HWND, s: &str) {
-    let mut wide: Vec<u16> = s.encode_utf16().collect();
-    wide.push(0);
-    unsafe {
-        let _ = SetWindowTextW(hwnd, PCWSTR(wide.as_ptr()));
-    }
+fn set_hwnd_text(hwnd: HWND, s: &str) -> windows::core::Result<()> {
+    helpers::set_edit_text(hwnd, s)
 }
 
-fn apply_config_to_ui(state: &AppState, cfg: &config::Config) {
-    unsafe {
-        helpers::set_checkbox(state.checkboxes.autostart, cfg.start_on_startup);
-        helpers::set_checkbox(state.checkboxes.tray, cfg.show_tray_icon);
-        helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms);
+fn apply_config_to_ui(state: &AppState, cfg: &config::Config) -> windows::core::Result<()> {
+    helpers::set_checkbox(state.checkboxes.autostart, cfg.start_on_startup);
+    helpers::set_checkbox(state.checkboxes.tray, cfg.show_tray_icon);
+    helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms)?;
 
-        set_hwnd_text(
-            state.hotkeys.last_word,
-            &format_hotkey(cfg.hotkey_convert_last_word),
-        );
-        set_hwnd_text(state.hotkeys.pause, &format_hotkey(cfg.hotkey_pause));
-        set_hwnd_text(
-            state.hotkeys.selection,
-            &format_hotkey(cfg.hotkey_convert_selection),
-        );
-        set_hwnd_text(
-            state.hotkeys.switch_layout,
-            &format_hotkey(cfg.hotkey_switch_layout),
-        );
-    }
+    set_hwnd_text(
+        state.hotkeys.last_word,
+        &format_hotkey(cfg.hotkey_convert_last_word),
+    )?;
+    set_hwnd_text(state.hotkeys.pause, &format_hotkey(cfg.hotkey_pause))?;
+    set_hwnd_text(
+        state.hotkeys.selection,
+        &format_hotkey(cfg.hotkey_convert_selection),
+    )?;
+    set_hwnd_text(
+        state.hotkeys.switch_layout,
+        &format_hotkey(cfg.hotkey_switch_layout),
+    )?;
+
+    Ok(())
 }
 
 fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Config {
@@ -239,19 +235,21 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
         cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
     }
 
-    // paused сейчас в UI не редактируется, оставляем как есть в cfg
     cfg
 }
 
-fn apply_config_runtime(hwnd: HWND, state: &mut AppState, cfg: &config::Config) {
-    // Синхронизируем рантайм флаг
+fn apply_config_runtime(
+    hwnd: HWND,
+    state: &mut AppState,
+    cfg: &config::Config,
+) -> windows::core::Result<()> {
     state.paused = cfg.paused;
 
-    // Перерегистрируем хоткеи
     let _ = crate::hotkeys::register_from_config(hwnd, cfg);
 
     // TODO: включить или выключить трей
     // TODO: включить или выключить автозапуск
+    Ok(())
 }
 
 fn init_font_and_visuals(hwnd: HWND, state: &mut AppState) {
@@ -266,38 +264,61 @@ fn init_font_and_visuals(hwnd: HWND, state: &mut AppState) {
     }
 }
 
+macro_rules! startup_or_return0 {
+    ($hwnd:expr, $state:expr, $text:expr, $expr:expr) => {{
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                $crate::ui::error_notifier::push($hwnd, $state, "", $text, &e);
+                on_app_error($hwnd);
+                return LRESULT(0);
+            }
+        }
+    }};
+}
+
 fn on_create(hwnd: HWND) -> LRESULT {
+    let mut state = Box::new(AppState::default());
+
+    #[rustfmt::skip]
+    startup_or_return0!(hwnd, &mut state, "Failed to create UI controls", ui::create_controls(hwnd, &mut state));
+
+    let cfg = match config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            use windows::core::{Error, HRESULT};
+            let we = Error::new(HRESULT(0x80004005u32 as i32), e.to_string());
+            crate::ui::error_notifier::push(
+                hwnd,
+                &mut state,
+                "",
+                "Failed to load config, falling back to defaults",
+                &we,
+            );
+            on_app_error(hwnd);
+            config::Config::default()
+        }
+    };
+
+    #[rustfmt::skip]
+    startup_or_return0!(hwnd, &mut state, "Failed to apply config to UI", apply_config_to_ui(&state, &cfg));
+
+    #[rustfmt::skip]
+    startup_or_return0!(hwnd, &mut state, "Failed to register hotkeys", register_from_config(hwnd, &cfg));
+
+    init_font_and_visuals(hwnd, &mut state);
+
     unsafe {
-        let mut state = Box::new(AppState::default());
-
-        {
-            let e = helpers::last_error();
-            crate::ui::error_notifier::push(hwnd, &mut state, "Тест ⛑️", "Ошибка при запуске", &e);
-        }
-
-        let _ = on_app_error(hwnd);
-
-        if ui::create_controls(hwnd, &mut state).is_err() {
-            let _ = DestroyWindow(hwnd);
-            return LRESULT(0);
-        }
-
-        let cfg = config::load().unwrap_or_default();
-        apply_config_to_ui(&state, &cfg);
-        // Регистрируем хоткеи из config
-        if let Err(_) = hotkeys::register_from_config(hwnd, &cfg) {
-            // Если регистрация провалилась, закрываем окно
-
-            let _ = DestroyWindow(hwnd);
-
-            return LRESULT(0);
-        }
-
-        init_font_and_visuals(hwnd, &mut state);
-
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
-        LRESULT(0)
     }
+
+    #[cfg(debug_assertions)]
+    with_state_mut_do(hwnd, |state| {
+        helpers::debug_startup_notification(hwnd, state);
+        on_app_error(hwnd);
+    });
+
+    LRESULT(0)
 }
 
 /// Start the main window and enter the message loop.
@@ -315,7 +336,8 @@ pub fn run() -> Result<()> {
         register_main_class(class_name, hinstance)?;
 
         let style = WS_OVERLAPPEDWINDOW & !WS_THICKFRAME & !WS_MAXIMIZEBOX;
-        let (window_w, window_h) = compute_window_size(style);
+        let (window_w, window_h) = compute_window_size(style)?;
+
         let (x, y) = helpers::default_window_pos(window_w, window_h);
 
         let hwnd = create_main_window(class_name, hinstance, style, x, y, window_w, window_h)?;
@@ -347,6 +369,61 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
     }
 }
 
+fn io_to_win(e: std::io::Error) -> windows::core::Error {
+    use windows::core::{Error, HRESULT};
+    Error::new(HRESULT(0x80004005u32 as i32), e.to_string())
+}
+
+fn handle_apply(hwnd: HWND, state: &mut AppState) {
+    let base = match config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            let e = io_to_win(e);
+            crate::ui::error_notifier::push(
+                hwnd,
+                state,
+                "",
+                "Failed to load config before applying changes",
+                &e,
+            );
+            on_app_error(hwnd);
+            config::Config::default()
+        }
+    };
+
+    let cfg = read_ui_to_config(state, base);
+
+    if let Err(e) = config::save(&cfg) {
+        let e = io_to_win(e);
+        crate::ui::error_notifier::push(hwnd, state, "", "Failed to save config", &e);
+        on_app_error(hwnd);
+        return;
+    }
+
+    #[rustfmt::skip]
+    ui_call!(hwnd, state, T_CONFIG, "Failed to apply config at runtime", apply_config_runtime(hwnd, state, &cfg));
+
+    #[rustfmt::skip]
+    ui_call!(hwnd, state, T_UI, "Failed to update UI from config", apply_config_to_ui(state, &cfg));
+}
+
+fn handle_cancel(hwnd: HWND, state: &mut AppState) {
+    let cfg = match config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            let e = io_to_win(e);
+            crate::ui::error_notifier::push(hwnd, state, "", "Failed to load config", &e);
+            on_app_error(hwnd);
+            return;
+        }
+    };
+
+    #[rustfmt::skip]
+    ui_call!(hwnd, state, T_CONFIG, "Failed to apply config at runtime", apply_config_runtime(hwnd, state, &cfg));
+    #[rustfmt::skip]
+    ui_call!(hwnd, state, T_UI, "Failed to update UI from config", apply_config_to_ui(state, &cfg));
+}
+
 fn on_command(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     let id = helpers::loword(wparam.0) as i32;
     let notif = helpers::hiword(wparam.0);
@@ -360,31 +437,20 @@ fn on_command(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     };
 
     match cid {
-        ControlId::Exit => unsafe {
-            let _ = DestroyWindow(hwnd);
-        },
-
-        ControlId::Apply => {
-            with_state_mut(hwnd, |state| {
-                let base = config::load().unwrap_or_default();
-                let cfg = read_ui_to_config(state, base);
-
-                if config::save(&cfg).is_ok() {
-                    apply_config_runtime(hwnd, state, &cfg);
-                    apply_config_to_ui(state, &cfg);
-                }
-            });
-        }
-
-        ControlId::Cancel => {
-            with_state_mut(hwnd, |state| {
-                if let Ok(cfg) = config::load() {
-                    apply_config_runtime(hwnd, state, &cfg);
-                    apply_config_to_ui(state, &cfg);
-                }
-            });
-        }
-
+        ControlId::Exit => with_state_mut_do(hwnd, |state| {
+            if let Err(e) = unsafe { DestroyWindow(hwnd) } {
+                crate::ui::error_notifier::push(
+                    hwnd,
+                    state,
+                    T_UI,
+                    "Failed to close the window",
+                    &e,
+                );
+                on_app_error(hwnd);
+            }
+        }),
+        ControlId::Apply => with_state_mut_do(hwnd, |state| handle_apply(hwnd, state)),
+        ControlId::Cancel => with_state_mut_do(hwnd, |state| handle_cancel(hwnd, state)),
         _ => {}
     }
 
@@ -414,6 +480,15 @@ fn with_state_mut<R>(hwnd: HWND, f: impl FnOnce(&mut AppState) -> R) -> Option<R
     unsafe {
         let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
         (!p.is_null()).then(|| f(&mut *p))
+    }
+}
+
+fn with_state_mut_do(hwnd: HWND, f: impl FnOnce(&mut AppState)) {
+    unsafe {
+        let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
+        if !p.is_null() {
+            f(&mut *p);
+        }
     }
 }
 

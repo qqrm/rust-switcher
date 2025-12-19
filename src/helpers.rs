@@ -137,26 +137,26 @@ pub fn default_window_pos(window_w: i32, window_h: i32) -> (i32, i32) {
     }
 }
 
-pub unsafe fn set_checkbox(hwnd: HWND, value: bool) {
+pub fn set_checkbox(hwnd: HWND, value: bool) {
     let v = if value { BST_CHECKED } else { BST_UNCHECKED };
-    let _ = unsafe {
+    unsafe {
         SendMessageW(
             hwnd,
             BM_SETCHECK,
             Some(WPARAM(v.0 as usize)),
             Some(LPARAM(0)),
-        )
-    };
+        );
+    }
 }
 
-pub unsafe fn get_checkbox(hwnd: HWND) -> bool {
+pub fn get_checkbox(hwnd: HWND) -> bool {
     let r = unsafe { SendMessageW(hwnd, BM_GETCHECK, Some(WPARAM(0)), Some(LPARAM(0))) };
     r.0 as u32 == BST_CHECKED.0
 }
 
-pub unsafe fn set_edit_text(hwnd: HWND, s: &str) {
+pub fn set_edit_text(hwnd: HWND, s: &str) -> windows::core::Result<()> {
     let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-    let _ = unsafe { SetWindowTextW(hwnd, PCWSTR(wide.as_ptr())) };
+    unsafe { SetWindowTextW(hwnd, PCWSTR(wide.as_ptr())) }
 }
 
 pub unsafe fn get_edit_text(hwnd: HWND) -> String {
@@ -170,8 +170,8 @@ pub unsafe fn get_edit_text(hwnd: HWND) -> String {
     String::from_utf16_lossy(&buf[..n])
 }
 
-pub unsafe fn set_edit_u32(hwnd: HWND, value: u32) {
-    unsafe { set_edit_text(hwnd, &value.to_string()) };
+pub fn set_edit_u32(hwnd: HWND, value: u32) -> windows::core::Result<()> {
+    set_edit_text(hwnd, &value.to_string())
 }
 
 pub unsafe fn get_edit_u32(hwnd: HWND) -> Option<u32> {
@@ -183,8 +183,15 @@ pub unsafe fn get_edit_u32(hwnd: HWND) -> Option<u32> {
     s.parse::<u32>().ok()
 }
 
-pub fn init_app_user_model_id() {
-    unsafe {
-        let _ = SetCurrentProcessExplicitAppUserModelID(w!("RustSwitcher"));
-    }
+pub fn init_app_user_model_id() -> windows::core::Result<()> {
+    unsafe { SetCurrentProcessExplicitAppUserModelID(w!("RustSwitcher")) }
+}
+
+#[cfg(debug_assertions)]
+pub fn debug_startup_notification(
+    hwnd: windows::Win32::Foundation::HWND,
+    state: &mut crate::app::AppState,
+) {
+    let e = crate::helpers::last_error();
+    crate::ui::error_notifier::push(hwnd, state, "Test title ⛑️", "Startup test error", &e);
 }
