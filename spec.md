@@ -11,6 +11,7 @@ Supported actions:
 - Convert selection: convert the currently selected text
 - Switch keyboard layout: switch the system layout only, without converting text
 - Pause: temporarily disable all hotkey handling
+- Toggle conversion scope: toggle Convert last word scope between Last word and Last phrase
 
 ---
 
@@ -49,6 +50,12 @@ The application uses a set of hotkeys configurable via the GUI.
 - Toggles pause state on or off
 - When paused, other hotkeys do nothing
 
+5) Toggle conversion scope
+- Toggles Convert last word scope between Last word and Last phrase
+- Trigger: pressing Left Shift and Right Shift together
+- Must not interfere with normal typing
+- Debounced: triggers once per press pair until at least one Shift is released
+
 ### Default Hotkeys
 
 Defaults match the reference UI:
@@ -65,8 +72,8 @@ Notes:
 
 ## Execution Delay
 
-Setting: Delay before switching (ms)
-- A delay before running the copy, switch layout, paste sequence
+Setting: Delay before paste (ms)
+- A delay before inserting the converted text
 - Needed for stability in apps with slow selection or clipboard updates
 - Configured as an integer in milliseconds
 - Default value: 100 ms
@@ -75,20 +82,34 @@ Setting: Delay before switching (ms)
 
 ## Text Conversion
 
-- Simple character mapping based on keyboard layouts
-- No language detection
-- No heuristics
-- No guessing of the correct layout
+Base:
+- Character mapping based on keyboard layouts (RU <-> EN for the active pair)
+- Conversion is deterministic for a given mapping table
+- No translation
+- No API calls
+- No background auto-fix
 
-Logic:
-- take the existing text
-- switch the system layout
-- transform characters according to the new layout
+Two scopes for Convert last word:
+- Last word: convert only the last word to the left of the caret
+- Last phrase: greedily extend the range by words to the left while conversion quality improves, then convert that range
+
+Last phrase heuristic:
+- Uses lingua-rs limited to languages: Russian and English
+- The app compares how plausible the text looks before and after conversion
+- The app extends selection left by one word at a time and stops when:
+  - conversion no longer improves the target language confidence by a threshold, or
+  - confidence drops below a minimal threshold, or
+  - max_words limit is reached
+- The heuristic runs only on explicit user command, never automatically
+
+Logic for conversion:
+- take the existing text (selection)
+- convert characters according to the mapping table (no system layout switching is required for conversion itself)
 - insert the result
 
-Supports:
-- any number of layouts
-- layout cycling via the system round robin
+Layout switching:
+- Switching the system layout is a separate step and can be performed after conversion so the user continues typing in the expected layout
+
 
 ---
 
@@ -98,22 +119,40 @@ Supports:
 
 1) Send Ctrl + C
 2) Read text from the system clipboard
-3) Wait Delay before switching
-4) Switch system keyboard layout to the next layout
-5) Convert the text according to the new layout
-6) Send Ctrl + V
-7) Restore original clipboard contents
+3) Wait Delay before paste
+4) Convert the text according to the mapping table
+5) Send Ctrl + V
+6) Restore original clipboard contents
 
 Requirements:
+- After paste, switch system keyboard layout to the next layout so the user continues typing in the expected layout
 - Clipboard is always backed up and restored
 - No per character backspace logic
 
 ### Convert last word
 
+If there is a selection:
+- behaves like Convert selection
+
 If there is no selection:
+- depends on Conversion scope
+
+Scope: Last word
 1) Select the last word to the left of the caret
    - stop at whitespace or start of line
-2) Then run the same flow as Convert selection
+2) Then run Convert selection flow
+
+Scope: Last phrase
+1) Select the last word to the left of the caret
+2) Repeat:
+   - evaluate original vs converted text with lingua-rs (RU, EN only)
+   - if converted is better for the same target language, extend selection by one word to the left
+   - otherwise stop and revert to the last good selection
+3) Then run Convert selection flow
+
+Limits:
+- max_words: N (configurable, default 8)
+- minimal confidence and minimal delta thresholds are configurable constants
 
 ---
 
@@ -140,6 +179,9 @@ Left side:
 - Checkbox: Start on windows startup
 - Checkbox: Show tray icon
 - Input: Delay before switching (ms)
+- Combo: Conversion scope
+  - Last word
+  - Last phrase
 - Button: Report an issue
 - Button: Exit program
 
@@ -156,6 +198,7 @@ Bottom buttons:
   - atomically writes the config and applies settings
 - Cancel
   - discards UI changes and restores values from the current config
+  
 
 ### Report an issue
 
@@ -193,6 +236,8 @@ When disabled:
   - hotkey_switch_layout: Hotkey or None
   - hotkey_pause: Hotkey or None
   - paused: bool
+  - conversion_scope: "last_word" | "last_phrase"
+  - last_phrase_max_words: u32
 
 ---
 
