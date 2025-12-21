@@ -160,14 +160,15 @@ pub fn set_edit_text(hwnd: HWND, s: &str) -> windows::core::Result<()> {
     unsafe { SetWindowTextW(hwnd, PCWSTR(wide.as_ptr())) }
 }
 
-pub unsafe fn get_edit_text(hwnd: HWND) -> String {
+pub fn get_edit_text(hwnd: HWND) -> String {
     let len = unsafe { GetWindowTextLengthW(hwnd) };
     if len <= 0 {
         return String::new();
     }
+
     let mut buf: Vec<u16> = vec![0; (len as usize) + 1];
-    let n = unsafe { GetWindowTextW(hwnd, &mut buf) };
-    let n = n.max(0) as usize;
+    let n = unsafe { GetWindowTextW(hwnd, &mut buf) }.max(0) as usize;
+
     String::from_utf16_lossy(&buf[..n])
 }
 
@@ -175,8 +176,8 @@ pub fn set_edit_u32(hwnd: HWND, value: u32) -> windows::core::Result<()> {
     set_edit_text(hwnd, &value.to_string())
 }
 
-pub unsafe fn get_edit_u32(hwnd: HWND) -> Option<u32> {
-    let s = unsafe { get_edit_text(hwnd) };
+pub fn get_edit_u32(hwnd: HWND) -> Option<u32> {
+    let s = get_edit_text(hwnd);
     let s = s.trim();
     if s.is_empty() {
         return None;

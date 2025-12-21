@@ -32,7 +32,7 @@ pub fn convert_last_word(state: &mut AppState, hwnd: HWND) {
 }
 
 pub fn convert_selection(state: &mut AppState, _hwnd: HWND) {
-    let delay_ms = unsafe { crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100) };
+    let delay_ms = crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100);
 
     unsafe {
         let fg = GetForegroundWindow();
@@ -68,7 +68,6 @@ pub fn convert_selection(state: &mut AppState, _hwnd: HWND) {
         let _ = switch_keyboard_layout();
     }
 }
-
 
 pub fn switch_keyboard_layout() -> windows::core::Result<()> {
     unsafe {

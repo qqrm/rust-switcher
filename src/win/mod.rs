@@ -295,11 +295,9 @@ fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::co
 }
 
 fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Config {
-    unsafe {
-        cfg.start_on_startup = helpers::get_checkbox(state.checkboxes.autostart);
-        cfg.show_tray_icon = helpers::get_checkbox(state.checkboxes.tray);
-        cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
-    }
+    cfg.start_on_startup = helpers::get_checkbox(state.checkboxes.autostart);
+    cfg.show_tray_icon = helpers::get_checkbox(state.checkboxes.tray);
+    cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
 
     cfg.hotkey_convert_last_word = state.hotkey_values.last_word;
     cfg.hotkey_pause = state.hotkey_values.pause;
