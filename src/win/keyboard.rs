@@ -2,9 +2,11 @@ use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+    System::SystemInformation::GetTickCount64,
     UI::WindowsAndMessaging::{
-        CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, SetWindowsHookExW, UnhookWindowsHookEx,
-        WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+        CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, PostMessageW, SetWindowsHookExW,
+        UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
+        WM_SYSKEYUP,
     },
 };
 
@@ -14,6 +16,10 @@ static HOOK_HANDLE: AtomicIsize = AtomicIsize::new(0);
 static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
 static MODS_DOWN: AtomicU32 = AtomicU32::new(0);
 static MODVKS_DOWN: AtomicU32 = AtomicU32::new(0);
+
+fn now_tick_ms() -> u64 {
+    unsafe { GetTickCount64() }
+}
 
 fn mod_bit_for_vk(vk: u32) -> Option<u32> {
     match vk {
@@ -54,6 +60,19 @@ fn chord_to_hotkey(ch: config::HotkeyChord) -> config::Hotkey {
     }
 }
 
+fn chord_matches(template: config::HotkeyChord, input: config::HotkeyChord) -> bool {
+    if template.mods != input.mods {
+        return false;
+    }
+    if template.vk != input.vk {
+        return false;
+    }
+    if template.mods_vks == 0 {
+        return true;
+    }
+    template.mods_vks == input.mods_vks
+}
+
 fn main_hwnd() -> Option<HWND> {
     let raw = MAIN_HWND.load(Ordering::Relaxed);
     if raw == 0 {
@@ -67,13 +86,22 @@ fn should_swallow(hwnd: HWND) -> bool {
     super::with_state_mut(hwnd, |s| s.hotkey_capture.active).unwrap_or(false)
 }
 
-fn push_chord(
+fn push_chord_capture(
     existing: Option<config::HotkeySequence>,
     chord: config::HotkeyChord,
+    now_ms: u64,
+    last_input_tick_ms: &mut u64,
 ) -> config::HotkeySequence {
-    const DEFAULT_GAP_MS: u32 = 800;
+    const DEFAULT_GAP_MS: u32 = 1000;
+    const RESET_AFTER_MS: u64 = 2000;
 
-    match existing {
+    let existing = match (*last_input_tick_ms, existing) {
+        (0, s) => s,
+        (prev, s) if now_ms.saturating_sub(prev) > RESET_AFTER_MS => None,
+        (_, s) => s,
+    };
+
+    let seq = match existing {
         None => config::HotkeySequence {
             first: chord,
             second: None,
@@ -90,7 +118,121 @@ fn push_chord(
                 s
             }
         },
+    };
+
+    *last_input_tick_ms = now_ms;
+    seq
+}
+
+fn progress_for_slot_mut(
+    state: &mut crate::app::AppState,
+    slot: crate::app::HotkeySlot,
+) -> &mut crate::app::SequenceProgress {
+    match slot {
+        crate::app::HotkeySlot::LastWord => &mut state.hotkey_sequence_progress.last_word,
+        crate::app::HotkeySlot::Pause => &mut state.hotkey_sequence_progress.pause,
+        crate::app::HotkeySlot::Selection => &mut state.hotkey_sequence_progress.selection,
+        crate::app::HotkeySlot::SwitchLayout => &mut state.hotkey_sequence_progress.switch_layout,
     }
+}
+
+fn hotkey_id_for_slot(slot: crate::app::HotkeySlot) -> i32 {
+    match slot {
+        crate::app::HotkeySlot::LastWord => crate::hotkeys::HK_CONVERT_LAST_WORD_ID,
+        crate::app::HotkeySlot::Pause => crate::hotkeys::HK_PAUSE_TOGGLE_ID,
+        crate::app::HotkeySlot::Selection => crate::hotkeys::HK_CONVERT_SELECTION_ID,
+        crate::app::HotkeySlot::SwitchLayout => crate::hotkeys::HK_SWITCH_LAYOUT_ID,
+    }
+}
+
+fn post_hotkey(hwnd: HWND, id: i32) {
+    unsafe {
+        let _ = PostMessageW(Some(hwnd), WM_HOTKEY, WPARAM(id as usize), LPARAM(0));
+    }
+}
+
+fn effective_gap_ms(slot: crate::app::HotkeySlot, seq: config::HotkeySequence) -> u64 {
+    match slot {
+        crate::app::HotkeySlot::SwitchLayout => 1000,
+        _ => seq.max_gap_ms as u64,
+    }
+}
+
+fn try_match_sequence(
+    hwnd: HWND,
+    state: &mut crate::app::AppState,
+    slot: crate::app::HotkeySlot,
+    chord: config::HotkeyChord,
+    now_ms: u64,
+) -> bool {
+    let Some(seq) = state.active_hotkey_sequences.get(slot) else {
+        return false;
+    };
+    let Some(second) = seq.second else {
+        return false;
+    };
+
+    let gap_ms = effective_gap_ms(slot, seq);
+
+    let prog = progress_for_slot_mut(state, slot);
+
+    if prog.waiting_second && now_ms.saturating_sub(prog.first_tick_ms) > gap_ms {
+        prog.waiting_second = false;
+        prog.first_tick_ms = 0;
+    }
+
+    if prog.waiting_second {
+        if chord_matches(second, chord) {
+            prog.waiting_second = false;
+            prog.first_tick_ms = 0;
+
+            post_hotkey(hwnd, hotkey_id_for_slot(slot));
+            return true;
+        }
+
+        if chord_matches(seq.first, chord) {
+            prog.first_tick_ms = now_ms;
+            return true;
+        }
+
+        prog.waiting_second = false;
+        prog.first_tick_ms = 0;
+
+        if chord_matches(seq.first, chord) {
+            prog.waiting_second = true;
+            prog.first_tick_ms = now_ms;
+            return true;
+        }
+
+        return false;
+    }
+
+    if chord_matches(seq.first, chord) {
+        prog.waiting_second = true;
+        prog.first_tick_ms = now_ms;
+        return true;
+    }
+
+    false
+}
+
+fn try_match_any_sequence(
+    hwnd: HWND,
+    state: &mut crate::app::AppState,
+    chord: config::HotkeyChord,
+    now_ms: u64,
+) -> bool {
+    for slot in [
+        crate::app::HotkeySlot::SwitchLayout,
+        crate::app::HotkeySlot::LastWord,
+        crate::app::HotkeySlot::Selection,
+        crate::app::HotkeySlot::Pause,
+    ] {
+        if try_match_sequence(hwnd, state, slot, chord, now_ms) {
+            return true;
+        }
+    }
+    false
 }
 
 fn handle_keydown(vk: u32, is_mod: bool) -> bool {
@@ -105,27 +247,70 @@ fn handle_keydown(vk: u32, is_mod: bool) -> bool {
         return false;
     };
 
-    super::with_state_mut_do(hwnd, |state| {
-        if !state.hotkey_capture.active {
-            return;
+    let now_ms = now_tick_ms();
+
+    super::with_state_mut(hwnd, |state| {
+        if state.hotkey_capture.active {
+            let Some(slot) = state.hotkey_capture.slot else {
+                return false;
+            };
+
+            let mods = MODS_DOWN.load(Ordering::Relaxed);
+            let mods_vks = MODVKS_DOWN.load(Ordering::Relaxed);
+
+            if is_mod {
+                state.hotkey_capture.pending_mods = mods;
+                state.hotkey_capture.pending_mods_vks = mods_vks;
+                state.hotkey_capture.pending_mods_valid = true;
+                state.hotkey_capture.saw_non_mod = false;
+                return true;
+            }
+
+            state.hotkey_capture.saw_non_mod = true;
+            state.hotkey_capture.pending_mods_valid = false;
+
+            let chord = config::HotkeyChord {
+                mods,
+                mods_vks,
+                vk: Some(vk),
+            };
+
+            let prev = state.hotkey_sequence_values.get(slot);
+            let seq = push_chord_capture(
+                prev,
+                chord,
+                now_ms,
+                &mut state.hotkey_capture.last_input_tick_ms,
+            );
+
+            state.hotkey_sequence_values.set(slot, Some(seq));
+            state.hotkey_values.set(slot, Some(chord_to_hotkey(chord)));
+
+            let text = super::format_hotkey_sequence(Some(seq));
+            let target = match slot {
+                crate::app::HotkeySlot::LastWord => state.hotkeys.last_word,
+                crate::app::HotkeySlot::Pause => state.hotkeys.pause,
+                crate::app::HotkeySlot::Selection => state.hotkeys.selection,
+                crate::app::HotkeySlot::SwitchLayout => state.hotkeys.switch_layout,
+            };
+
+            let _ = helpers::set_edit_text(target, &text);
+            return true;
         }
-        let Some(slot) = state.hotkey_capture.slot else {
-            return;
-        };
 
         let mods = MODS_DOWN.load(Ordering::Relaxed);
         let mods_vks = MODVKS_DOWN.load(Ordering::Relaxed);
 
         if is_mod {
-            state.hotkey_capture.pending_mods = mods;
-            state.hotkey_capture.pending_mods_vks = mods_vks;
-            state.hotkey_capture.pending_mods_valid = true;
-            state.hotkey_capture.saw_non_mod = false;
-            return;
+            state.runtime_chord_capture.pending_mods = mods;
+            state.runtime_chord_capture.pending_mods_vks = mods_vks;
+            state.runtime_chord_capture.pending_mods_valid = true;
+            state.runtime_chord_capture.saw_non_mod = false;
+            return false;
         }
 
-        state.hotkey_capture.saw_non_mod = true;
-        state.hotkey_capture.pending_mods_valid = false;
+        state.runtime_chord_capture.saw_non_mod = true;
+        state.runtime_chord_capture.pending_mods_valid = false;
 
         let chord = config::HotkeyChord {
             mods,
@@ -133,24 +318,9 @@ fn handle_keydown(vk: u32, is_mod: bool) -> bool {
             vk: Some(vk),
         };
 
-        let prev = state.hotkey_sequence_values.get(slot);
-        let seq = push_chord(prev, chord);
-
-        state.hotkey_sequence_values.set(slot, Some(seq));
-        state.hotkey_values.set(slot, Some(chord_to_hotkey(chord)));
-
-        let text = super::format_hotkey_sequence(Some(seq));
-        let target = match slot {
-            crate::app::HotkeySlot::LastWord => state.hotkeys.last_word,
-            crate::app::HotkeySlot::Pause => state.hotkeys.pause,
-            crate::app::HotkeySlot::Selection => state.hotkeys.selection,
-            crate::app::HotkeySlot::SwitchLayout => state.hotkeys.switch_layout,
-        };
-
-        let _ = helpers::set_edit_text(target, &text);
-    });
-
-    should_swallow(hwnd)
+        try_match_any_sequence(hwnd, state, chord, now_ms)
+    })
+    .unwrap_or(false)
 }
 
 fn handle_keyup(vk: u32, is_mod: bool) -> bool {
@@ -165,57 +335,89 @@ fn handle_keyup(vk: u32, is_mod: bool) -> bool {
         return false;
     };
 
-    super::with_state_mut_do(hwnd, |state| {
-        if !state.hotkey_capture.active {
-            return;
+    let now_ms = now_tick_ms();
+
+    super::with_state_mut(hwnd, |state| {
+        if state.hotkey_capture.active {
+            let Some(slot) = state.hotkey_capture.slot else {
+                return false;
+            };
+
+            if !is_mod {
+                return true;
+            }
+
+            let mods_now = MODS_DOWN.load(Ordering::Relaxed);
+            if !state.hotkey_capture.pending_mods_valid {
+                return true;
+            }
+            if state.hotkey_capture.saw_non_mod {
+                return true;
+            }
+            if mods_now != 0 {
+                return true;
+            }
+
+            let chord = config::HotkeyChord {
+                mods: state.hotkey_capture.pending_mods,
+                mods_vks: state.hotkey_capture.pending_mods_vks,
+                vk: None,
+            };
+
+            let prev = state.hotkey_sequence_values.get(slot);
+            let seq = push_chord_capture(
+                prev,
+                chord,
+                now_ms,
+                &mut state.hotkey_capture.last_input_tick_ms,
+            );
+
+            state.hotkey_sequence_values.set(slot, Some(seq));
+            state.hotkey_values.set(slot, Some(chord_to_hotkey(chord)));
+
+            state.hotkey_capture.pending_mods_valid = false;
+            state.hotkey_capture.pending_mods = 0;
+            state.hotkey_capture.pending_mods_vks = 0;
+
+            let text = super::format_hotkey_sequence(Some(seq));
+            let target = match slot {
+                crate::app::HotkeySlot::LastWord => state.hotkeys.last_word,
+                crate::app::HotkeySlot::Pause => state.hotkeys.pause,
+                crate::app::HotkeySlot::Selection => state.hotkeys.selection,
+                crate::app::HotkeySlot::SwitchLayout => state.hotkeys.switch_layout,
+            };
+
+            let _ = helpers::set_edit_text(target, &text);
+            return true;
         }
-        let Some(slot) = state.hotkey_capture.slot else {
-            return;
-        };
 
         if !is_mod {
-            return;
+            return false;
         }
 
         let mods_now = MODS_DOWN.load(Ordering::Relaxed);
-        if !state.hotkey_capture.pending_mods_valid {
-            return;
+
+        if !state.runtime_chord_capture.pending_mods_valid {
+            return false;
         }
-        if state.hotkey_capture.saw_non_mod {
-            return;
+        if state.runtime_chord_capture.saw_non_mod {
+            return false;
         }
         if mods_now != 0 {
-            return;
+            return false;
         }
 
         let chord = config::HotkeyChord {
-            mods: state.hotkey_capture.pending_mods,
-            mods_vks: state.hotkey_capture.pending_mods_vks,
+            mods: state.runtime_chord_capture.pending_mods,
+            mods_vks: state.runtime_chord_capture.pending_mods_vks,
             vk: None,
         };
 
-        let prev = state.hotkey_sequence_values.get(slot);
-        let seq = push_chord(prev, chord);
+        state.runtime_chord_capture = crate::app::RuntimeChordCapture::default();
 
-        state.hotkey_sequence_values.set(slot, Some(seq));
-        state.hotkey_values.set(slot, Some(chord_to_hotkey(chord)));
-
-        state.hotkey_capture.pending_mods_valid = false;
-        state.hotkey_capture.pending_mods = 0;
-        state.hotkey_capture.pending_mods_vks = 0;
-
-        let text = super::format_hotkey_sequence(Some(seq));
-        let target = match slot {
-            crate::app::HotkeySlot::LastWord => state.hotkeys.last_word,
-            crate::app::HotkeySlot::Pause => state.hotkeys.pause,
-            crate::app::HotkeySlot::Selection => state.hotkeys.selection,
-            crate::app::HotkeySlot::SwitchLayout => state.hotkeys.switch_layout,
-        };
-
-        let _ = helpers::set_edit_text(target, &text);
-    });
-
-    should_swallow(hwnd)
+        try_match_any_sequence(hwnd, state, chord, now_ms)
+    })
+    .unwrap_or(false)
 }
 
 extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

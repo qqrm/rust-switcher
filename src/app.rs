@@ -110,6 +110,32 @@ pub struct HotkeyCaptureUi {
     pub pending_mods: u32,
     pub pending_mods_valid: bool,
     pub saw_non_mod: bool,
+
+    // Last successful chord capture time in milliseconds since boot (GetTickCount64).
+    // Used to reset sequence after a long pause.
+    pub last_input_tick_ms: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct RuntimeChordCapture {
+    pub pending_mods_vks: u32,
+    pub pending_mods: u32,
+    pub pending_mods_valid: bool,
+    pub saw_non_mod: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SequenceProgress {
+    pub waiting_second: bool,
+    pub first_tick_ms: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct HotkeySequenceProgress {
+    pub last_word: SequenceProgress,
+    pub pause: SequenceProgress,
+    pub selection: SequenceProgress,
+    pub switch_layout: SequenceProgress,
 }
 
 /// Per-window state used throughout the application.
@@ -134,6 +160,16 @@ pub struct AppState {
 
     /// Which hotkey edit is currently capturing input.
     pub hotkey_capture: HotkeyCaptureUi,
+
+    /// Active (already applied) sequences used by the runtime hotkey recognizer.
+    /// This must NOT be tied to temporary edits in the UI.
+    pub active_hotkey_sequences: HotkeySequenceValues,
+
+    /// Runtime state for modifier-only chord detection.
+    pub runtime_chord_capture: RuntimeChordCapture,
+
+    /// Runtime state for chord sequence progress.
+    pub hotkey_sequence_progress: HotkeySequenceProgress,
 }
 
 #[derive(Debug, Default)]

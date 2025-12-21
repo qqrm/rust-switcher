@@ -327,15 +327,34 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
     cfg.show_tray_icon = helpers::get_checkbox(state.checkboxes.tray);
     cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
 
-    cfg.hotkey_convert_last_word = state.hotkey_values.last_word;
-    cfg.hotkey_pause = state.hotkey_values.pause;
-    cfg.hotkey_convert_selection = state.hotkey_values.selection;
-    cfg.hotkey_switch_layout = state.hotkey_values.switch_layout;
-
     cfg.hotkey_convert_last_word_sequence = state.hotkey_sequence_values.last_word;
     cfg.hotkey_pause_sequence = state.hotkey_sequence_values.pause;
     cfg.hotkey_convert_selection_sequence = state.hotkey_sequence_values.selection;
     cfg.hotkey_switch_layout_sequence = state.hotkey_sequence_values.switch_layout;
+
+    fn hk_or_none_if_double(
+        seq: Option<config::HotkeySequence>,
+        hk: Option<config::Hotkey>,
+    ) -> Option<config::Hotkey> {
+        match seq {
+            Some(s) if s.second.is_some() => None,
+            _ => hk,
+        }
+    }
+
+    cfg.hotkey_convert_last_word = hk_or_none_if_double(
+        cfg.hotkey_convert_last_word_sequence,
+        state.hotkey_values.last_word,
+    );
+    cfg.hotkey_pause = hk_or_none_if_double(cfg.hotkey_pause_sequence, state.hotkey_values.pause);
+    cfg.hotkey_convert_selection = hk_or_none_if_double(
+        cfg.hotkey_convert_selection_sequence,
+        state.hotkey_values.selection,
+    );
+    cfg.hotkey_switch_layout = hk_or_none_if_double(
+        cfg.hotkey_switch_layout_sequence,
+        state.hotkey_values.switch_layout,
+    );
 
     cfg
 }
@@ -346,6 +365,10 @@ fn apply_config_runtime(
     cfg: &config::Config,
 ) -> windows::core::Result<()> {
     state.paused = cfg.paused;
+
+    state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(cfg);
+    state.runtime_chord_capture = crate::app::RuntimeChordCapture::default();
+    state.hotkey_sequence_progress = crate::app::HotkeySequenceProgress::default();
 
     let _ = crate::hotkeys::register_from_config(hwnd, cfg);
 
@@ -403,6 +426,8 @@ fn on_create(hwnd: HWND) -> LRESULT {
     };
 
     state.hotkey_values = crate::app::HotkeyValues::from_config(&cfg);
+    state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(&cfg);
+
     #[rustfmt::skip]
     startup_or_return0!(hwnd, &mut state, "Failed to apply config to UI", apply_config_to_ui(state.as_mut(), &cfg));
 
@@ -581,12 +606,18 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
             with_state_mut_do(hwnd, |state| {
                 state.hotkey_capture.active = true;
                 state.hotkey_capture.slot = Some(slot);
+                state.hotkey_capture.pending_mods_vks = 0;
+                state.hotkey_capture.pending_mods = 0;
+                state.hotkey_capture.pending_mods_valid = false;
+                state.hotkey_capture.saw_non_mod = false;
+                state.hotkey_capture.last_input_tick_ms = 0;
 
                 #[cfg(debug_assertions)]
                 eprintln!("hotkey.capture: start slot={:?}", slot);
             });
             Some(LRESULT(0))
         }
+
         EN_KILLFOCUS => {
             with_state_mut_do(hwnd, |state| {
                 state.hotkey_capture.active = false;
