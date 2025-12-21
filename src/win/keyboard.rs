@@ -3,10 +3,16 @@ use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     System::SystemInformation::GetTickCount64,
-    UI::WindowsAndMessaging::{
-        CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, PostMessageW, SetWindowsHookExW,
-        UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
-        WM_SYSKEYUP,
+    UI::{
+        Input::KeyboardAndMouse::{
+            MAPVK_VSC_TO_VK_EX, MapVirtualKeyW, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_MENU,
+            VK_RCONTROL, VK_RMENU, VK_SHIFT,
+        },
+        WindowsAndMessaging::{
+            CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, PostMessageW,
+            SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_HOTKEY, WM_KEYDOWN,
+            WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+        },
     },
 };
 
@@ -49,6 +55,34 @@ fn is_keydown_msg(msg: u32) -> bool {
     msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN
 }
 
+fn normalize_vk(kb: &KBDLLHOOKSTRUCT) -> u32 {
+    let vk = kb.vkCode;
+    let extended = kb.flags.contains(LLKHF_EXTENDED);
+
+    match vk {
+        x if x == VK_SHIFT.0 as u32 => {
+            // Reliable left right shift resolution based on scan code mapping.
+            let mapped = unsafe { MapVirtualKeyW(kb.scanCode, MAPVK_VSC_TO_VK_EX) };
+            if mapped != 0 { mapped } else { vk }
+        }
+        x if x == VK_CONTROL.0 as u32 => {
+            if extended {
+                VK_RCONTROL.0 as u32
+            } else {
+                VK_LCONTROL.0 as u32
+            }
+        }
+        x if x == VK_MENU.0 as u32 => {
+            if extended {
+                VK_RMENU.0 as u32
+            } else {
+                VK_LMENU.0 as u32
+            }
+        }
+        _ => vk,
+    }
+}
+
 fn is_keyup_msg(msg: u32) -> bool {
     msg == WM_KEYUP || msg == WM_SYSKEYUP
 }
@@ -82,6 +116,7 @@ fn main_hwnd() -> Option<HWND> {
     }
 }
 
+#[allow(dead_code)]
 fn should_swallow(hwnd: HWND) -> bool {
     super::with_state_mut(hwnd, |s| s.hotkey_capture.active).unwrap_or(false)
 }
@@ -168,10 +203,17 @@ fn try_match_sequence(
     let Some(seq) = state.active_hotkey_sequences.get(slot) else {
         return false;
     };
-    let Some(second) = seq.second else {
-        return false;
-    };
 
+    // Single chord sequence
+    if seq.second.is_none() {
+        if chord_matches(seq.first, chord) {
+            post_hotkey(hwnd, hotkey_id_for_slot(slot));
+            return true;
+        }
+        return false;
+    }
+
+    let second = seq.second.unwrap();
     let gap_ms = effective_gap_ms(slot, seq);
 
     let prog = progress_for_slot_mut(state, slot);
@@ -190,20 +232,15 @@ fn try_match_sequence(
             return true;
         }
 
+        // If user repeats first chord, keep waiting window alive
         if chord_matches(seq.first, chord) {
             prog.first_tick_ms = now_ms;
             return true;
         }
 
+        // Wrong second chord, reset to waiting first
         prog.waiting_second = false;
         prog.first_tick_ms = 0;
-
-        if chord_matches(seq.first, chord) {
-            prog.waiting_second = true;
-            prog.first_tick_ms = now_ms;
-            return true;
-        }
-
         return false;
     }
 
@@ -433,7 +470,7 @@ extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
 
     let msg = wparam.0 as u32;
     let kb = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-    let vk = kb.vkCode;
+    let vk = normalize_vk(kb);
     let is_mod = mod_bit_for_vk(vk).is_some();
 
     if is_keydown_msg(msg) {

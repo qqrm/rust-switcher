@@ -170,6 +170,10 @@ pub struct AppState {
 
     /// Runtime state for chord sequence progress.
     pub hotkey_sequence_progress: HotkeySequenceProgress,
+
+    pub active_switch_layout_sequence: Option<config::HotkeySequence>,
+    pub switch_layout_waiting_second: bool,
+    pub switch_layout_first_tick_ms: u64,
 }
 
 #[derive(Debug, Default)]

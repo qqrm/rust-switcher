@@ -351,10 +351,10 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
         cfg.hotkey_convert_selection_sequence,
         state.hotkey_values.selection,
     );
-    cfg.hotkey_switch_layout = hk_or_none_if_double(
-        cfg.hotkey_switch_layout_sequence,
-        state.hotkey_values.switch_layout,
-    );
+    cfg.hotkey_switch_layout = match cfg.hotkey_switch_layout_sequence {
+        Some(_) => None, // важно: только LL hook, иначе Windows не отличит LShift от RShift
+        None => state.hotkey_values.switch_layout,
+    };
 
     cfg
 }
@@ -366,14 +366,11 @@ fn apply_config_runtime(
 ) -> windows::core::Result<()> {
     state.paused = cfg.paused;
 
-    state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(cfg);
-    state.runtime_chord_capture = crate::app::RuntimeChordCapture::default();
-    state.hotkey_sequence_progress = crate::app::HotkeySequenceProgress::default();
+    state.active_switch_layout_sequence = cfg.hotkey_switch_layout_sequence;
+    state.switch_layout_waiting_second = false;
+    state.switch_layout_first_tick_ms = 0;
 
     let _ = crate::hotkeys::register_from_config(hwnd, cfg);
-
-    // TODO: включить или выключить трей
-    // TODO: включить или выключить автозапуск
     Ok(())
 }
 
