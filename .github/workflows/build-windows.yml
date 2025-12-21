@@ -1,0 +1,33 @@
+name: Build Windows Binary
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [created]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: x86_64-pc-windows-msvc
+        override: true
+    
+    - name: Build Release Binary
+      run: cargo build --release --target x86_64-pc-windows-msvc
+    
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-binary
+        path: target/x86_64-pc-windows-msvc/release/*.exe
