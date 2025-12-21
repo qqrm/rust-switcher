@@ -1,12 +1,10 @@
-name: Build Windows Binary
+name: Build Windows Binary (Nightly)
 
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  release:
-    types: [created]
 
 jobs:
   build-windows:
@@ -17,14 +15,10 @@ jobs:
       uses: actions/checkout@v4
     
     - name: Install Rust Nightly
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        target: x86_64-pc-windows-msvc
-        override: true
-    
-    - name: Set Nightly as Default
-      run: rustup default nightly
+      run: |
+        choco install rustup -y  # On Windows
+        rustup toolchain install nightly --target x86_64-pc-windows-msvc
+        rustup default nightly
     
     - name: Build Release Binary
       run: cargo build --release --target x86_64-pc-windows-msvc
