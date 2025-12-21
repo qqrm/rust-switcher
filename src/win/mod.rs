@@ -200,31 +200,48 @@ fn format_hotkey_sequence(seq: Option<config::HotkeySequence>) -> String {
 }
 
 fn format_hotkey_chord(ch: config::HotkeyChord) -> String {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyNameTextW, MAPVK_VK_TO_VSC, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MapVirtualKeyW,
+    };
 
-    const MODS: &[(u32, &str)] = &[
-        (MOD_CONTROL.0, "Ctrl"),
-        (MOD_ALT.0, "Alt"),
-        (MOD_SHIFT.0, "Shift"),
-        (MOD_WIN.0, "Win"),
-    ];
+    fn vk_to_display(vk: u32) -> String {
+        if (0x41..=0x5A).contains(&vk) || (0x30..=0x39).contains(&vk) {
+            return (vk as u8 as char).to_string();
+        }
 
-    let mut parts: Vec<&str> = MODS
-        .iter()
-        .filter_map(|&(m, s)| ((ch.mods & m) != 0).then_some(s))
-        .collect();
+        let sc = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) };
+        if sc == 0 {
+            return format!("VK 0x{:02X}", vk);
+        }
+
+        let lparam = ((sc as i32) << 16) as i32;
+
+        let mut buf = [0u16; 64];
+        let len = unsafe { GetKeyNameTextW(lparam, &mut buf) };
+        if len <= 0 {
+            return format!("VK 0x{:02X}", vk);
+        }
+
+        String::from_utf16_lossy(&buf[..(len as usize)])
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+
+    if (ch.mods & MOD_CONTROL.0) != 0 {
+        parts.push("Ctrl".to_string());
+    }
+    if (ch.mods & MOD_ALT.0) != 0 {
+        parts.push("Alt".to_string());
+    }
+    if (ch.mods & MOD_SHIFT.0) != 0 {
+        parts.push("Shift".to_string());
+    }
+    if (ch.mods & MOD_WIN.0) != 0 {
+        parts.push("Win".to_string());
+    }
 
     if let Some(vk) = ch.vk {
-        let key = match vk as u16 {
-            v if v == windows::Win32::UI::Input::KeyboardAndMouse::VK_PAUSE.0 => {
-                "Pause".to_string()
-            }
-            v if v == windows::Win32::UI::Input::KeyboardAndMouse::VK_CANCEL.0 => {
-                "Cancel".to_string()
-            }
-            _ => format!("VK 0x{:02X}", vk),
-        };
-        parts.push(Box::leak(key.into_boxed_str()));
+        parts.push(vk_to_display(vk));
     }
 
     if parts.is_empty() {
