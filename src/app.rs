@@ -44,6 +44,7 @@ impl HotkeyValues {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, slot: HotkeySlot) -> Option<config::Hotkey> {
         match slot {
             HotkeySlot::LastWord => self.last_word,

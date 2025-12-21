@@ -14,6 +14,7 @@ impl RectI {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 struct HotkeysGroupLayout {
     top_y: i32,
@@ -26,6 +27,7 @@ struct HotkeysGroupLayout {
     w_edit: i32,
 }
 
+#[allow(dead_code)]
 impl HotkeysGroupLayout {
     fn new(l: &UiLayout) -> Self {
         let right_x = l.right_x;

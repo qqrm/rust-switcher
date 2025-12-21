@@ -170,20 +170,37 @@ fn wait_clipboard_change(before: u32, tries: usize, sleep_ms: u64) -> bool {
     false
 }
 
-fn clipboard_get_unicode_text() -> Option<String> {
-    unsafe {
-        OpenClipboard(None).ok()?;
+struct ClipboardGuard;
 
+impl ClipboardGuard {
+    fn open() -> Option<Self> {
+        unsafe {
+            OpenClipboard(None).ok()?;
+        }
+        Some(Self)
+    }
+}
+
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseClipboard();
+        }
+    }
+}
+
+fn clipboard_get_unicode_text() -> Option<String> {
+    let _clip = ClipboardGuard::open()?;
+
+    unsafe {
         let handle = GetClipboardData(CF_UNICODETEXT_ID).ok()?;
         if handle.0.is_null() {
-            let _ = CloseClipboard();
             return None;
         }
 
         let hglobal = HGLOBAL(handle.0);
         let ptr = GlobalLock(hglobal) as *const u16;
         if ptr.is_null() {
-            let _ = CloseClipboard();
             return None;
         }
 
@@ -196,25 +213,22 @@ fn clipboard_get_unicode_text() -> Option<String> {
         let text = String::from_utf16_lossy(slice);
 
         let _ = GlobalUnlock(hglobal);
-        let _ = CloseClipboard();
         Some(text)
     }
 }
 
 fn clipboard_set_unicode_text(text: &str) -> Option<()> {
+    let _clip = ClipboardGuard::open()?;
+
     unsafe {
-        OpenClipboard(None).ok()?;
         EmptyClipboard().ok()?;
 
-        let mut wide: Vec<u16> = text.encode_utf16().collect();
-        wide.push(0);
+        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let bytes = wide.len() * std::mem::size_of::<u16>();
 
-        let bytes = wide.len() * 2;
         let hmem = GlobalAlloc(GMEM_MOVEABLE, bytes).ok()?;
-
         let ptr = GlobalLock(hmem) as *mut u16;
         if ptr.is_null() {
-            let _ = CloseClipboard();
             return None;
         }
 
@@ -223,8 +237,6 @@ fn clipboard_set_unicode_text(text: &str) -> Option<()> {
         let _ = GlobalUnlock(hmem);
 
         SetClipboardData(CF_UNICODETEXT_ID, Some(HANDLE(hmem.0))).ok()?;
-
-        let _ = CloseClipboard();
         Some(())
     }
 }
