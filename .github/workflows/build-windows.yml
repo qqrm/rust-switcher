@@ -1,4 +1,4 @@
-name: Build Windows Binary (Nightly)
+name: Build Windows Binary
 
 on:
   push:
@@ -6,25 +6,34 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-windows:
     runs-on: windows-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Install Rust Nightly
-      run: |
-        choco install rustup -y  # On Windows
-        rustup toolchain install nightly --target x86_64-pc-windows-msvc
-        rustup default nightly
-    
-    - name: Build Release Binary
-      run: cargo build --release --target x86_64-pc-windows-msvc
-    
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-binary
-        path: target/x86_64-pc-windows-msvc/release/*.exe
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust from rust-toolchain.toml
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: x86_64-pc-windows-msvc
+
+      - name: Build (release, locked)
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          if-no-files-found: error
+          path: |
+            target/x86_64-pc-windows-msvc/release/*.exe
+            target/x86_64-pc-windows-msvc/release/*.pdb
