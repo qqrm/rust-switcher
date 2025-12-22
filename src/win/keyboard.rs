@@ -425,12 +425,7 @@ fn handle_keydown_runtime(
 }
 
 fn handle_keyup(vk: u32, is_mod: bool) -> windows::core::Result<HookDecision> {
-    if let Some(bit) = mod_bit_for_vk(vk) {
-        MODS_DOWN.fetch_and(!bit, Ordering::Relaxed);
-    }
-    if let Some(bit) = mod_vk_bit_for_vk(vk) {
-        MODVKS_DOWN.fetch_and(!bit, Ordering::Relaxed);
-    }
+    update_mods_down_release(vk);
 
     let Some(hwnd) = main_hwnd() else {
         return Ok(HookDecision::Pass);
@@ -439,91 +434,117 @@ fn handle_keyup(vk: u32, is_mod: bool) -> windows::core::Result<HookDecision> {
     let now_ms = now_tick_ms();
 
     super::with_state_mut(hwnd, |state| {
-        if state.hotkey_capture.active {
-            let Some(slot) = state.hotkey_capture.slot else {
-                return Ok(HookDecision::Pass);
-            };
-
-            if !is_mod {
-                return Ok(HookDecision::Swallow);
-            }
-
-            let mods_now = MODS_DOWN.load(Ordering::Relaxed);
-            if !state.hotkey_capture.pending_mods_valid {
-                return Ok(HookDecision::Swallow);
-            }
-            if state.hotkey_capture.saw_non_mod {
-                return Ok(HookDecision::Swallow);
-            }
-            if mods_now != 0 {
-                return Ok(HookDecision::Swallow);
-            }
-
-            let chord = config::HotkeyChord {
-                mods: state.hotkey_capture.pending_mods,
-                mods_vks: state.hotkey_capture.pending_mods_vks,
-                vk: None,
-            };
-
-            let prev = state.hotkey_sequence_values.get(slot);
-            let seq = push_chord_capture(
-                prev,
-                chord,
-                now_ms,
-                &mut state.hotkey_capture.last_input_tick_ms,
-            );
-
-            state.hotkey_sequence_values.set(slot, Some(seq));
-            state.hotkey_values.set(slot, Some(chord_to_hotkey(chord)));
-
-            state.hotkey_capture.pending_mods_valid = false;
-            state.hotkey_capture.pending_mods = 0;
-            state.hotkey_capture.pending_mods_vks = 0;
-
-            let text = super::format_hotkey_sequence(Some(seq));
-            let target = match slot {
-                crate::app::HotkeySlot::LastWord => state.hotkeys.last_word,
-                crate::app::HotkeySlot::Pause => state.hotkeys.pause,
-                crate::app::HotkeySlot::Selection => state.hotkeys.selection,
-                crate::app::HotkeySlot::SwitchLayout => state.hotkeys.switch_layout,
-            };
-
-            helpers::set_edit_text(target, &text)?;
-            return Ok(HookDecision::Swallow);
-        }
-
-        if !is_mod {
-            return Ok(HookDecision::Pass);
-        }
-
-        let mods_now = MODS_DOWN.load(Ordering::Relaxed);
-
-        if !state.runtime_chord_capture.pending_mods_valid {
-            return Ok(HookDecision::Pass);
-        }
-        if state.runtime_chord_capture.saw_non_mod {
-            return Ok(HookDecision::Pass);
-        }
-        if mods_now != 0 {
-            return Ok(HookDecision::Pass);
-        }
-
-        let chord = config::HotkeyChord {
-            mods: state.runtime_chord_capture.pending_mods,
-            mods_vks: state.runtime_chord_capture.pending_mods_vks,
-            vk: None,
-        };
-
-        state.runtime_chord_capture = crate::app::RuntimeChordCapture::default();
-
-        let matched = try_match_any_sequence(hwnd, state, chord, now_ms)?;
-        Ok(if matched {
-            HookDecision::Swallow
-        } else {
-            HookDecision::Pass
-        })
+        handle_keyup_in_state(hwnd, state, vk, is_mod, now_ms)
     })
     .unwrap_or(Ok(HookDecision::Pass))
+}
+
+fn update_mods_down_release(vk: u32) {
+    if let Some(bit) = mod_bit_for_vk(vk) {
+        MODS_DOWN.fetch_and(!bit, Ordering::Relaxed);
+    }
+    if let Some(bit) = mod_vk_bit_for_vk(vk) {
+        MODVKS_DOWN.fetch_and(!bit, Ordering::Relaxed);
+    }
+}
+
+fn handle_keyup_in_state(
+    hwnd: HWND,
+    state: &mut crate::app::AppState,
+    _vk: u32,
+    is_mod: bool,
+    now_ms: u64,
+) -> windows::core::Result<HookDecision> {
+    if state.hotkey_capture.active {
+        return handle_keyup_capture(state, is_mod, now_ms);
+    }
+
+    handle_keyup_runtime(hwnd, state, is_mod, now_ms)
+}
+
+fn handle_keyup_capture(
+    state: &mut crate::app::AppState,
+    is_mod: bool,
+    now_ms: u64,
+) -> windows::core::Result<HookDecision> {
+    let Some(slot) = state.hotkey_capture.slot else {
+        return Ok(HookDecision::Pass);
+    };
+
+    if !is_mod {
+        return Ok(HookDecision::Swallow);
+    }
+
+    if !state.hotkey_capture.pending_mods_valid {
+        return Ok(HookDecision::Swallow);
+    }
+    if state.hotkey_capture.saw_non_mod {
+        return Ok(HookDecision::Swallow);
+    }
+
+    let mods_now = MODS_DOWN.load(Ordering::Relaxed);
+    if mods_now != 0 {
+        return Ok(HookDecision::Swallow);
+    }
+
+    let chord = config::HotkeyChord {
+        mods: state.hotkey_capture.pending_mods,
+        mods_vks: state.hotkey_capture.pending_mods_vks,
+        vk: None,
+    };
+
+    let prev = state.hotkey_sequence_values.get(slot);
+    let seq = push_chord_capture(
+        prev,
+        chord,
+        now_ms,
+        &mut state.hotkey_capture.last_input_tick_ms,
+    );
+
+    state.hotkey_capture.pending_mods_valid = false;
+    state.hotkey_capture.pending_mods = 0;
+    state.hotkey_capture.pending_mods_vks = 0;
+
+    store_captured_hotkey(state, slot, chord, seq)?;
+    Ok(HookDecision::Swallow)
+}
+
+fn handle_keyup_runtime(
+    hwnd: HWND,
+    state: &mut crate::app::AppState,
+    is_mod: bool,
+    now_ms: u64,
+) -> windows::core::Result<HookDecision> {
+    if !is_mod {
+        return Ok(HookDecision::Pass);
+    }
+
+    if !state.runtime_chord_capture.pending_mods_valid {
+        return Ok(HookDecision::Pass);
+    }
+    if state.runtime_chord_capture.saw_non_mod {
+        return Ok(HookDecision::Pass);
+    }
+
+    let mods_now = MODS_DOWN.load(Ordering::Relaxed);
+    if mods_now != 0 {
+        return Ok(HookDecision::Pass);
+    }
+
+    let chord = config::HotkeyChord {
+        mods: state.runtime_chord_capture.pending_mods,
+        mods_vks: state.runtime_chord_capture.pending_mods_vks,
+        vk: None,
+    };
+
+    state.runtime_chord_capture = crate::app::RuntimeChordCapture::default();
+
+    let matched = try_match_any_sequence(hwnd, state, chord, now_ms)?;
+    Ok(if matched {
+        HookDecision::Swallow
+    } else {
+        HookDecision::Pass
+    })
 }
 
 extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
