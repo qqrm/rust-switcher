@@ -10,8 +10,8 @@ use windows::Win32::{
         },
         WindowsAndMessaging::{
             CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, PostMessageW,
-            SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_HOTKEY, WM_KEYDOWN,
-            WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+            SetWindowsHookExW, WH_KEYBOARD_LL, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
+            WM_SYSKEYUP,
         },
     },
 };
@@ -503,23 +503,9 @@ pub fn install(hwnd: HWND) {
             #[cfg(debug_assertions)]
             eprintln!("RustSwitcher: WH_KEYBOARD_LL installed");
         }
-        Err(e) => {
+        Err(_e) => {
             #[cfg(debug_assertions)]
-            eprintln!("RustSwitcher: SetWindowsHookExW failed: {}", e);
+            eprintln!("RustSwitcher: SetWindowsHookExW failed: {}", _e);
         }
     }
-}
-
-pub fn uninstall() {
-    let h = HOOK_HANDLE.swap(0, Ordering::Relaxed);
-    if h == 0 {
-        return;
-    }
-
-    unsafe {
-        let _ = UnhookWindowsHookEx(HHOOK(h as *mut _));
-    }
-
-    #[cfg(debug_assertions)]
-    eprintln!("RustSwitcher: WH_KEYBOARD_LL removed");
 }

@@ -15,7 +15,7 @@ use crate::config;
 pub struct UiError {
     pub title: String,
     pub user_text: String,
-    pub debug_text: String,
+    pub _debug_text: String,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

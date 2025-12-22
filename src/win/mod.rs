@@ -562,7 +562,7 @@ fn handle_cancel(hwnd: HWND, state: &mut AppState) {
     debug_assertions,
     tracing::instrument(level = "info", skip_all, fields(msg, id, notif))
 )]
-fn on_command(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+fn on_command(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     #[cfg(debug_assertions)]
     tracing::Span::current().record("msg", "WM_COMMAND");
 
@@ -573,7 +573,7 @@ fn on_command(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     {
         tracing::Span::current().record("id", id);
         tracing::Span::current().record("notif", notif as i64);
-        eprintln!("ui.command: id={} notif={} lparam={}", id, notif, lparam.0);
+        eprintln!("ui.command: id={} notif={} lparam={}", id, notif, _lparam.0);
     }
 
     if let Some(r) = handle_hotkey_capture_focus(hwnd, id, notif) {
@@ -728,13 +728,13 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
 fn on_app_error(hwnd: HWND) -> LRESULT {
     with_state_mut(hwnd, |state| {
         if let Some(e) = crate::ui::error_notifier::drain_one(state) {
-            if let Err(te) = crate::tray::balloon_error(hwnd, &e.title, &e.user_text) {
+            if let Err(_te) = crate::tray::balloon_error(hwnd, &e.title, &e.user_text) {
                 #[cfg(debug_assertions)]
-                eprintln!("tray balloon failed: {:?}", te);
+                eprintln!("tray balloon failed: {:?}", _te);
             }
 
             #[cfg(debug_assertions)]
-            eprintln!("{}: {}", e.title, e.debug_text);
+            eprintln!("{}: {}", e.title, e._debug_text);
         }
     });
     LRESULT(0)

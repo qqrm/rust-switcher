@@ -26,7 +26,7 @@ pub fn push(
     state.errors.push_back(UiError {
         title: title.to_string(),
         user_text: user_text.to_string(),
-        debug_text,
+        _debug_text: debug_text,
     });
 
     unsafe {
