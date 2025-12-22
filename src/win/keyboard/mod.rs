@@ -34,11 +34,6 @@ fn main_hwnd() -> Option<HWND> {
     }
 }
 
-#[allow(dead_code)]
-fn should_swallow(hwnd: HWND) -> bool {
-    super::with_state_mut(hwnd, |s| s.hotkey_capture.active).unwrap_or(false)
-}
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum HookDecision {
     Pass,
