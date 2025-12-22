@@ -23,12 +23,14 @@ use windows::Win32::{
 use crate::app::AppState;
 
 const VK_C_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x43);
-
 const VK_V_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x56);
+const VK_LEFT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x25);
+const VK_RIGHT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x27);
+const VK_SHIFT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x10);
 const CF_UNICODETEXT_ID: u32 = 13;
 
 pub fn convert_last_word(state: &mut AppState, hwnd: HWND) {
-    convert_selection(state, hwnd);
+    convert_selection(state, hwnd)
 }
 
 pub fn convert_selection(state: &mut AppState, _hwnd: HWND) {
@@ -55,6 +57,7 @@ pub fn convert_selection(state: &mut AppState, _hwnd: HWND) {
         };
 
         let converted = convert_ru_en_bidirectional(&text);
+        let converted_units = converted.encode_utf16().count();
 
         thread::sleep(Duration::from_millis(delay_ms as u64));
 
@@ -62,9 +65,14 @@ pub fn convert_selection(state: &mut AppState, _hwnd: HWND) {
             return;
         }
 
-        let _ = send_ctrl_combo(VK_V_KEY);
+        if !send_ctrl_combo(VK_V_KEY) {
+            return;
+        }
 
-        // As in spec: after paste switch layout so the user continues typing in the expected layout.
+        thread::sleep(Duration::from_millis(20));
+
+        let _ = reselect_last_inserted_text_utf16_units(converted_units);
+
         let _ = switch_keyboard_layout();
     }
 }
@@ -157,6 +165,37 @@ unsafe fn send_key(vk: VIRTUAL_KEY, key_up: bool) -> bool {
     };
 
     (unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) }) != 0
+}
+
+unsafe fn reselect_last_inserted_text_utf16_units(units: usize) -> bool {
+    if units == 0 {
+        return true;
+    }
+
+    let units = units.min(4096);
+
+    // Move caret to start of inserted text (no selection)
+    for _ in 0..units {
+        if !(unsafe { send_key(VK_LEFT_KEY, false) && send_key(VK_LEFT_KEY, true) }) {
+            return false;
+        }
+    }
+
+    // Select forward so that active end is on the right (caret ends at the end)
+    if !unsafe { send_key(VK_SHIFT_KEY, false) } {
+        return false;
+    }
+
+    let mut ok = true;
+    for _ in 0..units {
+        if !(unsafe { send_key(VK_RIGHT_KEY, false) && send_key(VK_RIGHT_KEY, true) }) {
+            ok = false;
+            break;
+        }
+    }
+
+    let _ = unsafe { send_key(VK_SHIFT_KEY, true) };
+    ok
 }
 
 fn wait_clipboard_change(before: u32, tries: usize, sleep_ms: u64) -> bool {
