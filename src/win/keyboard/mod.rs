@@ -1,21 +1,17 @@
+mod vk;
+
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     System::SystemInformation::GetTickCount64,
-    UI::{
-        Input::KeyboardAndMouse::{
-            MAPVK_VSC_TO_VK_EX, MapVirtualKeyW, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_MENU,
-            VK_RCONTROL, VK_RMENU, VK_SHIFT,
-        },
-        WindowsAndMessaging::{
-            CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, PostMessageW,
-            SetWindowsHookExW, WH_KEYBOARD_LL, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
-            WM_SYSKEYUP,
-        },
+    UI::WindowsAndMessaging::{
+        CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, PostMessageW, SetWindowsHookExW,
+        WH_KEYBOARD_LL, WM_HOTKEY,
     },
 };
 
+use self::vk::{is_keydown_msg, is_keyup_msg, mod_bit_for_vk, mod_vk_bit_for_vk, normalize_vk};
 use crate::{config, helpers};
 
 static HOOK_HANDLE: AtomicIsize = AtomicIsize::new(0);
@@ -25,66 +21,6 @@ static MODVKS_DOWN: AtomicU32 = AtomicU32::new(0);
 
 fn now_tick_ms() -> u64 {
     unsafe { GetTickCount64() }
-}
-
-fn mod_bit_for_vk(vk: u32) -> Option<u32> {
-    match vk {
-        0xA2 | 0xA3 => Some(windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL.0), // VK_LCONTROL VK_RCONTROL
-        0xA0 | 0xA1 => Some(windows::Win32::UI::Input::KeyboardAndMouse::MOD_SHIFT.0), // VK_LSHIFT VK_RSHIFT
-        0xA4 | 0xA5 => Some(windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT.0), // VK_LMENU VK_RMENU
-        0x5B | 0x5C => Some(windows::Win32::UI::Input::KeyboardAndMouse::MOD_WIN.0), // VK_LWIN VK_RWIN
-        _ => None,
-    }
-}
-
-fn mod_vk_bit_for_vk(vk: u32) -> Option<u32> {
-    match vk {
-        0xA2 => Some(config::MODVK_LCTRL),  // VK_LCONTROL
-        0xA3 => Some(config::MODVK_RCTRL),  // VK_RCONTROL
-        0xA0 => Some(config::MODVK_LSHIFT), // VK_LSHIFT
-        0xA1 => Some(config::MODVK_RSHIFT), // VK_RSHIFT
-        0xA4 => Some(config::MODVK_LALT),   // VK_LMENU
-        0xA5 => Some(config::MODVK_RALT),   // VK_RMENU
-        0x5B => Some(config::MODVK_LWIN),   // VK_LWIN
-        0x5C => Some(config::MODVK_RWIN),   // VK_RWIN
-        _ => None,
-    }
-}
-
-fn is_keydown_msg(msg: u32) -> bool {
-    msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN
-}
-
-fn normalize_vk(kb: &KBDLLHOOKSTRUCT) -> u32 {
-    let vk = kb.vkCode;
-    let extended = kb.flags.contains(LLKHF_EXTENDED);
-
-    match vk {
-        x if x == VK_SHIFT.0 as u32 => {
-            // Reliable left right shift resolution based on scan code mapping.
-            let mapped = unsafe { MapVirtualKeyW(kb.scanCode, MAPVK_VSC_TO_VK_EX) };
-            if mapped != 0 { mapped } else { vk }
-        }
-        x if x == VK_CONTROL.0 as u32 => {
-            if extended {
-                VK_RCONTROL.0 as u32
-            } else {
-                VK_LCONTROL.0 as u32
-            }
-        }
-        x if x == VK_MENU.0 as u32 => {
-            if extended {
-                VK_RMENU.0 as u32
-            } else {
-                VK_LMENU.0 as u32
-            }
-        }
-        _ => vk,
-    }
-}
-
-fn is_keyup_msg(msg: u32) -> bool {
-    msg == WM_KEYUP || msg == WM_SYSKEYUP
 }
 
 fn chord_to_hotkey(ch: config::HotkeyChord) -> config::Hotkey {
