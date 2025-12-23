@@ -3,6 +3,7 @@
 mod app;
 mod config;
 mod config_validator;
+mod constants;
 mod conversion;
 mod helpers;
 mod hotkeys;
@@ -11,7 +12,6 @@ mod tray;
 mod ui;
 mod visuals;
 mod win;
-mod constants;
 
 pub fn init_tracing() {
     use std::sync::Once;

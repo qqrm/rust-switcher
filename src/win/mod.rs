@@ -366,8 +366,46 @@ unsafe fn on_ncdestroy(hwnd: HWND) -> LRESULT {
     LRESULT(0)
 }
 
+fn hotkey_id_from_wparam(wparam: WPARAM) -> i32 {
+    wparam.0 as i32
+}
+
+fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
+    state.paused = !state.paused;
+
+    let hotkey_text = if state.hotkey_sequence_values.pause.is_some() {
+        format_hotkey_sequence(state.hotkey_sequence_values.pause)
+    } else {
+        format_hotkey(state.hotkey_values.pause)
+    };
+
+    let body = if state.paused {
+        format!(
+            "Статус: деактивирована.\nАвтоконвертация выключена.\nПереключить: {}",
+            hotkey_text
+        )
+    } else {
+        format!(
+            "Статус: активирована.\nАвтоконвертация включена.\nПереключить: {}",
+            hotkey_text
+        )
+    };
+
+    if let Err(e) = crate::tray::balloon_info(hwnd, "RustSwitcher", &body) {
+        #[cfg(debug_assertions)]
+        eprintln!("tray balloon failed: {:?}", e);
+    }
+}
+
+fn handle_convert_smart(state: &mut AppState) {
+    if crate::conversion::convert_selection_if_any(state) {
+        return;
+    }
+    crate::conversion::convert_last_word(state);
+}
+
 fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
-    let id = wparam.0 as i32;
+    let id = hotkey_id_from_wparam(wparam);
 
     #[cfg(debug_assertions)]
     crate::helpers::debug_log(&format!("WM_HOTKEY id={}", id));
@@ -377,56 +415,11 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
     };
 
     with_state_mut(hwnd, |state| match action {
-        HotkeyAction::PauseToggle => {
-            state.paused = !state.paused;
-
-            let hotkey_text = if state.hotkey_sequence_values.pause.is_some() {
-                format_hotkey_sequence(state.hotkey_sequence_values.pause)
-            } else {
-                format_hotkey(state.hotkey_values.pause)
-            };
-
-            let body = if state.paused {
-                format!(
-                    "Статус: деактивирована.\nКонвертация выключена.\nПереключить: {}",
-                    hotkey_text
-                )
-            } else {
-                format!(
-                    "Статус: активирована.\nКонвертация включена.\nПереключить: {}",
-                    hotkey_text
-                )
-            };
-
-            if let Err(e) = crate::tray::balloon_info(hwnd, "RustSwitcher", &body) {
-                #[cfg(debug_assertions)]
-                eprintln!("tray balloon failed: {:?}", e);
-            }
-        }
-        HotkeyAction::ConvertLastWord => {
-            if state.paused {
-                return;
-            }
-
-            // 1) пробуем выделение (clipboard)
-            if crate::conversion::convert_selection_if_any(state) {
-                return;
-            }
-
-            // 2) fallback на журнал
-            crate::conversion::convert_last_word(state);
-        }
-        HotkeyAction::ConvertSelection => {
-            if !state.paused {
-                // строго выделение через clipboard, без UIA
-                crate::conversion::convert_selection(state);
-            }
-        }
-
+        HotkeyAction::PauseToggle => handle_pause_toggle(hwnd, state),
+        HotkeyAction::ConvertLastWord => handle_convert_smart(state),
+        HotkeyAction::ConvertSelection => crate::conversion::convert_selection(state),
         HotkeyAction::SwitchLayout => {
-            if !state.paused {
-                let _ = crate::conversion::switch_keyboard_layout();
-            }
+            let _ = crate::conversion::switch_keyboard_layout();
         }
     });
 
@@ -451,57 +444,10 @@ fn on_app_error(hwnd: HWND) -> LRESULT {
 fn on_timer(hwnd: HWND, wparam: WPARAM) -> LRESULT {
     #[cfg(debug_assertions)]
     {
-        let id = wparam.0;
+        use crate::win::keyboard::debug_timers::handle_timer;
 
-        if id == crate::helpers::DEBUG_TIMER_ID_STARTUP_ERROR {
-            unsafe {
-                let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(
-                    Some(hwnd),
-                    crate::helpers::DEBUG_TIMER_ID_STARTUP_ERROR,
-                );
-            }
-
-            with_state_mut(hwnd, |state| {
-                let e = crate::helpers::last_error();
-                crate::ui::error_notifier::push(
-                    hwnd,
-                    state,
-                    "Test title ⛑️",
-                    "Startup test error",
-                    &e,
-                );
-            });
-
-            unsafe {
-                let _ = windows::Win32::UI::WindowsAndMessaging::SetTimer(
-                    Some(hwnd),
-                    crate::helpers::DEBUG_TIMER_ID_STARTUP_INFO,
-                    600,
-                    None,
-                );
-            }
-
-            return LRESULT(0);
-        }
-
-        if id == crate::helpers::DEBUG_TIMER_ID_STARTUP_INFO {
-            unsafe {
-                let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(
-                    Some(hwnd),
-                    crate::helpers::DEBUG_TIMER_ID_STARTUP_INFO,
-                );
-            }
-
-            with_state_mut(hwnd, |state| {
-                crate::ui::info_notifier::push(
-                    hwnd,
-                    state,
-                    "Test title ⛑️",
-                    "Notification test info",
-                );
-            });
-
-            return LRESULT(0);
+        if let Some(r) = handle_timer(hwnd, wparam.0) {
+            return r;
         }
     }
 

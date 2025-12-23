@@ -1,4 +1,6 @@
 mod capture;
+#[cfg(debug_assertions)]
+pub(crate) mod debug_timers;
 mod keydown;
 mod keyup;
 pub(crate) mod mods;

@@ -305,7 +305,7 @@ fn create_hotkey_rows(
         hy,
         g.w_label,
         g.w_edit,
-        w!("Pause:"),
+        w!("Autoconvert pause:"),
         ControlId::HotkeyPause.hmenu(),
     )?;
     hy += 28;
