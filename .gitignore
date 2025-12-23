@@ -25,4 +25,4 @@ target
 
 /target
 /*.zip
-logs/rust-switcher.log
+/logs/*
