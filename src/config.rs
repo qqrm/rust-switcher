@@ -121,5 +121,6 @@ pub fn load() -> io::Result<Config> {
 pub fn save(cfg: &Config) -> io::Result<()> {
     let path = config_path()?;
     ensure_parent_dir(&path)?;
+    cfg.validate_hotkey_sequences().map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     confy::store_path(path, cfg).map_err(confy_err)
 }

@@ -10,6 +10,7 @@ mod tray;
 mod ui;
 mod visuals;
 mod win;
+mod config_validator;
 
 fn init_tracing() {
     #[cfg(feature = "debug-tracing")]
