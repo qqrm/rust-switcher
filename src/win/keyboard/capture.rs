@@ -19,8 +19,8 @@ pub(crate) fn push_chord_capture(
     const RESET_AFTER_MS: u64 = 2000;
 
     let existing = match (*last_input_tick_ms, existing) {
-        (0, s) => s,
-        (prev, s) if now_ms.saturating_sub(prev) > RESET_AFTER_MS => None,
+        (0, _) => None,
+        (prev, _) if now_ms.saturating_sub(prev) > RESET_AFTER_MS => None,
         (_, s) => s,
     };
 

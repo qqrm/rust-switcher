@@ -7,7 +7,7 @@
 
 mod commands;
 mod hotkey_format;
-mod keyboard;
+pub(crate) mod keyboard;
 mod state;
 mod window;
 

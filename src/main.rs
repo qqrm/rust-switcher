@@ -5,6 +5,7 @@ mod config;
 mod conversion;
 mod helpers;
 mod hotkeys;
+mod input_journal;
 mod tray;
 mod ui;
 mod visuals;

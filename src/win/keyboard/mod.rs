@@ -1,7 +1,7 @@
 mod capture;
 mod keydown;
 mod keyup;
-mod mods;
+pub(crate) mod mods;
 mod sequence;
 mod vk;
 
@@ -75,6 +75,10 @@ extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     } else {
         Ok(HookDecision::Pass)
     };
+
+    if is_keydown_msg(msg) && matches!(decision.as_ref(), Ok(HookDecision::Pass)) {
+        crate::input_journal::record_keydown(kb, vk);
+    }
 
     match decision {
         Ok(d) if d.should_swallow() && !(is_mod && is_keyup_msg(msg)) => return LRESULT(1),

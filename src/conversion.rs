@@ -2,18 +2,15 @@ use std::{ptr::null_mut, sync::Once, thread, time::Duration};
 
 use windows::{
     Win32::{
-        Foundation::{HANDLE, HGLOBAL, HWND, LPARAM, WPARAM},
+        Foundation::{HGLOBAL, HWND, LPARAM, WPARAM},
         System::{
             Com::{
                 CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-                IDataObject,
             },
             DataExchange::{
-                CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-                OpenClipboard, SetClipboardData,
+                CloseClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
             },
-            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
-            Ole::{OleGetClipboard, OleSetClipboard},
+            Memory::{GlobalLock, GlobalUnlock},
         },
         UI::{
             Accessibility::{
@@ -22,7 +19,7 @@ use windows::{
             Input::KeyboardAndMouse::{
                 GetAsyncKeyState, GetKeyboardLayout, GetKeyboardLayoutList, HKL, INPUT, INPUT_0,
                 INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY, VK_CONTROL,
-                VK_LEFT, VK_LSHIFT, VK_RIGHT, VK_RSHIFT, VK_SHIFT,
+                VK_LSHIFT, VK_RSHIFT,
             },
             WindowsAndMessaging::{
                 GetForegroundWindow, GetWindowThreadProcessId, PostMessageW,
@@ -36,67 +33,79 @@ use windows::{
 use crate::app::AppState;
 
 const VK_C_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x43);
-const VK_V_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x56);
+// const VK_V_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x56);
 const VK_LEFT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x25);
 const VK_RIGHT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x27);
 const VK_SHIFT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x10);
+const VK_DELETE_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x2E);
 
 const CF_UNICODETEXT_ID: u32 = 13;
 
 static COM_INIT: Once = Once::new();
 
-struct ClipboardBackup(Option<IDataObject>);
-
-impl ClipboardBackup {
-    fn capture() -> Self {
-        ensure_com_initialized();
-
-        let obj = unsafe { OleGetClipboard().ok() };
-        Self(obj)
-    }
+enum UiaSelection {
+    NoSelection,
+    Text(String),
+    HasSelectionButTextUnavailable,
+    Unavailable,
 }
 
-impl Drop for ClipboardBackup {
-    fn drop(&mut self) {
-        if let Some(obj) = self.0.take() {
-            unsafe {
-                let _ = OleSetClipboard(&obj);
-            }
-        }
+fn uia_get_selection() -> UiaSelection {
+    ensure_com_initialized();
+
+    let uia: IUIAutomation =
+        match unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok() {
+            Some(v) => v,
+            None => return UiaSelection::Unavailable,
+        };
+
+    let focused = match unsafe { uia.GetFocusedElement() }.ok() {
+        Some(v) => v,
+        None => return UiaSelection::Unavailable,
+    };
+
+    let tp: IUIAutomationTextPattern =
+        match unsafe { focused.GetCurrentPatternAs(UIA_TextPatternId) }.ok() {
+            Some(v) => v,
+            None => return UiaSelection::Unavailable,
+        };
+
+    let ranges = match unsafe { tp.GetSelection() }.ok() {
+        Some(v) => v,
+        None => return UiaSelection::Unavailable,
+    };
+
+    let len = match unsafe { ranges.Length() }.ok() {
+        Some(v) => v,
+        None => return UiaSelection::Unavailable,
+    };
+
+    if len <= 0 {
+        return UiaSelection::NoSelection;
     }
 
+    let range = match unsafe { ranges.GetElement(0) }.ok() {
+        Some(v) => v,
+        None => return UiaSelection::HasSelectionButTextUnavailable,
+    };
 
-    йцукеyu
+    let b: BSTR = match unsafe { range.GetText(-1) }.ok() {
+        Some(v) => v,
+        None => return UiaSelection::HasSelectionButTextUnavailable,
+    };
+
+    let s = b.to_string();
+    if s.is_empty() {
+        UiaSelection::HasSelectionButTextUnavailable
+    } else {
+        UiaSelection::Text(s)
+    }
 }
 
 fn ensure_com_initialized() {
     COM_INIT.call_once(|| unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
     });
-}
-
-fn uia_get_selected_text() -> Option<String> {
-    ensure_com_initialized();
-
-    let uia: IUIAutomation =
-        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok()?;
-
-    let focused = unsafe { uia.GetFocusedElement() }.ok()?;
-
-    let tp: IUIAutomationTextPattern =
-        unsafe { focused.GetCurrentPatternAs(UIA_TextPatternId) }.ok()?;
-
-    let ranges = unsafe { tp.GetSelection() }.ok()?;
-    let len = unsafe { ranges.Length() }.ok()?;
-    if len <= 0 {
-        return None;
-    }
-
-    let range = unsafe { ranges.GetElement(0) }.ok()?;
-    let b: BSTR = unsafe { range.GetText(-1) }.ok()?;
-
-    let s = b.to_string();
-    (!s.is_empty()).then_some(s)
 }
 
 pub fn convert_by_context(state: &mut AppState, hwnd: HWND) {
@@ -109,37 +118,45 @@ pub fn convert_by_context(state: &mut AppState, hwnd: HWND) {
         return;
     }
 
-    if let Some(text) = uia_get_selected_text() {
-        convert_selection_from_text(state, text);
+    match uia_get_selection() {
+        UiaSelection::Text(text) => {
+            convert_selection_from_text(state, text);
+        }
+        UiaSelection::HasSelectionButTextUnavailable => {
+            convert_selection(state, hwnd);
+        }
+        UiaSelection::NoSelection | UiaSelection::Unavailable => {
+            convert_last_word(state, hwnd);
+        }
+    }
+}
+
+pub fn convert_last_word(_state: &mut AppState, _hwnd: HWND) {
+    let Some(word) = crate::input_journal::take_last_word() else {
+        return;
+    };
+    if word.is_empty() {
         return;
     }
 
-    convert_last_word(state, hwnd);
-}
+    let converted = convert_ru_en_bidirectional(&word);
 
-pub fn convert_last_word(state: &mut AppState, hwnd: HWND) {
-    unsafe {
-        let fg = GetForegroundWindow();
-        if fg.0.is_null() {
+    let mut seq = KeySequence::new();
+
+    for _ in 0..word.chars().count().min(4096) {
+        if !seq.tap(VIRTUAL_KEY(0x08)) {
             return;
         }
     }
 
-    if !send_ctrl_shift_combo(VK_LEFT) {
+    if !send_text_unicode(&converted) {
         return;
     }
 
-    thread::sleep(Duration::from_millis(20));
-
-    convert_selection(state, hwnd);
-
-    let _ = send_key(VK_RIGHT, false);
-    let _ = send_key(VK_RIGHT, true);
+    let _ = switch_keyboard_layout();
 }
 
 fn convert_selection_from_text(state: &mut AppState, text: String) {
-    let _clipboard_backup = ClipboardBackup::capture();
-
     let delay_ms = crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100);
 
     let converted = convert_ru_en_bidirectional(&text);
@@ -147,11 +164,13 @@ fn convert_selection_from_text(state: &mut AppState, text: String) {
 
     thread::sleep(Duration::from_millis(delay_ms as u64));
 
-    if clipboard_set_unicode_text(&converted).is_none() {
+    let mut seq = KeySequence::new();
+
+    if !seq.tap(VK_DELETE_KEY) {
         return;
     }
 
-    if !send_ctrl_combo(VK_V_KEY) {
+    if !send_text_unicode(&converted) {
         return;
     }
 
@@ -254,12 +273,6 @@ fn post_layout_change(fg: HWND, hkl: HKL) -> windows::core::Result<()> {
     Ok(())
 }
 
-fn send_ctrl_shift_combo(vk: VIRTUAL_KEY) -> bool {
-    let mut seq = KeySequence::new();
-
-    seq.down(VK_CONTROL) && seq.down(VK_SHIFT) && seq.tap(vk)
-}
-
 fn send_ctrl_combo(vk: VIRTUAL_KEY) -> bool {
     let mut seq = KeySequence::new();
 
@@ -301,6 +314,48 @@ impl Drop for KeySequence {
             let _ = send_key(vk, true);
         }
     }
+}
+
+fn send_text_unicode(text: &str) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_UNICODE;
+
+    let units: Vec<u16> = text.encode_utf16().collect();
+    if units.is_empty() {
+        return true;
+    }
+
+    let mut inputs = Vec::with_capacity(units.len() * 2);
+
+    for u in units {
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(0),
+                    wScan: u,
+                    dwFlags: KEYEVENTF_UNICODE,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        });
+
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(0),
+                    wScan: u,
+                    dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        });
+    }
+
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) } as usize;
+    sent == inputs.len()
 }
 
 fn send_key(vk: VIRTUAL_KEY, key_up: bool) -> bool {
@@ -425,30 +480,6 @@ fn clipboard_get_unicode_text() -> Option<String> {
 
         let _ = GlobalUnlock(hglobal);
         Some(text)
-    }
-}
-
-fn clipboard_set_unicode_text(text: &str) -> Option<()> {
-    let _clip = ClipboardGuard::open()?;
-
-    unsafe {
-        EmptyClipboard().ok()?;
-
-        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
-        let bytes = wide.len() * std::mem::size_of::<u16>();
-
-        let hmem = GlobalAlloc(GMEM_MOVEABLE, bytes).ok()?;
-        let ptr = GlobalLock(hmem) as *mut u16;
-        if ptr.is_null() {
-            return None;
-        }
-
-        std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
-
-        let _ = GlobalUnlock(hmem);
-
-        SetClipboardData(CF_UNICODETEXT_ID, Some(HANDLE(hmem.0))).ok()?;
-        Some(())
     }
 }
 
