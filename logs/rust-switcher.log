@@ -1,0 +1,25 @@
+2025-12-23T08:18:12.023047Z  INFO ThreadId(01) rust_switcher: src\main.rs:55: tracing initialized
+2025-12-23T08:18:12.027401Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.027463Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1003 [3mid[0m[2m=[0m1003 [3mnotif[0m[2m=[0m1024 [3mnotif[0m[2m=[0m1024}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.027490Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.027521Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1003 [3mid[0m[2m=[0m1003 [3mnotif[0m[2m=[0m768 [3mnotif[0m[2m=[0m768}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.031411Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.031457Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1003 [3mid[0m[2m=[0m1003 [3mnotif[0m[2m=[0m1024 [3mnotif[0m[2m=[0m1024}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.031477Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.031506Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1003 [3mid[0m[2m=[0m1003 [3mnotif[0m[2m=[0m768 [3mnotif[0m[2m=[0m768}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.031571Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.031605Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1201 [3mid[0m[2m=[0m1201 [3mnotif[0m[2m=[0m1024 [3mnotif[0m[2m=[0m1024}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.031621Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.031650Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1201 [3mid[0m[2m=[0m1201 [3mnotif[0m[2m=[0m768 [3mnotif[0m[2m=[0m768}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.031735Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.031779Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1202 [3mid[0m[2m=[0m1202 [3mnotif[0m[2m=[0m1024 [3mnotif[0m[2m=[0m1024}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.031799Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.031830Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1202 [3mid[0m[2m=[0m1202 [3mnotif[0m[2m=[0m768 [3mnotif[0m[2m=[0m768}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.031892Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.031928Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1203 [3mid[0m[2m=[0m1203 [3mnotif[0m[2m=[0m1024 [3mnotif[0m[2m=[0m1024}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.031944Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.031974Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1203 [3mid[0m[2m=[0m1203 [3mnotif[0m[2m=[0m768 [3mnotif[0m[2m=[0m768}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.032068Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.032111Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1204 [3mid[0m[2m=[0m1204 [3mnotif[0m[2m=[0m1024 [3mnotif[0m[2m=[0m1024}: rust_switcher::win::commands: src\win\commands.rs:11: exit
+2025-12-23T08:18:12.032130Z  INFO ThreadId(01) on_command: rust_switcher::win::commands: src\win\commands.rs:11: enter
+2025-12-23T08:18:12.032161Z  INFO ThreadId(01) on_command{[3mmsg[0m[2m=[0m"WM_COMMAND" [3mmsg[0m[2m=[0m"WM_COMMAND" [3mid[0m[2m=[0m1204 [3mid[0m[2m=[0m1204 [3mnotif[0m[2m=[0m768 [3mnotif[0m[2m=[0m768}: rust_switcher::win::commands: src\win\commands.rs:11: exit
