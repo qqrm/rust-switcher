@@ -1,17 +1,18 @@
 use crate::config::Config;
+use crate::constants::*;
 
 pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
     let sequences = [
-        ("Convert last word", &config.hotkey_convert_last_word_sequence),
-        ("Pause", &config.hotkey_pause_sequence),
-        ("Convert selection", &config.hotkey_convert_selection_sequence),
-        ("Switch keyboard layout", &config.hotkey_switch_layout_sequence),
+        (CONVERT_LAST_WORD, &config.hotkey_convert_last_word_sequence),
+        (PAUSE, &config.hotkey_pause_sequence),
+        (CONVERT_SELECTION, &config.hotkey_convert_selection_sequence),
+        (SWITCH_LAYOUT, &config.hotkey_switch_layout_sequence),
     ];
     
     // Allowed duplicates (bidirectional check)
     let is_allowed_duplicate = |a: &str, b: &str| {
-        (a == "Convert selection" && b == "Convert last word") ||
-        (a == "Convert last word" && b == "Convert selection")
+        (a == CONVERT_SELECTION && b == CONVERT_LAST_WORD) ||
+        (a == CONVERT_LAST_WORD && b == CONVERT_SELECTION)
     };
 
     let duplicates: Vec<_> = sequences

@@ -11,6 +11,7 @@ mod tray;
 mod ui;
 mod visuals;
 mod win;
+mod constants;
 
 pub fn init_tracing() {
     use std::sync::Once;
