@@ -28,10 +28,6 @@ impl Drop for ClipboardGuard {
     }
 }
 
-pub fn sequence_number() -> u32 {
-    unsafe { GetClipboardSequenceNumber() }
-}
-
 pub fn get_unicode_text() -> Option<String> {
     let _clip = ClipboardGuard::open()?;
 
@@ -104,7 +100,7 @@ pub fn set_unicode_text(text: &str) -> bool {
 
 pub fn wait_change(before: u32, tries: usize, sleep_ms: u64) -> bool {
     for _ in 0..tries {
-        let now = sequence_number();
+        let now = unsafe { GetClipboardSequenceNumber() };
         if now != before {
             return true;
         }
