@@ -216,7 +216,7 @@ fn on_create(hwnd: HWND) -> LRESULT {
     #[rustfmt::skip]
     startup_or_return0!(hwnd, &mut state, "Failed to register hotkeys", register_from_config(hwnd, &cfg));
 
-    keyboard::install(hwnd);
+    keyboard::install(hwnd, state.as_mut());
 
     init_font_and_visuals(hwnd, &mut state);
 
@@ -297,37 +297,94 @@ fn io_to_win(e: std::io::Error) -> windows::core::Error {
     Error::new(HRESULT(0x80004005u32 as i32), e.to_string())
 }
 
-fn handle_apply(hwnd: HWND, state: &mut AppState) {
-    let base = match config::load() {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            let e = io_to_win(e);
-            crate::ui::error_notifier::push(
-                hwnd,
-                state,
-                "",
-                "Failed to load config before applying changes",
-                &e,
-            );
-            on_app_error(hwnd);
-            config::Config::default()
-        }
-    };
+/// Error returned by `build_and_save_config_from_ui`.
+///
+/// This type carries two payloads:
+/// - `user_text`: a short message intended to be shown to the user
+/// - `source`: the underlying Win32 error used for debug details
+struct ApplyConfigError {
+    user_text: String,
+    source: windows::core::Error,
+}
+
+impl ApplyConfigError {
+    /// Enqueues the error into the UI notifier queue and schedules UI processing.
+    ///
+    /// This method is intentionally side effecting and should be called only from
+    /// the UI boundary code (for example a window command handler).
+    fn notify(self, hwnd: HWND, state: &mut AppState) {
+        crate::ui::error_notifier::push(hwnd, state, T_CONFIG, &self.user_text, &self.source);
+    }
+}
+
+/// Builds a config from the current UI state and persists it.
+///
+/// Responsibilities:
+/// - loads the current config as a base (so unspecified fields are preserved)
+/// - reads UI controls into a new config instance
+/// - saves the config to persistent storage
+///
+/// Error semantics:
+/// Returns an `ApplyConfigError` that is suitable for direct user notification.
+/// In particular, validation failures are reported with the validation message as `user_text`.
+fn build_and_save_config_from_ui(
+    state: &mut AppState,
+) -> std::result::Result<config::Config, ApplyConfigError> {
+    let base = config::load().map_err(|e| ApplyConfigError {
+        user_text: "Failed to load config before applying changes".to_string(),
+        source: io_to_win(e),
+    })?;
 
     let cfg = read_ui_to_config(state, base);
 
-    if let Err(e) = config::save(&cfg) {
-        let e = io_to_win(e);
-        crate::ui::error_notifier::push(hwnd, state, "", "Failed to save config", &e);
-        on_app_error(hwnd);
-        return;
-    }
+    config::save(&cfg).map_err(|e| {
+        let user_text = match e.kind() {
+            std::io::ErrorKind::InvalidInput => e.to_string(),
+            _ => "Failed to save config".to_string(),
+        };
 
-    #[rustfmt::skip]
-    ui_call!(hwnd, state, T_CONFIG, "Failed to apply config at runtime", apply_config_runtime(hwnd, state, &cfg));
+        ApplyConfigError {
+            user_text,
+            source: io_to_win(e),
+        }
+    })?;
 
-    #[rustfmt::skip]
-    ui_call!(hwnd, state, T_UI, "Failed to update UI from config", apply_config_to_ui(state, &cfg));
+    Ok(cfg)
+}
+
+/// Applies configuration changes requested by the UI.
+///
+/// Architectural boundary:
+/// This handler is a UI boundary. It coordinates:
+/// - persistence (load, merge, save)
+/// - runtime application of the new config
+/// - updating the UI to reflect the saved config
+///
+/// All user notifications are emitted here. Lower level helpers return `Result` only.
+fn handle_apply(hwnd: HWND, state: &mut AppState) {
+    let cfg = match build_and_save_config_from_ui(state) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            e.notify(hwnd, state);
+            return;
+        }
+    };
+
+    ui_call!(
+        hwnd,
+        state,
+        T_CONFIG,
+        "Failed to apply config at runtime",
+        apply_config_runtime(hwnd, state, &cfg)
+    );
+
+    ui_call!(
+        hwnd,
+        state,
+        T_UI,
+        "Failed to update UI from config",
+        apply_config_to_ui(state, &cfg)
+    );
 }
 
 fn handle_cancel(hwnd: HWND, state: &mut AppState) {

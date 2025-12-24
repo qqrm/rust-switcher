@@ -99,7 +99,11 @@ extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe { CallNextHookEx(hook, code, wparam, lparam) }
 }
 
-pub fn install(hwnd: HWND) {
+/// Installs the low level keyboard hook used for hotkey capture.
+///
+/// On failure, the error is routed through the UI error notifier. This keeps the
+/// release build observable even without logs.
+pub fn install(hwnd: HWND, state: &mut crate::app::AppState) {
     MAIN_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
 
     if HOOK_HANDLE.load(Ordering::Relaxed) != 0 {
@@ -112,9 +116,14 @@ pub fn install(hwnd: HWND) {
             #[cfg(debug_assertions)]
             eprintln!("RustSwitcher: WH_KEYBOARD_LL installed");
         }
-        Err(_e) => {
-            #[cfg(debug_assertions)]
-            eprintln!("RustSwitcher: SetWindowsHookExW failed: {}", _e);
+        Err(e) => {
+            crate::ui::error_notifier::push(
+                hwnd,
+                state,
+                crate::ui::error_notifier::T_UI,
+                "Failed to install keyboard hook",
+                &e,
+            );
         }
     }
 }
