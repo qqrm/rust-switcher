@@ -13,11 +13,6 @@ mod ui;
 mod visuals;
 mod win;
 
-#[cfg(test)]
-mod tests {
-    pub mod config_validator_tests;
-}
-
 pub fn init_tracing() {
     use std::sync::Once;
 
@@ -78,4 +73,9 @@ fn main() -> windows::core::Result<()> {
     };
 
     win::run()
+}
+
+#[cfg(test)]
+mod tests {
+    pub mod config_validator_tests;
 }
