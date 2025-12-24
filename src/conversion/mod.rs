@@ -154,25 +154,21 @@ fn convert_selection_from_text(
 
 /// Attempts to reselect the last inserted text using bounded retries.
 ///
-/// Rationale:
-/// Some target applications update caret position and selection state asynchronously
-/// relative to `SendInput`. A single fixed delay is either too long for fast apps or
-/// too short for slow ones. Retrying for a short budget reduces median latency while
-/// keeping behavior stable under load.
+/// Some target applications apply caret and selection updates asynchronously relative to `SendInput`.
+/// This helper retries for a short time budget to reduce flakiness without adding a long fixed delay.
 ///
 /// Returns `true` if reselect succeeds within `budget`, otherwise `false`.
 fn reselect_with_retry(units: usize, budget: Duration, step_sleep: Duration) -> bool {
     let deadline = std::time::Instant::now() + budget;
 
-    loop {
-        if reselect_last_inserted_text_utf16_units(units) {
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        thread::sleep(step_sleep);
-    }
+    std::iter::repeat_with(|| reselect_last_inserted_text_utf16_units(units))
+        .take_while(|_| std::time::Instant::now() < deadline)
+        .inspect(|ok| {
+            if !ok {
+                thread::sleep(step_sleep);
+            }
+        })
+        .any(|ok| ok)
 }
 
 /// Converts the current selection, if it exists.
@@ -201,45 +197,68 @@ pub fn convert_selection(state: &mut AppState) {
     }
 }
 
-/// Switches the keyboard layout for the current foreground window to the next installed layout.
-///
-/// How it works:
-/// - identifies the foreground window and its thread id
-/// - reads the current keyboard layout for that thread
-/// - enumerates all installed layouts
-/// - picks the next one cyclically
-/// - posts `WM_INPUTLANGCHANGEREQUEST` to the target window
-///
-/// Returns `Ok(())` if the operation is completed or skipped (no window or no layouts),
-/// or an error if posting the message fails.
-pub fn switch_keyboard_layout() -> windows::core::Result<()> {
+/// Returns the current foreground window, or `None` if it is null.
+fn foreground_window() -> Option<HWND> {
+    let fg = unsafe { GetForegroundWindow() };
+    (!fg.0.is_null()).then_some(fg)
+}
+
+/// Returns the current keyboard layout for the thread owning `fg`.
+fn current_layout_for_window(fg: HWND) -> HKL {
     unsafe {
-        let fg = GetForegroundWindow();
-        if fg.0.is_null() {
-            return Ok(());
-        }
-
         let tid = GetWindowThreadProcessId(fg, None);
-        let cur = GetKeyboardLayout(tid);
+        GetKeyboardLayout(tid)
+    }
+}
 
+/// Enumerates installed keyboard layouts for the current desktop.
+///
+/// Returns an empty vector when enumeration fails or yields no results.
+fn installed_layouts() -> Vec<HKL> {
+    unsafe {
         let n = GetKeyboardLayoutList(None);
         if n <= 0 {
-            return Ok(());
+            return Vec::new();
         }
 
         let mut layouts = vec![HKL(null_mut()); n as usize];
-
         let n2 = GetKeyboardLayoutList(Some(layouts.as_mut_slice()));
         if n2 <= 0 {
-            return Ok(());
+            return Vec::new();
         }
+
         layouts.truncate(n2 as usize);
-
-        let next = next_layout(&layouts, cur);
-        post_layout_change(fg, next)?;
-
-        Ok(())
+        layouts
     }
+}
+
+/// Switches the keyboard layout for the current foreground window to the next installed layout.
+///
+/// Algorithm:
+/// - obtains the foreground window
+/// - reads the current layout for that window thread
+/// - enumerates installed layouts
+/// - selects the next one cyclically
+/// - posts `WM_INPUTLANGCHANGEREQUEST` to the window
+///
+/// Returns `Ok(())` when the operation is completed or skipped:
+/// - no foreground window
+/// - no layouts available
+///
+/// Returns `Err` only if posting the request fails.
+pub fn switch_keyboard_layout() -> windows::core::Result<()> {
+    let Some(fg) = foreground_window() else {
+        return Ok(());
+    };
+
+    let cur = current_layout_for_window(fg);
+    let layouts = installed_layouts();
+    if layouts.is_empty() {
+        return Ok(());
+    }
+
+    let next = next_layout(&layouts, cur);
+    post_layout_change(fg, next)
 }
 
 /// Returns the next layout in `layouts` after `cur`, cycling back to the first.
@@ -267,18 +286,13 @@ fn post_layout_change(fg: HWND, hkl: HKL) -> windows::core::Result<()> {
     }
     Ok(())
 }
-
 /// Waits until both left and right Shift keys are released or the timeout elapses.
 ///
 /// Returns `true` as soon as neither Shift key is currently pressed.
 fn wait_shift_released(timeout_ms: u64) -> bool {
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
 
-    std::iter::from_fn(|| {
-        let now = std::time::Instant::now();
-        (now < deadline).then_some(())
-    })
-    .any(|_| {
+    while std::time::Instant::now() < deadline {
         let l = unsafe { GetAsyncKeyState(VK_LSHIFT.0 as i32) } as u16;
         let r = unsafe { GetAsyncKeyState(VK_RSHIFT.0 as i32) } as u16;
 
@@ -288,30 +302,43 @@ fn wait_shift_released(timeout_ms: u64) -> bool {
         }
 
         thread::sleep(Duration::from_millis(1));
-        false
-    })
+    }
+
+    false
 }
 
-/// RAII helper that restores clipboard Unicode text on drop.
+/// RAII helper that restores clipboard Unicode text on drop, but only if it was changed.
 ///
-/// The conversion pipeline uses the clipboard for reading the current selection.
-/// This guard preserves the previous clipboard text and restores it even on early
-/// returns or errors.
+/// The selection conversion pipeline uses clipboard for reading selection.
+/// This guard minimizes side effects by restoring only when the clipboard sequence number changed.
 struct ClipboardRestore {
+    before_seq: u32,
     old: Option<String>,
 }
 
 impl ClipboardRestore {
-    /// Captures current clipboard Unicode text.
+    /// Captures current clipboard Unicode text and its sequence number.
     fn capture() -> Self {
+        let before_seq = unsafe { GetClipboardSequenceNumber() };
         Self {
+            before_seq,
             old: clip::get_unicode_text(),
         }
+    }
+
+    /// Returns the captured clipboard sequence number.
+    fn before_seq(&self) -> u32 {
+        self.before_seq
     }
 }
 
 impl Drop for ClipboardRestore {
     fn drop(&mut self) {
+        let after_seq = unsafe { GetClipboardSequenceNumber() };
+        if after_seq == self.before_seq {
+            return;
+        }
+
         if let Some(old_text) = self.old.as_deref() {
             let _ = clip::set_unicode_text(old_text);
         }
@@ -323,8 +350,8 @@ impl Drop for ClipboardRestore {
 /// Returns `None` when selection is empty, multiline, too long, or clipboard did not change.
 /// `max_chars` is counted in Unicode scalar values.
 fn copy_selection_text_with_clipboard_restore(max_chars: usize) -> Option<String> {
-    let _restore = ClipboardRestore::capture();
-    let before_seq = unsafe { GetClipboardSequenceNumber() };
+    let restore = ClipboardRestore::capture();
+    let before_seq = restore.before_seq();
 
     send_ctrl_combo(VK_C_KEY)
         .then(|| clip::wait_change(before_seq, 10, 20))
