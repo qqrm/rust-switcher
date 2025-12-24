@@ -10,7 +10,7 @@ use crate::{app::ControlId, helpers, ui::error_notifier::T_UI};
     debug_assertions,
     tracing::instrument(level = "info", skip_all, fields(msg, id, notif))
 )]
-pub(crate) fn on_command(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+pub(crate) fn on_command(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     #[cfg(debug_assertions)]
     tracing::Span::current().record("msg", "WM_COMMAND");
 
@@ -21,7 +21,7 @@ pub(crate) fn on_command(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT 
     {
         tracing::Span::current().record("id", id);
         tracing::Span::current().record("notif", notif as i64);
-        eprintln!("ui.command: id={} notif={} lparam={}", id, notif, lparam.0);
+        eprintln!("ui.command: id={} notif={} lparam={}", id, notif, _lparam.0);
     }
 
     if let Some(r) = handle_hotkey_capture_focus(hwnd, id, notif) {

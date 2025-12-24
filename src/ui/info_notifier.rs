@@ -1,3 +1,4 @@
+#[cfg(debug_assertions)]
 pub fn push(
     hwnd: windows::Win32::Foundation::HWND,
     _state: &mut crate::app::AppState,

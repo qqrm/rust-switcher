@@ -461,9 +461,9 @@ fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
         )
     };
 
-    if let Err(e) = crate::tray::balloon_info(hwnd, "RustSwitcher", &body) {
+    if let Err(_e) = crate::tray::balloon_info(hwnd, "RustSwitcher", &body) {
         #[cfg(debug_assertions)]
-        eprintln!("tray balloon failed: {:?}", e);
+        eprintln!("tray balloon failed: {:?}", _e);
     }
 }
 
@@ -507,12 +507,12 @@ fn on_app_error(hwnd: HWND) -> LRESULT {
     LRESULT(0)
 }
 
-fn on_timer(hwnd: HWND, wparam: WPARAM) -> LRESULT {
+fn on_timer(_hwnd: HWND, _wparam: WPARAM) -> LRESULT {
     #[cfg(debug_assertions)]
     {
         use crate::win::keyboard::debug_timers::handle_timer;
 
-        if let Some(r) = handle_timer(hwnd, wparam.0) {
+        if let Some(r) = handle_timer(_hwnd, _wparam.0) {
             return r;
         }
     }

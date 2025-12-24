@@ -80,9 +80,9 @@ pub fn push(
     });
 
     unsafe {
-        if let Err(e) = PostMessageW(Some(hwnd), WM_APP_ERROR, WPARAM(0), LPARAM(0)) {
+        if let Err(_e) = PostMessageW(Some(hwnd), WM_APP_ERROR, WPARAM(0), LPARAM(0)) {
             #[cfg(debug_assertions)]
-            tracing::warn!(error=?e, "PostMessageW(WM_APP_ERROR) failed");
+            tracing::warn!(error=?_e, "PostMessageW(WM_APP_ERROR) failed");
         }
     }
 }
