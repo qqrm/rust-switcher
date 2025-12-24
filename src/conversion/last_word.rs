@@ -88,36 +88,65 @@ struct LastWordPayload {
     suffix_has_newline: bool,
 }
 
-/// Reads `(word, suffix)` from the input journal and derives a normalized payload.
+/// Extracts the last "word" and its trailing suffix from the input journal, with a small fixup:
+/// if the suffix begins with a convertible punctuation character (`?`, `/`, `,`, `.`) and the rest
+/// of the suffix contains only spaces or tabs, that punctuation is moved into the word so it gets
+/// converted together with the word during "Convert Last Word".
 ///
+/// This prevents cases like `ghbdtn?` from leaving `?` unconverted when converting only the last word.
+/// Newlines in the suffix are not merged into the word.
+/// Reads `(word, suffix)` from the input journal and derives a normalized payload.
 /// Returns `None` if the journal is empty or the extracted `word` is empty.
 fn take_last_word_payload() -> Option<LastWordPayload> {
-    crate::input_journal::take_last_word_with_suffix().and_then(|(word, suffix)| {
-        (!word.is_empty()).then(|| {
-            let word_len = word.chars().count();
-            let suffix_len = suffix.chars().count();
-            let suffix_has_newline = suffix.contains('\n') || suffix.contains('\r');
-            let suffix_spaces_only =
-                !suffix.is_empty() && suffix.chars().all(|c| c == ' ' || c == '\t');
+    fn is_convertible_trailing_punct(ch: char) -> bool {
+        matches!(ch, '?' | '/' | ',' | '.')
+    }
 
-            tracing::trace!(
-                %word,
-                %suffix,
-                word_len,
-                suffix_len,
-                suffix_spaces_only,
-                suffix_has_newline,
-                "journal extracted"
-            );
+    crate::input_journal::take_last_word_with_suffix().and_then(|(mut word, mut suffix)| {
+        if word.is_empty() {
+            return None;
+        }
 
-            LastWordPayload {
-                word,
-                suffix,
-                word_len,
-                suffix_len,
-                suffix_spaces_only,
-                suffix_has_newline,
+        // If suffix starts with convertible punctuation and the rest is only spaces or tabs (or empty),
+        // move that punctuation into the word so it gets converted together with the word.
+        let (first, rest) = match suffix.chars().next() {
+            Some(ch) if is_convertible_trailing_punct(ch) => {
+                let ch_len = ch.len_utf8();
+                (Some(ch), &suffix[ch_len..])
             }
+            _ => (None, ""),
+        };
+
+        if let Some(ch) = first
+            && rest.chars().all(|c| c == ' ' || c == '\t')
+        {
+            word.push(ch);
+            suffix = rest.to_string();
+        }
+
+        let word_len = word.chars().count();
+        let suffix_len = suffix.chars().count();
+        let suffix_has_newline = suffix.contains('\n') || suffix.contains('\r');
+        let suffix_spaces_only =
+            !suffix.is_empty() && suffix.chars().all(|c| c == ' ' || c == '\t');
+
+        tracing::trace!(
+            %word,
+            %suffix,
+            word_len,
+            suffix_len,
+            suffix_spaces_only,
+            suffix_has_newline,
+            "journal extracted"
+        );
+
+        Some(LastWordPayload {
+            word,
+            suffix,
+            word_len,
+            suffix_len,
+            suffix_spaces_only,
+            suffix_has_newline,
         })
     })
 }

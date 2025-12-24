@@ -5,9 +5,9 @@ use std::{
 
 use windows::Win32::UI::{
     Input::KeyboardAndMouse::{
-        GetKeyboardLayout, GetKeyboardState, MOD_ALT, MOD_CONTROL, ToUnicodeEx, VIRTUAL_KEY,
-        VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT,
-        VK_PRIOR, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
+        GetAsyncKeyState, GetKeyboardLayout, GetKeyboardState, MOD_ALT, MOD_CONTROL, ToUnicodeEx,
+        VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT,
+        VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_SHIFT, VK_TAB, VK_UP,
     },
     WindowsAndMessaging::{
         GetForegroundWindow, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
@@ -52,10 +52,6 @@ impl InputJournal {
     }
 }
 
-fn is_word_char(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_'
-}
-
 fn mods_ctrl_or_alt_down() -> bool {
     let mods = crate::win::keyboard::mods::mods_now();
     (mods & (MOD_CONTROL.0 | MOD_ALT.0)) != 0
@@ -74,6 +70,28 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<String> {
     if unsafe { GetKeyboardState(&mut state) }.is_err() {
         return None;
     }
+
+    fn async_down(vk: VIRTUAL_KEY) -> bool {
+        let v = unsafe { GetAsyncKeyState(vk.0 as i32) } as u16;
+        (v & 0x8000) != 0
+    }
+
+    fn apply_async_key(state: &mut [u8; 256], vk: VIRTUAL_KEY) {
+        let idx = vk.0 as usize;
+        if idx >= state.len() {
+            return;
+        }
+
+        if async_down(vk) {
+            state[idx] |= 0x80;
+        } else {
+            state[idx] &= !0x80;
+        }
+    }
+
+    apply_async_key(&mut state, VK_SHIFT);
+    apply_async_key(&mut state, VK_LSHIFT);
+    apply_async_key(&mut state, VK_RSHIFT);
 
     let mut buf = [0u16; 8];
     let rc = unsafe { ToUnicodeEx(vk.0 as u32, kb.scanCode, &state, &mut buf, 0, Some(hkl)) };
@@ -152,34 +170,37 @@ pub fn take_last_word_with_suffix() -> Option<(String, String)> {
         return None;
     };
 
+    // Trailing whitespace is suffix (spaces, tabs, newlines, etc).
     let mut suffix: Vec<char> = Vec::new();
     while let Some(&ch) = j.buf.back() {
-        if is_word_char(ch) {
+        if ch.is_whitespace() {
+            suffix.push(j.buf.pop_back()?);
+        } else {
             break;
         }
-        suffix.push(j.buf.pop_back()?);
     }
 
-    let mut word: Vec<char> = Vec::new();
+    // Token is the last contiguous run of non-whitespace characters.
+    let mut token: Vec<char> = Vec::new();
     while let Some(&ch) = j.buf.back() {
-        if !is_word_char(ch) {
+        if ch.is_whitespace() {
             break;
         }
-        word.push(j.buf.pop_back()?);
+        token.push(j.buf.pop_back()?);
     }
 
-    if word.is_empty() {
-        // если в конце были только разделители, вернем их обратно
+    if token.is_empty() {
+        // Restore suffix if we didn't get a token.
         while let Some(ch) = suffix.pop() {
             j.buf.push_back(ch);
         }
         return None;
     }
 
-    word.reverse();
+    token.reverse();
     suffix.reverse();
 
-    Some((word.into_iter().collect(), suffix.into_iter().collect()))
+    Some((token.into_iter().collect(), suffix.into_iter().collect()))
 }
 
 pub fn push_text(s: &str) {

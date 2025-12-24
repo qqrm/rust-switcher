@@ -5,7 +5,7 @@ env.CARGO_TERM_COLOR = "always"
 
 [jobs.dev-long]
 env.RUST_LOG = "trace"
-command = ["cargo", "run", "--features", "debug-tracing"]
+command = ["cargo", "+nightly", "run", "--features", "debug-tracing"]
 need_stdout = true
 allow_warnings = true
 background = false
@@ -14,7 +14,7 @@ on_change_strategy = "kill_then_restart"
 
 [jobs.release-long]
 env.RUSTFLAGS = "-D warnings"
-command = ["cargo", "run", "--release", "--locked"]
+command = ["cargo", "+nightly", "run", "--release", "--locked"]
 need_stdout = true
 allow_warnings = false
 background = false
