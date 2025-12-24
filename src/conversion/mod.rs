@@ -307,26 +307,38 @@ fn wait_shift_released(timeout_ms: u64) -> bool {
     false
 }
 
-/// RAII helper that restores clipboard Unicode text on drop.
+/// RAII helper that restores clipboard Unicode text on drop, but only if it was changed.
 ///
-/// The conversion pipeline uses the clipboard for reading the current selection.
-/// This guard preserves the previous clipboard text and restores it even on early
-/// returns or errors.
+/// The selection conversion pipeline uses clipboard for reading selection.
+/// This guard minimizes side effects by restoring only when the clipboard sequence number changed.
 struct ClipboardRestore {
+    before_seq: u32,
     old: Option<String>,
 }
 
 impl ClipboardRestore {
-    /// Captures current clipboard Unicode text.
+    /// Captures current clipboard Unicode text and its sequence number.
     fn capture() -> Self {
+        let before_seq = unsafe { GetClipboardSequenceNumber() };
         Self {
+            before_seq,
             old: clip::get_unicode_text(),
         }
+    }
+
+    /// Returns the captured clipboard sequence number.
+    fn before_seq(&self) -> u32 {
+        self.before_seq
     }
 }
 
 impl Drop for ClipboardRestore {
     fn drop(&mut self) {
+        let after_seq = unsafe { GetClipboardSequenceNumber() };
+        if after_seq == self.before_seq {
+            return;
+        }
+
         if let Some(old_text) = self.old.as_deref() {
             let _ = clip::set_unicode_text(old_text);
         }
@@ -338,8 +350,8 @@ impl Drop for ClipboardRestore {
 /// Returns `None` when selection is empty, multiline, too long, or clipboard did not change.
 /// `max_chars` is counted in Unicode scalar values.
 fn copy_selection_text_with_clipboard_restore(max_chars: usize) -> Option<String> {
-    let _restore = ClipboardRestore::capture();
-    let before_seq = unsafe { GetClipboardSequenceNumber() };
+    let restore = ClipboardRestore::capture();
+    let before_seq = restore.before_seq();
 
     send_ctrl_combo(VK_C_KEY)
         .then(|| clip::wait_change(before_seq, 10, 20))
