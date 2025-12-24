@@ -201,45 +201,68 @@ pub fn convert_selection(state: &mut AppState) {
     }
 }
 
-/// Switches the keyboard layout for the current foreground window to the next installed layout.
-///
-/// How it works:
-/// - identifies the foreground window and its thread id
-/// - reads the current keyboard layout for that thread
-/// - enumerates all installed layouts
-/// - picks the next one cyclically
-/// - posts `WM_INPUTLANGCHANGEREQUEST` to the target window
-///
-/// Returns `Ok(())` if the operation is completed or skipped (no window or no layouts),
-/// or an error if posting the message fails.
-pub fn switch_keyboard_layout() -> windows::core::Result<()> {
+/// Returns the current foreground window, or `None` if it is null.
+fn foreground_window() -> Option<HWND> {
+    let fg = unsafe { GetForegroundWindow() };
+    (!fg.0.is_null()).then_some(fg)
+}
+
+/// Returns the current keyboard layout for the thread owning `fg`.
+fn current_layout_for_window(fg: HWND) -> HKL {
     unsafe {
-        let fg = GetForegroundWindow();
-        if fg.0.is_null() {
-            return Ok(());
-        }
-
         let tid = GetWindowThreadProcessId(fg, None);
-        let cur = GetKeyboardLayout(tid);
+        GetKeyboardLayout(tid)
+    }
+}
 
+/// Enumerates installed keyboard layouts for the current desktop.
+///
+/// Returns an empty vector when enumeration fails or yields no results.
+fn installed_layouts() -> Vec<HKL> {
+    unsafe {
         let n = GetKeyboardLayoutList(None);
         if n <= 0 {
-            return Ok(());
+            return Vec::new();
         }
 
         let mut layouts = vec![HKL(null_mut()); n as usize];
-
         let n2 = GetKeyboardLayoutList(Some(layouts.as_mut_slice()));
         if n2 <= 0 {
-            return Ok(());
+            return Vec::new();
         }
+
         layouts.truncate(n2 as usize);
-
-        let next = next_layout(&layouts, cur);
-        post_layout_change(fg, next)?;
-
-        Ok(())
+        layouts
     }
+}
+
+/// Switches the keyboard layout for the current foreground window to the next installed layout.
+///
+/// Algorithm:
+/// - obtains the foreground window
+/// - reads the current layout for that window thread
+/// - enumerates installed layouts
+/// - selects the next one cyclically
+/// - posts `WM_INPUTLANGCHANGEREQUEST` to the window
+///
+/// Returns `Ok(())` when the operation is completed or skipped:
+/// - no foreground window
+/// - no layouts available
+///
+/// Returns `Err` only if posting the request fails.
+pub fn switch_keyboard_layout() -> windows::core::Result<()> {
+    let Some(fg) = foreground_window() else {
+        return Ok(());
+    };
+
+    let cur = current_layout_for_window(fg);
+    let layouts = installed_layouts();
+    if layouts.is_empty() {
+        return Ok(());
+    }
+
+    let next = next_layout(&layouts, cur);
+    post_layout_change(fg, next)
 }
 
 /// Returns the next layout in `layouts` after `cur`, cycling back to the first.
