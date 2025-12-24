@@ -154,25 +154,21 @@ fn convert_selection_from_text(
 
 /// Attempts to reselect the last inserted text using bounded retries.
 ///
-/// Rationale:
-/// Some target applications update caret position and selection state asynchronously
-/// relative to `SendInput`. A single fixed delay is either too long for fast apps or
-/// too short for slow ones. Retrying for a short budget reduces median latency while
-/// keeping behavior stable under load.
+/// Some target applications apply caret and selection updates asynchronously relative to `SendInput`.
+/// This helper retries for a short time budget to reduce flakiness without adding a long fixed delay.
 ///
 /// Returns `true` if reselect succeeds within `budget`, otherwise `false`.
 fn reselect_with_retry(units: usize, budget: Duration, step_sleep: Duration) -> bool {
     let deadline = std::time::Instant::now() + budget;
 
-    loop {
-        if reselect_last_inserted_text_utf16_units(units) {
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        thread::sleep(step_sleep);
-    }
+    std::iter::repeat_with(|| reselect_last_inserted_text_utf16_units(units))
+        .take_while(|_| std::time::Instant::now() < deadline)
+        .inspect(|ok| {
+            if !ok {
+                thread::sleep(step_sleep);
+            }
+        })
+        .any(|ok| ok)
 }
 
 /// Converts the current selection, if it exists.
@@ -290,18 +286,13 @@ fn post_layout_change(fg: HWND, hkl: HKL) -> windows::core::Result<()> {
     }
     Ok(())
 }
-
 /// Waits until both left and right Shift keys are released or the timeout elapses.
 ///
 /// Returns `true` as soon as neither Shift key is currently pressed.
 fn wait_shift_released(timeout_ms: u64) -> bool {
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
 
-    std::iter::from_fn(|| {
-        let now = std::time::Instant::now();
-        (now < deadline).then_some(())
-    })
-    .any(|_| {
+    while std::time::Instant::now() < deadline {
         let l = unsafe { GetAsyncKeyState(VK_LSHIFT.0 as i32) } as u16;
         let r = unsafe { GetAsyncKeyState(VK_RSHIFT.0 as i32) } as u16;
 
@@ -311,8 +302,9 @@ fn wait_shift_released(timeout_ms: u64) -> bool {
         }
 
         thread::sleep(Duration::from_millis(1));
-        false
-    })
+    }
+
+    false
 }
 
 /// RAII helper that restores clipboard Unicode text on drop.
