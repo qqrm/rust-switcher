@@ -426,58 +426,60 @@ struct LastWordPayload {
     suffix_has_newline: bool,
 }
 
-fn take_last_word_payload() -> Option<LastWordPayload> {
+fn normalize_last_word_payload(mut word: String, mut suffix: String) -> Option<LastWordPayload> {
     fn is_convertible_trailing_punct(ch: char) -> bool {
         matches!(ch, '?' | '/' | ',' | '.')
     }
 
-    crate::input_journal::take_last_word_with_suffix().and_then(|(mut word, mut suffix)| {
-        if word.is_empty() {
-            return None;
+    if word.is_empty() {
+        return None;
+    }
+
+    let suffix_has_newline = suffix.contains('\n') || suffix.contains('\r');
+
+    let (first, rest) = match suffix.chars().next() {
+        Some(ch) if is_convertible_trailing_punct(ch) => {
+            let ch_len = ch.len_utf8();
+            (Some(ch), &suffix[ch_len..])
         }
+        _ => (None, ""),
+    };
 
-        let (first, rest) = match suffix.chars().next() {
-            Some(ch) if is_convertible_trailing_punct(ch) => {
-                let ch_len = ch.len_utf8();
-                (Some(ch), &suffix[ch_len..])
-            }
-            _ => (None, ""),
-        };
+    if let Some(ch) = first
+        && !suffix_has_newline
+        && rest.chars().all(|c| c == ' ' || c == '\t')
+    {
+        word.push(ch);
+        suffix = rest.to_string();
+    }
 
-        if let Some(ch) = first
-            && !suffix.contains('\n')
-            && !suffix.contains('\r')
-            && rest.chars().all(|c| c == ' ' || c == '\t')
-        {
-            word.push(ch);
-            suffix = rest.to_string();
-        }
+    let word_len = word.chars().count();
+    let suffix_len = suffix.chars().count();
+    let suffix_spaces_only = !suffix.is_empty() && suffix.chars().all(|c| c == ' ' || c == '\t');
 
-        let word_len = word.chars().count();
-        let suffix_len = suffix.chars().count();
-        let suffix_has_newline = suffix.contains('\n') || suffix.contains('\r');
-        let suffix_spaces_only =
-            !suffix.is_empty() && suffix.chars().all(|c| c == ' ' || c == '\t');
+    tracing::trace!(
+        %word,
+        %suffix,
+        word_len,
+        suffix_len,
+        suffix_spaces_only,
+        suffix_has_newline,
+        "journal extracted"
+    );
 
-        tracing::trace!(
-            %word,
-            %suffix,
-            word_len,
-            suffix_len,
-            suffix_spaces_only,
-            suffix_has_newline,
-            "journal extracted"
-        );
-
-        Some(LastWordPayload {
-            word,
-            suffix,
-            word_len,
-            suffix_len,
-            suffix_spaces_only,
-            suffix_has_newline,
-        })
+    Some(LastWordPayload {
+        word,
+        suffix,
+        word_len,
+        suffix_len,
+        suffix_spaces_only,
+        suffix_has_newline,
     })
+}
+
+fn take_last_word_payload() -> Option<LastWordPayload> {
+    crate::input_journal::take_last_word_with_suffix()
+        .and_then(|(word, suffix)| normalize_last_word_payload(word, suffix))
 }
 
 fn apply_last_word_conversion(seq: &mut KeySequence, p: &LastWordPayload, converted: &str) -> bool {
@@ -612,5 +614,22 @@ mod tests {
 
         let decision = should_autoconvert_word(&detector, word, &converted);
         assert!(decision.is_err(), "must skip nonword tokens");
+    }
+
+    #[test]
+    fn normalize_moves_convertible_punct_into_word_when_suffix_is_whitespace() {
+        let p = normalize_last_word_payload("ghbdtn".to_string(), "? ".to_string()).unwrap();
+        assert_eq!(p.word, "ghbdtn?");
+        assert_eq!(p.suffix, " ");
+        assert!(p.suffix_spaces_only);
+        assert!(!p.suffix_has_newline);
+    }
+
+    #[test]
+    fn normalize_does_not_move_punct_when_suffix_has_newline() {
+        let p = normalize_last_word_payload("ghbdtn".to_string(), "?\n".to_string()).unwrap();
+        assert_eq!(p.word, "ghbdtn");
+        assert_eq!(p.suffix, "?\n");
+        assert!(p.suffix_has_newline);
     }
 }
