@@ -303,7 +303,7 @@ fn looks_like_ascii_word(s: &str) -> bool {
         return false;
     }
 
-    let is_ascii_letter = |b: u8| b.is_ascii_uppercase() || (b'a'..=b'z').contains(&b);
+    let is_ascii_letter = |b: u8| b.is_ascii_uppercase() || b.is_ascii_lowercase();
 
     let mut has_letter = false;
 
