@@ -495,10 +495,10 @@ fn hotkey_action_from_wparam(wparam: WPARAM) -> Option<HotkeyAction> {
 }
 
 fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
-    let id = hotkey_id_from_wparam(wparam);
+    let _id = hotkey_id_from_wparam(wparam);
 
     #[cfg(debug_assertions)]
-    crate::helpers::debug_log(&format!("WM_HOTKEY id={}", id));
+    crate::helpers::debug_log(&format!("WM_HOTKEY id={}", _id));
 
     let Some(action) = hotkey_action_from_wparam(wparam) else {
         return LRESULT(0);
