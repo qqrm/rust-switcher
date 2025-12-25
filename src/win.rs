@@ -19,9 +19,12 @@ use windows::{
         Graphics::Gdi::{DeleteObject, HFONT, HGDIOBJ},
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
-            DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, PostQuitMessage, SW_SHOW,
-            SetWindowLongPtrW, ShowWindow, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-            WM_CTLCOLORSTATIC, WM_DESTROY, WM_HOTKEY, WM_TIMER, WS_MAXIMIZEBOX,
+            DefWindowProcW, GetWindowLongPtrW, PostQuitMessage, SetWindowLongPtrW, ShowWindow,
+            SW_SHOW, GWLP_USERDATA,
+            WM_COMMAND, WM_CREATE, 
+            WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+            WM_CTLCOLORSTATIC, WM_DESTROY, 
+            WM_HOTKEY, WM_TIMER, WS_MAXIMIZEBOX,
             WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
         },
     },
@@ -36,6 +39,7 @@ use self::{
     },
 };
 use crate::{
+    tray::WM_APP_TRAY,
     app::AppState,
     config, helpers,
     hotkeys::{HotkeyAction, action_from_id, register_from_config},
@@ -282,6 +286,7 @@ pub fn run() -> Result<()> {
 /// procedure.
 pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     const WM_NCDESTROY: u32 = 0x0082;
+
     match msg {
         WM_CREATE => on_create(hwnd),
         WM_COMMAND => commands::on_command(hwnd, wparam, lparam),
@@ -308,7 +313,19 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
 
             LRESULT(0)
         }
-
+        WM_APP_TRAY => {
+            let lparam_val = lparam.0 as u32;
+            
+            match lparam_val {
+                0x1007b => {
+                    println!("WM_CONTEXTMENU - SHOWING MENU");
+                    let _ = crate::tray::show_tray_context_menu(hwnd);
+                }
+                _ => return LRESULT(0),
+            }
+            
+            return LRESULT(0)
+        }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }

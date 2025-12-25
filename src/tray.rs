@@ -3,20 +3,73 @@ use windows::{
         Foundation::{HINSTANCE, HWND},
         UI::{
             Shell::{
-                NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_ERROR, NIM_ADD, NIM_DELETE,
-                NIM_MODIFY, NIM_SETVERSION, NOTIFYICON_VERSION_4, NOTIFYICONDATAW,
+                NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_ERROR, NIM_ADD, NIM_DELETE, NIF_SHOWTIP, NIM_MODIFY, NIM_SETVERSION, NOTIFYICON_VERSION_4, 
+                NOTIFYICONDATAW,
                 Shell_NotifyIconW,
             },
             WindowsAndMessaging::{
-                GWLP_HINSTANCE, GetWindowLongPtrW, IMAGE_ICON, LR_SHARED, LoadImageW, WM_APP,
+                GWLP_HINSTANCE, IMAGE_ICON, LR_SHARED, WM_APP, MF_SEPARATOR, MF_STRING, TPM_BOTTOMALIGN, TPM_NOANIMATION, TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON,
+                SetForegroundWindow, TrackPopupMenu, CreatePopupMenu, DestroyMenu, InsertMenuW, GetCursorPos, GetWindowLongPtrW, LoadImageW
             },
         },
     },
     core::PCWSTR,
 };
 
-pub const WM_APP_TRAY: u32 = WM_APP + 2;
+pub const WM_APP_TRAY: u32 = WM_APP + 3;
 const TRAY_UID: u32 = 1;
+const ID_EXIT: u32 = 1001;
+
+pub fn show_tray_context_menu(hwnd: HWND) -> windows::core::Result<()> {
+    unsafe {
+        // Create popup menu
+        let hmenu = CreatePopupMenu()?;
+        
+        // Add "Exit" item
+        let exit_text = "Exit\0".encode_utf16().collect::<Vec<u16>>();
+        InsertMenuW(
+            hmenu,
+            0,
+            MF_STRING,
+            ID_EXIT as usize,
+            PCWSTR(exit_text.as_ptr()),
+        )?;
+        
+        // Add separator
+        InsertMenuW(hmenu, 1, MF_SEPARATOR, 0, PCWSTR::null())?;
+        
+        // Get cursor position
+        let mut pt = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+        GetCursorPos(&mut pt)?;
+        
+        // Show menu at cursor position
+        let _fg = SetForegroundWindow(hwnd);
+        let cmd = TrackPopupMenu(
+            hmenu,
+            TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_RIGHTALIGN | TPM_NOANIMATION | TPM_RIGHTBUTTON,
+            pt.x,
+            pt.y,
+            Some(0),
+            hwnd,
+            None,
+        );
+        
+        let _destroy = DestroyMenu(hmenu);
+        
+        // Handle selection
+        if cmd.0 as u32 == ID_EXIT {
+            // Send WM_CLOSE to exit
+            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                Some(hwnd),
+                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                windows::Win32::Foundation::WPARAM(0),
+                windows::Win32::Foundation::LPARAM(0),
+            )?;
+        }
+        
+        Ok(())
+    }
+}
 
 fn fill_wide(dst: &mut [u16], s: &str) {
     if let Some((last, body)) = dst.split_last_mut() {
@@ -56,7 +109,7 @@ pub fn ensure_icon(hwnd: HWND) -> windows::core::Result<()> {
         };
 
         nid.uCallbackMessage = WM_APP_TRAY;
-        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
 
         nid.hIcon = default_icon(hwnd)?;
         fill_wide(&mut nid.szTip, "RustSwitcher");
@@ -72,7 +125,7 @@ pub fn ensure_icon(hwnd: HWND) -> windows::core::Result<()> {
         }
 
         // Версия поведения
-        nid.uFlags = windows::Win32::UI::Shell::NOTIFY_ICON_DATA_FLAGS(0);
+        //nid.uFlags = windows::Win32::UI::Shell::NOTIFY_ICON_DATA_FLAGS(0);
         nid.Anonymous.uVersion = NOTIFYICON_VERSION_4;
 
         if !Shell_NotifyIconW(NIM_SETVERSION, &nid).as_bool() {
