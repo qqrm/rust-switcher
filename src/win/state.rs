@@ -5,6 +5,14 @@ use windows::Win32::{
 
 use crate::app::AppState;
 
+#[cfg(test)]
+pub(crate) fn with_state_mut<R>(_hwnd: HWND, f: impl FnOnce(&mut AppState) -> R) -> Option<R> {
+    // Create a dummy state just for the test
+    let mut dummy_state = AppState::default();
+    Some(f(&mut dummy_state))
+}
+
+#[cfg(not(test))]
 pub(crate) fn with_state_mut<R>(hwnd: HWND, f: impl FnOnce(&mut AppState) -> R) -> Option<R> {
     unsafe {
         let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;

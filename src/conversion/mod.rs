@@ -84,7 +84,9 @@ pub fn convert_selection_if_any(state: &mut AppState) -> bool {
     }
 }
 
+
 pub fn convert_selection(state: &mut AppState) {
+    tracing::trace!("convert_selection called");
     let fg = unsafe { GetForegroundWindow() };
     if fg.0.is_null() {
         tracing::warn!("foreground window is null");

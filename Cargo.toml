@@ -49,3 +49,6 @@ embed-resource = "3.0"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[dev-dependencies]
+tracing-test = "0.2.5"

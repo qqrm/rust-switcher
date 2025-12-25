@@ -280,7 +280,6 @@ pub fn run() -> Result<()> {
 /// procedure.
 pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     const WM_NCDESTROY: u32 = 0x0082;
-
     match msg {
         WM_CREATE => on_create(hwnd),
         WM_COMMAND => commands::on_command(hwnd, wparam, lparam),
@@ -443,7 +442,7 @@ unsafe fn on_ncdestroy(hwnd: HWND) -> LRESULT {
     LRESULT(0)
 }
 
-fn hotkey_id_from_wparam(wparam: WPARAM) -> i32 {
+pub fn hotkey_id_from_wparam(wparam: WPARAM) -> i32 {
     wparam.0 as i32
 }
 
@@ -490,7 +489,6 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
     let Some(action) = action_from_id(id) else {
         return LRESULT(0);
     };
-
     with_state_mut(hwnd, |state| match action {
         HotkeyAction::PauseToggle => handle_pause_toggle(hwnd, state),
         HotkeyAction::ConvertLastWord => handle_convert_smart(state),
