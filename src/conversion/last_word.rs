@@ -35,6 +35,7 @@ pub fn autoconvert_last_word(state: &mut AppState) {
 
     let restore_journal = || {
         update_journal(&payload, &payload.word);
+
         tracing::trace!("autoconvert: journal restored");
     };
 
@@ -76,6 +77,14 @@ pub fn autoconvert_last_word(state: &mut AppState) {
     let orig_lang = detector.detect_language_of(&payload.word);
     let conv_lang = detector.detect_language_of(&converted);
 
+    let is_ascii_word = payload.word.chars().all(|c| c.is_ascii_alphabetic());
+
+    // Никогда не автоконвертим нормальные английские ASCII слова в кириллицу.
+    if is_ascii_word && orig_lang == Some(Language::English) {
+        restore_journal();
+        return;
+    }
+
     tracing::trace!(
         word = %payload.word,
         converted = %converted,
@@ -84,18 +93,20 @@ pub fn autoconvert_last_word(state: &mut AppState) {
         "autoconvert decision"
     );
 
-    // Конвертируем только если исходник "не язык", а конверсия стала русским или английским.
-    if orig_lang.is_some() {
-        restore_journal();
-        return;
-    }
-
-    let Some(lang) = conv_lang else {
+    // Конвертируем, если после конверсии язык стал другим и это именно English или Russian.
+    let Some(conv_lang) = conv_lang else {
         restore_journal();
         return;
     };
 
-    if lang != Language::English && lang != Language::Russian {
+    if conv_lang != Language::English && conv_lang != Language::Russian {
+        restore_journal();
+        return;
+    }
+
+    if let Some(orig_lang) = orig_lang
+        && orig_lang == conv_lang
+    {
         restore_journal();
         return;
     }
@@ -108,6 +119,7 @@ pub fn autoconvert_last_word(state: &mut AppState) {
     }
 
     update_journal(&payload, &converted);
+    crate::input_journal::mark_last_token_autoconverted();
 
     match switch_keyboard_layout() {
         Ok(()) => tracing::trace!("layout switched (autoconvert)"),

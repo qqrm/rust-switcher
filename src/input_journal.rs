@@ -24,6 +24,7 @@ fn journal() -> &'static Mutex<InputJournal> {
 struct InputJournal {
     cap: usize,
     buf: VecDeque<char>,
+    last_token_autoconverted: bool,
 }
 
 impl InputJournal {
@@ -31,6 +32,7 @@ impl InputJournal {
         Self {
             cap,
             buf: VecDeque::with_capacity(cap),
+            last_token_autoconverted: false,
         }
     }
 
@@ -50,6 +52,20 @@ impl InputJournal {
     fn backspace(&mut self) {
         let _ = self.buf.pop_back();
     }
+}
+
+pub fn mark_last_token_autoconverted() {
+    if let Ok(mut j) = journal().lock() {
+        j.last_token_autoconverted = true;
+    }
+}
+
+pub fn last_token_autoconverted() -> bool {
+    journal()
+        .lock()
+        .ok()
+        .map(|j| j.last_token_autoconverted)
+        .unwrap_or(false)
 }
 
 fn mods_ctrl_or_alt_down() -> bool {
@@ -157,6 +173,12 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
     }
 
     let s = decode_typed_text(kb, vk)?;
+
+    if s.chars().any(|c| c.is_alphanumeric())
+        && let Ok(mut j) = journal().lock()
+    {
+        j.last_token_autoconverted = false;
+    }
 
     if let Ok(mut j) = journal().lock() {
         j.push_str(&s);

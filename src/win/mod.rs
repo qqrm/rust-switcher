@@ -295,13 +295,19 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
         }
         WM_NCDESTROY => unsafe { on_ncdestroy(hwnd) },
         crate::ui::error_notifier::WM_APP_AUTOCONVERT => {
+            if crate::input_journal::last_token_autoconverted() {
+                return LRESULT(0);
+            }
+
             with_state_mut_do(hwnd, |state| {
                 if !state.paused {
                     crate::conversion::last_word::autoconvert_last_word(state);
                 }
             });
+
             LRESULT(0)
         }
+
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }
