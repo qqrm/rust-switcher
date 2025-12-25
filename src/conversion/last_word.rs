@@ -139,9 +139,9 @@ pub(crate) enum SkipReason {
     NoChangeAfterConvert,
     TooShort,
     ScriptCheckFailed,
+    AlreadyCorrect,
     ConvertedConfidenceLow,
     NotBetterEnough,
-    AlreadyCorrect,
 }
 
 impl SkipReason {
@@ -153,11 +153,93 @@ impl SkipReason {
             SkipReason::NoChangeAfterConvert => "no_change_after_convert",
             SkipReason::TooShort => "too_short",
             SkipReason::ScriptCheckFailed => "script_check_failed",
+            SkipReason::AlreadyCorrect => "already_correct",
             SkipReason::ConvertedConfidenceLow => "converted_confidence_low",
             SkipReason::NotBetterEnough => "not_better_enough",
-            SkipReason::AlreadyCorrect => "already_correct",
         }
     }
+}
+
+fn has_ascii_vowel(s: &str) -> bool {
+    s.chars().any(|ch| {
+        let c = ch.to_ascii_lowercase();
+        matches!(c, 'a' | 'e' | 'i' | 'o' | 'u')
+    })
+}
+
+fn has_cyrillic_vowel(s: &str) -> bool {
+    s.chars().any(|ch| {
+        let c = ch.to_lowercase().next().unwrap_or(ch);
+        matches!(c, 'а' | 'е' | 'ё' | 'и' | 'о' | 'у' | 'ы' | 'э' | 'ю' | 'я')
+    })
+}
+
+fn is_plausible_english_like_token(s: &str) -> bool {
+    if !looks_like_ascii_word(s) {
+        return false;
+    }
+
+    let has_vowel = has_ascii_vowel(s);
+
+    // 'y' intentionally treated as consonant here to reduce false positives.
+    let mut consonant_run = 0usize;
+    let mut max_consonant_run = 0usize;
+    let mut rare = 0usize;
+
+    for ch in s.chars() {
+        if ch == '\'' {
+            continue;
+        }
+
+        let c = ch.to_ascii_lowercase();
+        let is_vowel = matches!(c, 'a' | 'e' | 'i' | 'o' | 'u');
+
+        if is_vowel {
+            consonant_run = 0;
+        } else {
+            consonant_run += 1;
+            max_consonant_run = max_consonant_run.max(consonant_run);
+
+            if matches!(c, 'j' | 'q' | 'x' | 'z') {
+                rare += 1;
+            }
+        }
+    }
+
+    has_vowel && max_consonant_run <= 4 && rare <= 1
+}
+
+fn is_plausible_russian_like_token(s: &str) -> bool {
+    if !looks_like_cyrillic_word(s) {
+        return false;
+    }
+    if !has_cyrillic_vowel(s) {
+        return false;
+    }
+
+    let mut consonant_run = 0usize;
+    let mut max_consonant_run = 0usize;
+
+    for ch in s.chars() {
+        if ch == '\'' || ch == '-' {
+            continue;
+        }
+        if !ch.is_alphabetic() {
+            continue;
+        }
+
+        let c = ch.to_lowercase().next().unwrap_or(ch);
+        let is_vowel = matches!(c, 'а' | 'е' | 'ё' | 'и' | 'о' | 'у' | 'ы' | 'э' | 'ю' | 'я');
+
+        if is_vowel {
+            consonant_run = 0;
+        } else {
+            consonant_run += 1;
+            max_consonant_run = max_consonant_run.max(consonant_run);
+        }
+    }
+
+    max_consonant_run <= 4
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -209,44 +291,6 @@ fn looks_like_ascii_word(s: &str) -> bool {
     has_alpha
 }
 
-fn is_probably_correct_english_word(detector: &lingua::LanguageDetector, word: &str) -> bool {
-    use lingua::Language;
-
-    if !looks_like_ascii_word(word) {
-        return false;
-    }
-    if !has_ascii_vowel(word) {
-        return false;
-    }
-    confidence(detector, word, Language::English) >= MIN_CONVERTED_CONFIDENCE
-}
-
-fn is_probably_correct_russian_word(detector: &lingua::LanguageDetector, word: &str) -> bool {
-    use lingua::Language;
-
-    if !looks_like_cyrillic_word(word) {
-        return false;
-    }
-    if !has_cyrillic_vowel(word) {
-        return false;
-    }
-    confidence(detector, word, Language::Russian) >= MIN_CONVERTED_CONFIDENCE
-}
-
-fn has_ascii_vowel(s: &str) -> bool {
-    s.chars()
-        .any(|ch| matches!(ch.to_ascii_lowercase(), 'a' | 'e' | 'i' | 'o' | 'u' | 'y'))
-}
-
-fn has_cyrillic_vowel(s: &str) -> bool {
-    s.chars().any(|ch| {
-        matches!(
-            ch.to_lowercase().next().unwrap_or(ch),
-            'а' | 'е' | 'ё' | 'и' | 'о' | 'у' | 'ы' | 'э' | 'ю' | 'я'
-        )
-    })
-}
-
 pub(crate) fn should_autoconvert_word(
     detector: &lingua::LanguageDetector,
     word: &str,
@@ -258,17 +302,13 @@ pub(crate) fn should_autoconvert_word(
         return Err(SkipReason::TooShort);
     }
 
-    let w_ok = looks_like_ascii_word(word) || looks_like_cyrillic_word(word);
-    let c_ok = looks_like_ascii_word(converted) || looks_like_cyrillic_word(converted);
-    if !w_ok || !c_ok {
-        return Err(SkipReason::ScriptCheckFailed);
-    }
+    let w_is_ascii = looks_like_ascii_word(word);
+    let w_is_cyr = looks_like_cyrillic_word(word);
+    let c_is_ascii = looks_like_ascii_word(converted);
+    let c_is_cyr = looks_like_cyrillic_word(converted);
 
-    if is_probably_correct_english_word(detector, word) {
-        return Err(SkipReason::AlreadyCorrect);
-    }
-    if is_probably_correct_russian_word(detector, word) {
-        return Err(SkipReason::AlreadyCorrect);
+    if !(w_is_ascii || w_is_cyr) || !(c_is_ascii || c_is_cyr) {
+        return Err(SkipReason::ScriptCheckFailed);
     }
 
     let w_ru = confidence(detector, word, Language::Russian);
@@ -276,21 +316,35 @@ pub(crate) fn should_autoconvert_word(
     let c_ru = confidence(detector, converted, Language::Russian);
     let c_en = confidence(detector, converted, Language::English);
 
-    let (c_best, w_in_target, w_other) = if c_ru >= c_en {
-        (c_ru, w_ru, w_en)
+    // 1) Ранний стоп: слово выглядит корректным для своей письменности.
+    // Это сознательная эвристика против автоконверта английских слов и опечаток вроде "hellp".
+    if w_is_ascii && is_plausible_english_like_token(word) {
+        return Err(SkipReason::AlreadyCorrect);
+    }
+    if w_is_cyr && is_plausible_russian_like_token(word) {
+        return Err(SkipReason::AlreadyCorrect);
+    }
+
+    // 2) Цель конверта определяется по converted
+    let (c_in_target, w_in_target) = if c_ru >= c_en {
+        (c_ru, w_ru)
     } else {
-        (c_en, w_en, w_ru)
+        (c_en, w_en)
     };
 
-    if c_best < MIN_CONVERTED_CONFIDENCE {
+    // 3) Минимальная абсолютная уверенность в target после конверта
+    let w_best = w_ru.max(w_en);
+    let min_abs = if w_best < 0.30 {
+        0.55
+    } else {
+        MIN_CONVERTED_CONFIDENCE
+    };
+    if c_in_target < min_abs {
         return Err(SkipReason::ConvertedConfidenceLow);
     }
 
-    if c_best - w_in_target < MIN_CONFIDENCE_GAIN {
-        return Err(SkipReason::NotBetterEnough);
-    }
-
-    if w_in_target >= w_other {
+    // 4) Нужен заметный прирост уверенности в target
+    if c_in_target - w_in_target < MIN_CONFIDENCE_GAIN {
         return Err(SkipReason::NotBetterEnough);
     }
 
@@ -502,11 +556,21 @@ fn apply_last_word_conversion(seq: &mut KeySequence, p: &LastWordPayload, conver
     }
 }
 
+fn journal_push_plan<'a>(p: &'a LastWordPayload, converted: &'a str) -> [&'a str; 2] {
+    // [0] всегда пишем converted
+    // [1] пишем suffix или пустую строку, чтобы не аллоцировать Vec
+    [converted, p.suffix.as_str()]
+}
+
+/// Updates the input journal to match what was inserted.
 fn update_journal(p: &LastWordPayload, converted: &str) {
-    crate::input_journal::push_text(converted);
-    if !p.suffix.is_empty() {
-        crate::input_journal::push_text(&p.suffix);
+    let [head, tail] = journal_push_plan(p, converted);
+
+    crate::input_journal::push_text(head);
+    if !tail.is_empty() {
+        crate::input_journal::push_text(tail);
     }
+
     tracing::trace!("journal updated");
 }
 
@@ -567,11 +631,15 @@ mod tests {
         let converted = convert_ru_en_bidirectional(word);
         assert_eq!(converted, "привет");
 
-        let decision = should_autoconvert_word(&detector, word, &converted);
-        assert!(
-            decision.is_ok(),
-            "should autoconvert mistyped Russian layout word"
-        );
+        match should_autoconvert_word(&detector, word, &converted) {
+            Ok(()) => {}
+            Err(reason) => {
+                panic!(
+                    "should autoconvert mistyped Russian layout word, got Err({:?})",
+                    reason
+                );
+            }
+        }
     }
 
     #[test]
@@ -631,5 +699,49 @@ mod tests {
         assert_eq!(p.word, "ghbdtn");
         assert_eq!(p.suffix, "?\n");
         assert!(p.suffix_has_newline);
+    }
+
+    #[test]
+    fn normalize_does_not_move_punct_when_suffix_has_nonspace_tail() {
+        let p = normalize_last_word_payload("ghbdtn".to_string(), "?x".to_string()).unwrap();
+        assert_eq!(p.word, "ghbdtn");
+        assert_eq!(p.suffix, "?x");
+    }
+
+    #[test]
+    fn autoconvert_skips_english_typo_like_hellp() {
+        let detector = detector_ru_en();
+
+        let word = "hellp";
+        let converted = convert_ru_en_bidirectional(word);
+        assert_ne!(converted, word);
+
+        let decision = should_autoconvert_word(&detector, word, &converted);
+        assert!(decision.is_err(), "must skip english-looking token: {word}");
+    }
+
+    #[test]
+    fn autoconvert_converts_token_from_reported_sequence_hjyxnmyuj() {
+        let detector = detector_ru_en();
+
+        let word = "hjyxnmyuj";
+        let converted = convert_ru_en_bidirectional(word);
+        assert_eq!(converted, "рончтьнго");
+
+        match should_autoconvert_word(&detector, word, &converted) {
+            Ok(()) => {}
+            Err(reason) => {
+                panic!(
+                    "must autoconvert token from reported sequence: {} -> {}, got Err({:?})",
+                    word, converted, reason
+                );
+            }
+        }
+    }
+    #[test]
+    fn normalize_does_not_move_nonconvertible_punct() {
+        let p = normalize_last_word_payload("ghbdtn".to_string(), "! ".to_string()).unwrap();
+        assert_eq!(p.word, "ghbdtn");
+        assert_eq!(p.suffix, "! ");
     }
 }
