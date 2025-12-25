@@ -98,4 +98,3 @@ fn wndproc_hotkey_convert_last_word_does_not_panic() {
     let r = call_hotkey(HK_CONVERT_LAST_WORD_ID);
     assert_eq!(r, LRESULT(0));
 }
-cq
