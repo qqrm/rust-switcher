@@ -19,12 +19,29 @@ use windows::{
 pub const WM_APP_TRAY: u32 = WM_APP + 3;
 const TRAY_UID: u32 = 1;
 const ID_EXIT: u32 = 1001;
+const ID_SHOW_HIDE: u32 = 1002;
 
-pub fn show_tray_context_menu(hwnd: HWND) -> windows::core::Result<()> {
+pub fn show_tray_context_menu(hwnd: HWND, window_visible: bool) -> windows::core::Result<()> {
     unsafe {
-        // Create popup menu
         let hmenu = CreatePopupMenu()?;
         
+        // Add "Show/Hide" item
+        let show_hide_text = if window_visible {
+            "Hide\0"
+        } else {
+            "Show\0"
+        };
+        let show_hide_text_vec = show_hide_text.encode_utf16().collect::<Vec<u16>>();
+        InsertMenuW(
+            hmenu,
+            0,
+            MF_STRING,
+            ID_SHOW_HIDE as usize,
+            PCWSTR(show_hide_text_vec.as_ptr()),
+        )?;
+
+        InsertMenuW(hmenu, 1, MF_SEPARATOR, 0, PCWSTR::null())?;
+
         // Add "Exit" item
         let exit_text = "Exit\0".encode_utf16().collect::<Vec<u16>>();
         InsertMenuW(
@@ -57,14 +74,39 @@ pub fn show_tray_context_menu(hwnd: HWND) -> windows::core::Result<()> {
         let _destroy = DestroyMenu(hmenu);
         
         // Handle selection
-        if cmd.0 as u32 == ID_EXIT {
-            // Send WM_CLOSE to exit
-            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                Some(hwnd),
-                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-                windows::Win32::Foundation::WPARAM(0),
-                windows::Win32::Foundation::LPARAM(0),
-            )?;
+        match cmd.0 as u32 {
+            ID_SHOW_HIDE => {
+                // Toggle window visibility
+                let _current_style = windows::Win32::UI::WindowsAndMessaging::GetWindowLongW(
+                    hwnd,
+                    windows::Win32::UI::WindowsAndMessaging::GWL_STYLE,
+                );
+                
+                if window_visible {
+                    // Hide window
+                    let _show = windows::Win32::UI::WindowsAndMessaging::ShowWindow(
+                        hwnd,
+                        windows::Win32::UI::WindowsAndMessaging::SW_HIDE,
+                    );
+                } else {
+                    // Show window
+                    let _show = windows::Win32::UI::WindowsAndMessaging::ShowWindow(
+                        hwnd,
+                        windows::Win32::UI::WindowsAndMessaging::SW_SHOW,
+                    );
+                    let _fg = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
+                }
+            }
+            ID_EXIT => {
+                // Send WM_CLOSE to exit
+                windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    Some(hwnd),
+                    windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                    windows::Win32::Foundation::WPARAM(0),
+                    windows::Win32::Foundation::LPARAM(0),
+                )?;
+            }
+            _ => {}
         }
         
         Ok(())

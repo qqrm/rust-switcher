@@ -220,7 +220,6 @@ fn on_create(hwnd: HWND) -> LRESULT {
 
     #[rustfmt::skip]
     startup_or_return0!(hwnd, &mut state, "Failed to create UI controls", ui::create_controls(hwnd, &mut state));
-
     let cfg = load_config_or_default(hwnd, state.as_mut());
 
     state.hotkey_values = crate::app::HotkeyValues::from_config(&cfg);
@@ -261,7 +260,6 @@ fn on_create(hwnd: HWND) -> LRESULT {
 pub fn run() -> Result<()> {
     unsafe {
         visuals::init_visuals();
-
         let class_name = w!("RustSwitcherMainWindow");
         let hinstance = GetModuleHandleW(PCWSTR::null())?.into();
 
@@ -318,8 +316,8 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
             
             match lparam_val {
                 0x1007b => {
-                    println!("WM_CONTEXTMENU - SHOWING MENU");
-                    let _ = crate::tray::show_tray_context_menu(hwnd);
+                    let window_visible = unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() };
+                    let _ = crate::tray::show_tray_context_menu(hwnd, window_visible);
                 }
                 _ => return LRESULT(0),
             }
