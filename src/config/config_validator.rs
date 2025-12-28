@@ -1,4 +1,9 @@
-use crate::config::{Config, constants::*};
+use std::fmt::Write as _;
+
+use crate::config::{
+    Config,
+    constants::{CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT},
+};
 
 pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
     let sequences = [
@@ -17,7 +22,7 @@ pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
     let duplicates: Vec<_> = sequences
         .iter()
         .enumerate()
-        .flat_map(|(i, (name1, seq1_opt))| {
+        .filter_map(|(i, (name1, seq1_opt))| {
             seq1_opt.as_ref().map(|seq1| {
                 sequences.iter().enumerate().skip(i + 1).filter_map(
                     move |(_j, (name2, seq2_opt))| {
@@ -38,7 +43,10 @@ pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
         let mut error = String::from("Duplicate hotkey sequences found:\n\n");
 
         for (name1, name2) in &duplicates {
-            error.push_str(&format!("• '{}' and '{}'\n", name1, name2));
+            debug_assert!(
+                writeln!(error, "• '{name1}' and '{name2}'").is_ok(),
+                "writing to String must not fail"
+            );
         }
 
         error.push_str("\nEach action must have a unique hotkey sequence.");

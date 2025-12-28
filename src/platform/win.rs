@@ -5,6 +5,7 @@
 //! routines, the application state, and the UI construction code to
 //! present a settings window and respond to user actions.
 
+mod autostart;
 mod commands;
 pub(crate) mod hotkey_format;
 pub(crate) mod keyboard;
@@ -140,6 +141,16 @@ fn apply_config_runtime(
 ) -> windows::core::Result<()> {
     state.paused = cfg.paused;
 
+    // Tray icon state must follow config
+    if cfg.show_tray_icon {
+        crate::platform::win::tray::ensure_icon(hwnd)?;
+    } else {
+        crate::platform::win::tray::remove_icon(hwnd);
+    }
+
+    // Autostart shortcut is idempotent: cleans old + creates or only cleans
+    crate::platform::win::autostart::apply_startup_shortcut(cfg.start_on_startup)?;
+
     // Critical: refresh runtime hotkey matcher inputs
     state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(cfg);
 
@@ -147,13 +158,12 @@ fn apply_config_runtime(
     state.runtime_chord_capture = crate::app::RuntimeChordCapture::default();
     state.hotkey_sequence_progress = crate::app::HotkeySequenceProgress::default();
 
-    // Legacy fields (РјРѕР¶РЅРѕ Р±СѓРґРµС‚ СѓРґР°Р»РёС‚СЊ РїРѕР·Р¶Рµ, СЃРµР№С‡Р°СЃ РѕСЃС‚Р°РІР»СЏРµРј С‡С‚РѕР±С‹ РЅРµ Р»РѕРјР°С‚СЊ РєРѕРЅС‚СЂР°РєС‚)
+    // Legacy fields (можно будет удалить позже)
     state.active_switch_layout_sequence = cfg.hotkey_switch_layout_sequence;
     state.switch_layout_waiting_second = false;
     state.switch_layout_first_tick_ms = 0;
 
     // Registering system hotkeys can legitimately fail for modifier-only bindings
-    // so report but do not fail the whole apply.
     ui_try!(
         hwnd,
         state,
@@ -338,7 +348,7 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
 
 fn io_to_win(e: std::io::Error) -> windows::core::Error {
     use windows::core::{Error, HRESULT};
-    Error::new(HRESULT(0x80004005u32 as i32), e.to_string())
+    Error::new(HRESULT(0x8000_4005_u32 as i32), e.to_string())
 }
 
 /// Error returned by `build_and_save_config_from_ui`.
@@ -487,20 +497,14 @@ fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
     };
 
     let body = if state.paused {
-        format!(
-            "РЎС‚Р°С‚СѓСЃ: РґРµР°РєС‚РёРІРёСЂРѕРІР°РЅР°.\nРђРІС‚РѕРєРѕРЅРІРµСЂС‚Р°С†РёСЏ РІС‹РєР»СЋС‡РµРЅР°.\nРџРµСЂРµРєР»СЋС‡РёС‚СЊ: {}",
-            hotkey_text
-        )
+        format!("Status: paused.\nAuto convert: OFF.\nToggle: {hotkey_text}")
     } else {
-        format!(
-            "РЎС‚Р°С‚СѓСЃ: Р°РєС‚РёРІРёСЂРѕРІР°РЅР°.\nРђРІС‚РѕРєРѕРЅРІРµСЂС‚Р°С†РёСЏ РІРєР»СЋС‡РµРЅР°.\nРџРµСЂРµРєР»СЋС‡РёС‚СЊ: {}",
-            hotkey_text
-        )
+        format!("Status: active.\nAuto convert: ON.\nToggle: {hotkey_text}")
     };
 
-    if let Err(_e) = balloon_info(hwnd, "RustSwitcher", &body) {
+    if let Err(e) = balloon_info(hwnd, "RustSwitcher", &body) {
         #[cfg(debug_assertions)]
-        eprintln!("tray balloon failed: {:?}", _e);
+        eprintln!("tray balloon failed: {e:?}");
     }
 }
 
@@ -527,7 +531,7 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
     let _id = hotkey_id_from_wparam(wparam);
 
     #[cfg(debug_assertions)]
-    crate::helpers::debug_log(&format!("WM_HOTKEY id={}", _id));
+    crate::helpers::debug_log(&format!("WM_HOTKEY id={_id}"));
 
     let Some(action) = hotkey_action_from_wparam(wparam) else {
         return LRESULT(0);

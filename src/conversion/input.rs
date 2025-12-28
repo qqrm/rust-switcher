@@ -1,5 +1,6 @@
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY, VK_CONTROL,
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
+    VIRTUAL_KEY, VK_CONTROL,
 };
 
 /// Virtual key code for the Left Arrow key.
@@ -22,7 +23,7 @@ const VK_SHIFT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x10);
 /// Returns `true` if all input events were successfully sent.
 pub fn send_ctrl_combo(vk: VIRTUAL_KEY) -> bool {
     let mut seq = KeySequence::new();
-    seq.down(VK_CONTROL) && seq.tap(vk)
+    seq.down(VK_CONTROL) && KeySequence::tap(vk)
 }
 
 /// A small RAII helper that tracks pressed keys and releases them on drop.
@@ -51,7 +52,7 @@ impl KeySequence {
     /// Taps a key (down then up).
     ///
     /// Returns `true` if both events were successfully sent.
-    pub fn tap(&mut self, vk: VIRTUAL_KEY) -> bool {
+    pub fn tap(vk: VIRTUAL_KEY) -> bool {
         send_key(vk, false) && send_key(vk, true)
     }
 }
@@ -102,7 +103,11 @@ pub fn send_text_unicode(text: &str) -> bool {
         .flat_map(|u| [unicode_input(u, false), unicode_input(u, true)])
         .collect();
 
-    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) } as usize;
+    let Some(input_size) = input_struct_size_i32() else {
+        return false;
+    };
+
+    let sent = unsafe { SendInput(&inputs, input_size) } as usize;
     sent == inputs.len()
 }
 
@@ -127,9 +132,13 @@ pub fn reselect_last_inserted_text_utf16_units(units: usize) -> bool {
     let units = units.min(MAX_UNITS);
     let mut seq = KeySequence::new();
 
-    (0..units).all(|_| seq.tap(VK_LEFT_KEY))
+    (0..units).all(|_| KeySequence::tap(VK_LEFT_KEY))
         && seq.down(VK_SHIFT_KEY)
-        && (0..units).all(|_| seq.tap(VK_RIGHT_KEY))
+        && (0..units).all(|_| KeySequence::tap(VK_RIGHT_KEY))
+}
+
+fn input_struct_size_i32() -> Option<i32> {
+    i32::try_from(std::mem::size_of::<INPUT>()).ok()
 }
 
 /// Sends a single virtual key event via `SendInput`.
@@ -147,7 +156,7 @@ fn send_key(vk: VIRTUAL_KEY, key_up: bool) -> bool {
                 dwFlags: if key_up {
                     KEYEVENTF_KEYUP
                 } else {
-                    Default::default()
+                    KEYBD_EVENT_FLAGS::default()
                 },
                 time: 0,
                 dwExtraInfo: 0,
@@ -155,6 +164,10 @@ fn send_key(vk: VIRTUAL_KEY, key_up: bool) -> bool {
         },
     };
 
-    let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
-    sent != 0
+    let Some(input_size) = input_struct_size_i32() else {
+        return false;
+    };
+
+    let sent = unsafe { SendInput(&[input], input_size) };
+    usize::try_from(sent).is_ok_and(|n| n != 0)
 }

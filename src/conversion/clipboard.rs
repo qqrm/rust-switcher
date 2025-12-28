@@ -9,7 +9,7 @@ use windows::Win32::{
     },
 };
 
-/// Win32 clipboard format id for UTF 16 text (CF_UNICODETEXT).
+/// Win32 clipboard format id for UTF 16 text (`CF_UNICODETEXT`).
 const CF_UNICODETEXT_ID: u32 = 13;
 
 /// RAII guard that opens the process clipboard on creation and closes it on drop.
@@ -39,10 +39,10 @@ impl Drop for ClipboardGuard {
     }
 }
 
-/// Reads current clipboard content as UTF 16 text (CF_UNICODETEXT) and returns it as `String`.
+/// Reads current clipboard content as UTF 16 text (`CF_UNICODETEXT`) and returns it as `String`.
 ///
 /// Returns:
-/// - `Some(String)` if clipboard contains CF_UNICODETEXT and data can be locked and decoded.
+/// - `Some(String)` if clipboard contains `CF_UNICODETEXT` and data can be locked and decoded.
 /// - `None` if clipboard cannot be opened, format not available, global lock fails, or the handle is null.
 ///
 /// Safety/FFI notes:
@@ -53,7 +53,7 @@ impl Drop for ClipboardGuard {
 /// Possible improvements:
 /// - Use `GlobalUnlock` return value + `GetLastError` to detect unlock errors (rarely needed).
 /// - Reject very large payloads to avoid scanning unbounded memory if clipboard data is malformed
-///   (defensive bound, for example 1_048_576 UTF 16 units).
+///   (defensive bound, for example `1_048_576` UTF 16 units).
 pub fn get_unicode_text() -> Option<String> {
     let _clip = ClipboardGuard::open()?;
 
@@ -83,14 +83,14 @@ pub fn get_unicode_text() -> Option<String> {
     }
 }
 
-/// Replaces clipboard content with UTF 16 text (CF_UNICODETEXT).
+/// Replaces clipboard content with UTF 16 text (`CF_UNICODETEXT`).
 ///
 /// Returns `true` on success, `false` on failure.
 ///
 /// Operational details:
 /// - Opens clipboard (fails fast if clipboard is locked).
 /// - Empties clipboard.
-/// - Allocates a movable global memory block (GMEM_MOVEABLE) and copies NUL terminated UTF 16.
+/// - Allocates a movable global memory block (`GMEM_MOVEABLE`) and copies NUL terminated UTF 16.
 /// - Transfers ownership of the memory block to the clipboard via `SetClipboardData`.
 ///
 /// Safety/FFI notes:
@@ -104,9 +104,8 @@ pub fn get_unicode_text() -> Option<String> {
 /// - Add `GlobalFree` on failure paths.
 /// - Use `size_of::<u16>()` rather than hardcoded `2`.
 pub fn set_unicode_text(text: &str) -> bool {
-    let _clip = match ClipboardGuard::open() {
-        Some(g) => g,
-        None => return false,
+    let Some(_clip) = ClipboardGuard::open() else {
+        return false;
     };
 
     unsafe {
@@ -125,7 +124,7 @@ pub fn set_unicode_text(text: &str) -> bool {
             }
         };
 
-        let ptr = GlobalLock(hmem) as *mut u16;
+        let ptr = GlobalLock(hmem).cast::<u16>();
         if ptr.is_null() {
             tracing::warn!("GlobalLock returned null");
             return false;

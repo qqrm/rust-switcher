@@ -5,16 +5,28 @@ env.CARGO_TERM_COLOR = "always"
 
 [jobs.dev-long]
 env.RUST_LOG = "trace"
-command = ["cargo", "+nightly", "run", "--features", "debug-tracing"]
+env.RUSTFLAGS = "-D warnings"
+command = [
+    "powershell",
+    "-NoProfile",
+    "-File",
+    "scripts/bacon_strict.ps1",
+    "dev",
+]
 need_stdout = true
-allow_warnings = true
+allow_warnings = false
 background = false
 on_change_strategy = "kill_then_restart"
 
-
 [jobs.release-long]
 env.RUSTFLAGS = "-D warnings"
-command = ["cargo", "+nightly", "run", "--release", "--locked"]
+command = [
+    "powershell",
+    "-NoProfile",
+    "-File",
+    "scripts/bacon_strict.ps1",
+    "release",
+]
 need_stdout = true
 allow_warnings = false
 background = false
@@ -23,9 +35,30 @@ on_change_strategy = "kill_then_restart"
 [jobs.test-long]
 env.RUST_TEST_NOCAPTURE = "1"
 env.RUST_LOG = "trace"
-command = ["cargo", "test"]
+env.RUSTFLAGS = "-D warnings"
+command = [
+    "powershell",
+    "-NoProfile",
+    "-File",
+    "scripts/bacon_strict.ps1",
+    "test",
+]
 need_stdout = true
-allow_warnings = true
+allow_warnings = false
+background = false
+on_change_strategy = "kill_then_restart"
+
+[jobs.dushnota]
+env.RUSTFLAGS = "-D warnings"
+command = [
+    "powershell",
+    "-NoProfile",
+    "-File",
+    "scripts/bacon_strict.ps1",
+    "dushnota",
+]
+need_stdout = true
+allow_warnings = false
 background = false
 on_change_strategy = "kill_then_restart"
 
@@ -33,3 +66,4 @@ on_change_strategy = "kill_then_restart"
 d = "job:dev-long"
 r = "job:release-long"
 t = "job:test-long"
+p = "job:dushnota"

@@ -5,9 +5,9 @@ mod app;
 mod config;
 mod conversion;
 mod domain;
+mod helpers;
 mod input;
 mod input_journal;
-mod helpers;
 mod platform;
 mod utils;
 

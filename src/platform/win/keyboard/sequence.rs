@@ -3,7 +3,13 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{PostMessageW, WM_HOTKEY},
 };
 
-use crate::{app::HotkeySlot, config, input::hotkeys::*};
+use crate::{
+    app::HotkeySlot,
+    config,
+    input::hotkeys::{
+        HK_CONVERT_LAST_WORD_ID, HK_CONVERT_SELECTION_ID, HK_PAUSE_TOGGLE_ID, HK_SWITCH_LAYOUT_ID,
+    },
+};
 
 pub(crate) fn chord_matches(template: config::HotkeyChord, input: config::HotkeyChord) -> bool {
     if template.mods != input.mods {
@@ -40,11 +46,18 @@ pub(crate) fn hotkey_id_for_slot(slot: crate::app::HotkeySlot) -> i32 {
 }
 
 pub(crate) fn effective_gap_ms(_slot: crate::app::HotkeySlot, seq: config::HotkeySequence) -> u64 {
-    seq.max_gap_ms as u64
+    u64::from(seq.max_gap_ms)
 }
 
 pub(crate) fn post_hotkey(hwnd: HWND, id: i32) -> windows::core::Result<()> {
-    unsafe { PostMessageW(Some(hwnd), WM_HOTKEY, WPARAM(id as usize), LPARAM(0)) }
+    let id_usize = usize::try_from(id).map_err(|_| {
+        windows::core::Error::new(
+            windows::core::HRESULT(0x8007_0057_u32.cast_signed()),
+            "hotkey id must be non-negative",
+        )
+    })?;
+
+    unsafe { PostMessageW(Some(hwnd), WM_HOTKEY, WPARAM(id_usize), LPARAM(0)) }
 }
 
 pub(crate) fn try_match_sequence(

@@ -23,22 +23,22 @@ pub fn normalize_vk(kb: &KBDLLHOOKSTRUCT) -> u32 {
     let extended = kb.flags.contains(LLKHF_EXTENDED);
 
     match vk {
-        x if x == VK_SHIFT.0 as u32 => {
+        x if x == u32::from(VK_SHIFT.0) => {
             let mapped = unsafe { MapVirtualKeyW(kb.scanCode, MAPVK_VSC_TO_VK_EX) };
             if mapped != 0 { mapped } else { vk }
         }
-        x if x == VK_CONTROL.0 as u32 => {
+        x if x == u32::from(VK_CONTROL.0) => {
             if extended {
-                VK_RCONTROL.0 as u32
+                u32::from(VK_RCONTROL.0)
             } else {
-                VK_LCONTROL.0 as u32
+                u32::from(VK_LCONTROL.0)
             }
         }
-        x if x == VK_MENU.0 as u32 => {
+        x if x == u32::from(VK_MENU.0) => {
             if extended {
-                VK_RMENU.0 as u32
+                u32::from(VK_RMENU.0)
             } else {
-                VK_LMENU.0 as u32
+                u32::from(VK_LMENU.0)
             }
         }
         _ => vk,

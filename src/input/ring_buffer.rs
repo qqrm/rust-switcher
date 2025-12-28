@@ -87,8 +87,7 @@ pub fn last_token_autoconverted() -> bool {
     journal()
         .lock()
         .ok()
-        .map(|j| j.last_token_autoconverted)
-        .unwrap_or(false)
+        .is_some_and(|j| j.last_token_autoconverted)
 }
 
 fn mods_ctrl_or_alt_down() -> bool {
@@ -110,13 +109,13 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<String> {
         return None;
     }
 
-    fn async_down(vk: VIRTUAL_KEY) -> bool {
-        let v = unsafe { GetAsyncKeyState(vk.0 as i32) } as u16;
+    let async_down = |vk: VIRTUAL_KEY| -> bool {
+        let v = unsafe { GetAsyncKeyState(i32::from(vk.0)) }.cast_unsigned();
         (v & 0x8000) != 0
-    }
+    };
 
-    fn apply_async_key(state: &mut [u8; 256], vk: VIRTUAL_KEY) {
-        let idx = vk.0 as usize;
+    let apply_async_key = |state: &mut [u8; 256], vk: VIRTUAL_KEY| {
+        let idx = usize::from(vk.0);
         if idx >= state.len() {
             return;
         }
@@ -126,17 +125,18 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<String> {
         } else {
             state[idx] &= !0x80;
         }
-    }
+    };
 
     apply_async_key(&mut state, VK_SHIFT);
     apply_async_key(&mut state, VK_LSHIFT);
     apply_async_key(&mut state, VK_RSHIFT);
 
     let mut buf = [0u16; 8];
-    let rc = unsafe { ToUnicodeEx(vk.0 as u32, kb.scanCode, &state, &mut buf, 0, Some(hkl)) };
+    let rc = unsafe { ToUnicodeEx(u32::from(vk.0), kb.scanCode, &state, &mut buf, 0, Some(hkl)) };
 
     if rc == -1 {
-        let _ = unsafe { ToUnicodeEx(vk.0 as u32, kb.scanCode, &state, &mut buf, 0, Some(hkl)) };
+        let _ =
+            unsafe { ToUnicodeEx(u32::from(vk.0), kb.scanCode, &state, &mut buf, 0, Some(hkl)) };
         return None;
     }
 
@@ -144,8 +144,10 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<String> {
         return None;
     }
 
-    let s = String::from_utf16_lossy(&buf[..rc as usize]);
-    if s.chars().any(|c| c.is_control()) {
+    let rc = usize::try_from(rc).ok()?;
+    let s = String::from_utf16_lossy(&buf[..rc]);
+
+    if s.chars().any(char::is_control) {
         return None;
     }
 
@@ -161,7 +163,8 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
         j.invalidate_if_foreground_changed();
     }
 
-    let vk = VIRTUAL_KEY(vk as u16);
+    let vk_u16 = u16::try_from(vk).ok()?;
+    let vk = VIRTUAL_KEY(vk_u16);
 
     match vk {
         VK_ESCAPE | VK_DELETE | VK_INSERT | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_HOME
@@ -201,7 +204,7 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
 
     let s = decode_typed_text(kb, vk)?;
 
-    if s.chars().any(|c| c.is_alphanumeric())
+    if s.chars().any(char::is_alphanumeric)
         && let Ok(mut j) = journal().lock()
     {
         j.last_token_autoconverted = false;
@@ -274,7 +277,9 @@ pub fn last_char_triggers_autoconvert() -> bool {
         return false;
     }
 
-    let last = *j.buf.back().unwrap();
+    let Some(&last) = j.buf.back() else {
+        return false;
+    };
 
     // Trigger on punctuation immediately following a non-whitespace char.
     if matches!(last, '.' | ',' | '!' | '?' | ';' | ':') {

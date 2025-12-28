@@ -3,6 +3,13 @@ name = "rust-switcher"
 version = "0.1.0"
 edition = "2024"
 
+description = "Windows keyboard layout switcher and text conversion utility"
+license = "MIT"
+repository = "https://github.com/qqrm/rust-switcher"
+homepage = "https://github.com/qqrm/rust-switcher"
+keywords = ["windows", "winapi", "keyboard", "hotkey", "tray"]
+categories = ["gui", "os::windows-apis"]
+
 [dependencies]
 windows = { version = "0.62", features = [
     "Win32_Foundation",

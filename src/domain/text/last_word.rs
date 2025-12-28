@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::{
     sync::{
         OnceLock,
@@ -410,8 +412,7 @@ fn confidence(detector: &lingua::LanguageDetector, text: &str, lang: lingua::Lan
         .compute_language_confidence_values(text)
         .iter()
         .find(|(l, _)| *l == lang)
-        .map(|(_, v)| *v)
-        .unwrap_or(0.0)
+        .map_or(0.0, |(_, v)| *v)
 }
 
 fn ensure_no_newline(p: &LastWordPayload) -> Result<(), SkipReason> {
@@ -422,7 +423,7 @@ fn ensure_no_newline(p: &LastWordPayload) -> Result<(), SkipReason> {
 }
 
 fn ensure_has_letters(word: &str) -> Result<(), SkipReason> {
-    if word.chars().any(|c| c.is_alphabetic()) {
+    if word.chars().any(char::is_alphabetic) {
         return Ok(());
     }
     Err(SkipReason::NotAWord)
@@ -462,11 +463,11 @@ fn is_cyrillic(ch: char) -> bool {
 }
 
 fn apply_last_word_replacement(p: &LastWordPayload, converted: &str) -> Result<(), ApplyError> {
-    let mut seq = KeySequence::new();
-    if apply_last_word_conversion(&mut seq, p, converted) {
-        return Ok(());
+    if apply_last_word_conversion(p, converted) {
+        Ok(())
+    } else {
+        Err(ApplyError::KeyInjectionFailed)
     }
-    Err(ApplyError::KeyInjectionFailed)
 }
 
 #[tracing::instrument(level = "trace", skip(state))]
@@ -522,7 +523,7 @@ fn foreground_window_alive() -> bool {
 fn sleep_before_convert(state: &AppState) {
     let delay_ms = crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100);
     tracing::trace!(delay_ms, "sleep before convert");
-    thread::sleep(Duration::from_millis(delay_ms as u64));
+    thread::sleep(Duration::from_millis(u64::from(delay_ms)));
 }
 
 struct LastWordPayload {
@@ -590,21 +591,21 @@ fn take_last_word_payload() -> Option<LastWordPayload> {
         .and_then(|(word, suffix)| normalize_last_word_payload(word, suffix))
 }
 
-fn apply_last_word_conversion(seq: &mut KeySequence, p: &LastWordPayload, converted: &str) -> bool {
+fn apply_last_word_conversion(p: &LastWordPayload, converted: &str) -> bool {
     const MAX_TAPS: usize = 4096;
 
     let word_len = p.word_len.min(MAX_TAPS);
     let suffix_len = p.suffix_len.min(MAX_TAPS);
 
     if p.suffix_spaces_only {
-        move_caret_left(seq, suffix_len)
-            && delete_with_backspace(seq, word_len)
+        move_caret_left(suffix_len)
+            && delete_with_backspace(word_len)
             && send_text_unicode(converted)
-            && move_caret_right(seq, suffix_len)
+            && move_caret_right(suffix_len)
     } else {
         let delete_count = p.word_len.saturating_add(p.suffix_len).min(MAX_TAPS);
 
-        delete_with_backspace(seq, delete_count)
+        delete_with_backspace(delete_count)
             && send_text_unicode(converted)
             && (p.suffix.is_empty() || send_text_unicode(&p.suffix))
     }
@@ -628,26 +629,26 @@ fn update_journal(p: &LastWordPayload, converted: &str) {
     tracing::trace!("journal updated");
 }
 
-fn delete_with_backspace(seq: &mut KeySequence, count: usize) -> bool {
-    repeat_tap(seq, VK_BACKSPACE_KEY, count, "backspace tap failed")
+fn delete_with_backspace(count: usize) -> bool {
+    repeat_tap(VK_BACKSPACE_KEY, count, "backspace tap failed")
 }
 
-fn move_caret_left(seq: &mut KeySequence, count: usize) -> bool {
-    repeat_tap(seq, VK_LEFT_KEY, count, "left arrow tap failed")
+fn move_caret_left(count: usize) -> bool {
+    repeat_tap(VK_LEFT_KEY, count, "left arrow tap failed")
 }
 
-fn move_caret_right(seq: &mut KeySequence, count: usize) -> bool {
-    repeat_tap(seq, VK_RIGHT_KEY, count, "right arrow tap failed")
+fn move_caret_right(count: usize) -> bool {
+    repeat_tap(VK_RIGHT_KEY, count, "right arrow tap failed")
 }
 
-fn repeat_tap(seq: &mut KeySequence, vk: VIRTUAL_KEY, count: usize, err_msg: &'static str) -> bool {
-    (0..count)
-        .try_for_each(|i| seq.tap(vk).then_some(()).ok_or(i))
-        .map(|_| true)
-        .unwrap_or_else(|i| {
+fn repeat_tap(vk: VIRTUAL_KEY, count: usize, err_msg: &'static str) -> bool {
+    match (0..count).try_for_each(|i| KeySequence::tap(vk).then_some(()).ok_or(i)) {
+        Ok(()) => true,
+        Err(i) => {
             tracing::error!(i, count, %err_msg);
             false
-        })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -688,10 +689,7 @@ mod tests {
         match should_autoconvert_word(&detector, word, &converted) {
             Ok(()) => {}
             Err(reason) => {
-                panic!(
-                    "should autoconvert mistyped Russian layout word, got Err({:?})",
-                    reason
-                );
+                panic!("should autoconvert mistyped Russian layout word, got Err({reason:?})");
             }
         }
     }
@@ -786,8 +784,7 @@ mod tests {
             Ok(()) => {}
             Err(reason) => {
                 panic!(
-                    "must autoconvert token from reported sequence: {} -> {}, got Err({:?})",
-                    word, converted, reason
+                    "must autoconvert token from reported sequence: {word} -> {converted}, got Err({reason:?})"
                 );
             }
         }
@@ -823,15 +820,11 @@ mod tests {
                 (false, Err(_)) => {}
                 (true, Err(reason)) => {
                     panic!(
-                        "expected autoconvert for token: {} -> {}, got Err({:?})",
-                        word, converted, reason
+                        "expected autoconvert for token: {word} -> {converted}, got Err({reason:?})"
                     );
                 }
                 (false, Ok(())) => {
-                    panic!(
-                        "expected skip for token: {} -> {}, got Ok(())",
-                        word, converted
-                    );
+                    panic!("expected skip for token: {word} -> {converted}, got Ok(())");
                 }
             }
         }

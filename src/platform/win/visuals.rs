@@ -34,7 +34,7 @@ pub unsafe fn init_visuals() {
         dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
         dwICC: ICC_STANDARD_CLASSES,
     };
-    let _ = unsafe { InitCommonControlsEx(&icc) };
+    let _ = unsafe { InitCommonControlsEx(&raw const icc) };
 }
 
 /// Create a font matching the system message font.
@@ -49,7 +49,7 @@ pub unsafe fn create_message_font() -> Result<HFONT> {
         ..Default::default()
     };
 
-    let pv_param = (&mut non_client_metrics as *mut NONCLIENTMETRICSW).cast::<core::ffi::c_void>();
+    let pv_param = (&raw mut non_client_metrics).cast::<core::ffi::c_void>();
 
     unsafe {
         SystemParametersInfoW(
@@ -60,7 +60,7 @@ pub unsafe fn create_message_font() -> Result<HFONT> {
         )?;
     }
 
-    let font = unsafe { CreateFontIndirectW(&non_client_metrics.lfMessageFont) };
+    let font = unsafe { CreateFontIndirectW(&raw const non_client_metrics.lfMessageFont) };
     if font.0.is_null() {
         return Err(windows::core::Error::from_hresult(E_FAIL));
     }

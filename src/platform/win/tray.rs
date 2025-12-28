@@ -3,13 +3,15 @@ use windows::{
         Foundation::{HINSTANCE, HWND},
         UI::{
             Shell::{
-                NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_ERROR, NIM_ADD, NIM_DELETE, NIF_SHOWTIP, NIM_MODIFY, NIM_SETVERSION, NOTIFYICON_VERSION_4, 
-                NOTIFYICONDATAW,
+                NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_ERROR, NIM_ADD,
+                NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NOTIFYICON_VERSION_4, NOTIFYICONDATAW,
                 Shell_NotifyIconW,
             },
             WindowsAndMessaging::{
-                GWLP_HINSTANCE, IMAGE_ICON, LR_SHARED, WM_APP, MF_SEPARATOR, MF_STRING, TPM_BOTTOMALIGN, TPM_NOANIMATION, TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON,
-                SetForegroundWindow, TrackPopupMenu, CreatePopupMenu, DestroyMenu, InsertMenuW, GetCursorPos, GetWindowLongPtrW, LoadImageW
+                CreatePopupMenu, DestroyMenu, GWLP_HINSTANCE, GetCursorPos, GetWindowLongPtrW,
+                IMAGE_ICON, InsertMenuW, LR_SHARED, LoadImageW, MF_SEPARATOR, MF_STRING,
+                SetForegroundWindow, TPM_BOTTOMALIGN, TPM_NOANIMATION, TPM_RETURNCMD,
+                TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP,
             },
         },
     },
@@ -24,13 +26,9 @@ const ID_SHOW_HIDE: u32 = 1002;
 pub fn show_tray_context_menu(hwnd: HWND, window_visible: bool) -> windows::core::Result<()> {
     unsafe {
         let hmenu = CreatePopupMenu()?;
-        
+
         // Add "Show/Hide" item
-        let show_hide_text = if window_visible {
-            "Hide\0"
-        } else {
-            "Show\0"
-        };
+        let show_hide_text = if window_visible { "Hide\0" } else { "Show\0" };
         let show_hide_text_vec = show_hide_text.encode_utf16().collect::<Vec<u16>>();
         InsertMenuW(
             hmenu,
@@ -51,14 +49,14 @@ pub fn show_tray_context_menu(hwnd: HWND, window_visible: bool) -> windows::core
             ID_EXIT as usize,
             PCWSTR(exit_text.as_ptr()),
         )?;
-        
+
         // Add separator
         InsertMenuW(hmenu, 1, MF_SEPARATOR, 0, PCWSTR::null())?;
-        
+
         // Get cursor position
         let mut pt = windows::Win32::Foundation::POINT { x: 0, y: 0 };
-        GetCursorPos(&mut pt)?;
-        
+        GetCursorPos(&raw mut pt)?;
+
         // Show menu at cursor position
         let _fg = SetForegroundWindow(hwnd);
         let cmd = TrackPopupMenu(
@@ -70,18 +68,18 @@ pub fn show_tray_context_menu(hwnd: HWND, window_visible: bool) -> windows::core
             hwnd,
             None,
         );
-        
+
         let _destroy = DestroyMenu(hmenu);
-        
+
         // Handle selection
-        match cmd.0 as u32 {
+        match cmd.0.cast_unsigned() as u32 {
             ID_SHOW_HIDE => {
                 // Toggle window visibility
                 let _current_style = windows::Win32::UI::WindowsAndMessaging::GetWindowLongW(
                     hwnd,
                     windows::Win32::UI::WindowsAndMessaging::GWL_STYLE,
                 );
-                
+
                 if window_visible {
                     // Hide window
                     let _show = windows::Win32::UI::WindowsAndMessaging::ShowWindow(
@@ -108,7 +106,7 @@ pub fn show_tray_context_menu(hwnd: HWND, window_visible: bool) -> windows::core
             }
             _ => {}
         }
-        
+
         Ok(())
     }
 }
@@ -134,8 +132,8 @@ fn shell_notify(
             Ok(())
         } else {
             Err(windows::core::Error::new(
-                windows::core::HRESULT(0x80004005u32 as i32), // E_FAIL
-                format!("Shell_NotifyIconW returned FALSE: {}", what),
+                windows::core::HRESULT(0x8000_4005_u32.cast_signed()), // E_FAIL
+                format!("Shell_NotifyIconW returned FALSE: {what}"),
             ))
         }
     }
@@ -144,7 +142,7 @@ fn shell_notify(
 pub fn ensure_icon(hwnd: HWND) -> windows::core::Result<()> {
     unsafe {
         let mut nid = NOTIFYICONDATAW {
-            cbSize: core::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            cbSize: u32::try_from(core::mem::size_of::<NOTIFYICONDATAW>())?,
             hWnd: hwnd,
             uID: TRAY_UID,
             ..Default::default()
@@ -158,7 +156,7 @@ pub fn ensure_icon(hwnd: HWND) -> windows::core::Result<()> {
 
         // Shell_NotifyIconW может вернуть FALSE без last error.
         // Поэтому делаем add, а если не вышло, пробуем modify.
-        if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
+        if !Shell_NotifyIconW(NIM_ADD, &raw const nid).as_bool() {
             shell_notify(
                 NIM_MODIFY,
                 &nid,
@@ -170,10 +168,10 @@ pub fn ensure_icon(hwnd: HWND) -> windows::core::Result<()> {
         //nid.uFlags = windows::Win32::UI::Shell::NOTIFY_ICON_DATA_FLAGS(0);
         nid.Anonymous.uVersion = NOTIFYICON_VERSION_4;
 
-        if !Shell_NotifyIconW(NIM_SETVERSION, &nid).as_bool() {
+        if !Shell_NotifyIconW(NIM_SETVERSION, &raw const nid).as_bool() {
             // Это не критично для жизни, но пусть будет сигналом
             return Err(windows::core::Error::new(
-                windows::core::HRESULT(0x80004005u32 as i32),
+                windows::core::HRESULT(0x8000_4005_u32.cast_signed()),
                 "Shell_NotifyIconW returned FALSE: ensure_icon NIM_SETVERSION",
             ));
         }
@@ -210,7 +208,7 @@ fn balloon_common(
     fill_wide(&mut nid.szInfo, text);
 
     // Первая попытка
-    if unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid).as_bool() } {
+    if unsafe { Shell_NotifyIconW(NIM_MODIFY, &raw const nid).as_bool() } {
         return Ok(());
     }
 
@@ -266,6 +264,6 @@ pub fn remove_icon(hwnd: HWND) {
             ..Default::default()
         };
 
-        let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+        let _ = Shell_NotifyIconW(NIM_DELETE, &raw const nid);
     }
 }

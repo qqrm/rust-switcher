@@ -5,7 +5,7 @@
 //! Constants representing control identifiers are defined here so
 //! that they can be shared between modules.
 
-use std::{collections::VecDeque, ffi::c_void};
+use std::collections::VecDeque;
 
 use windows::Win32::{Foundation::HWND, Graphics::Gdi::HFONT, UI::WindowsAndMessaging::HMENU};
 
@@ -202,7 +202,7 @@ pub struct Buttons {
     pub exit: HWND,
 }
 
-/// Control identifiers used in WM_COMMAND and as HMENU in CreateWindowExW.
+/// Control identifiers used in `WM_COMMAND` and as `HMENU` in `CreateWindowExW`.
 #[repr(i32)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ControlId {
@@ -242,7 +242,10 @@ impl ControlId {
     }
 
     #[inline]
-    pub const fn hmenu(self) -> Option<HMENU> {
-        Some(HMENU(self as i32 as usize as *mut c_void))
+    pub fn hmenu(self) -> windows::Win32::UI::WindowsAndMessaging::HMENU {
+        use std::ffi::c_void;
+
+        let id = self as u16;
+        HMENU(usize::from(id) as *mut c_void)
     }
 }

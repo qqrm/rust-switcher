@@ -96,7 +96,7 @@ pub fn convert_selection(state: &mut AppState) {
         ConvertOutcome::Noop => tracing::trace!("no selection"),
         ConvertOutcome::Ok => {}
         ConvertOutcome::Err(e) => {
-            tracing::warn!(user_text = e.user_text(), error = ?e, "selection conversion failed")
+            tracing::warn!(user_text = e.user_text(), error = ?e, "selection conversion failed");
         }
     }
 }
@@ -160,11 +160,11 @@ fn convert_selection_from_text(
     let converted = convert_ru_en_bidirectional(text);
     let converted_units = converted.encode_utf16().count();
 
-    thread::sleep(Duration::from_millis(delay_ms as u64));
+    thread::sleep(Duration::from_millis(u64::from(delay_ms)));
 
-    let mut seq = KeySequence::new();
+    let _seq = KeySequence::new();
 
-    seq.tap(VK_DELETE_KEY)
+    KeySequence::tap(VK_DELETE_KEY)
         .then_some(())
         .ok_or(ConvertSelectionError::Delete)?;
 
@@ -224,21 +224,26 @@ fn current_layout_for_window(fg: HWND) -> HKL {
 ///
 /// Returns an empty vector when enumeration fails or yields no results.
 fn installed_layouts() -> Vec<HKL> {
-    unsafe {
-        let n = GetKeyboardLayoutList(None);
-        if n <= 0 {
-            return Vec::new();
-        }
-
-        let mut layouts = vec![HKL(null_mut()); n as usize];
-        let n2 = GetKeyboardLayoutList(Some(layouts.as_mut_slice()));
-        if n2 <= 0 {
-            return Vec::new();
-        }
-
-        layouts.truncate(n2 as usize);
-        layouts
+    let n = unsafe { GetKeyboardLayoutList(None) };
+    let Ok(layout_count) = usize::try_from(n) else {
+        return Vec::new();
+    };
+    if layout_count == 0 {
+        return Vec::new();
     }
+
+    let mut layouts = vec![HKL(null_mut()); layout_count];
+
+    let n2 = unsafe { GetKeyboardLayoutList(Some(layouts.as_mut_slice())) };
+    let Ok(filled) = usize::try_from(n2) else {
+        return Vec::new();
+    };
+    if filled == 0 {
+        return Vec::new();
+    }
+
+    layouts.truncate(filled);
+    layouts
 }
 
 /// Switches the keyboard layout for the current foreground window to the next installed layout.
@@ -295,6 +300,7 @@ fn post_layout_change(fg: HWND, hkl: HKL) -> windows::core::Result<()> {
     }
     Ok(())
 }
+
 /// Waits until both left and right Shift keys are released or the timeout elapses.
 ///
 /// Returns `true` as soon as neither Shift key is currently pressed.
@@ -302,8 +308,8 @@ pub fn wait_shift_released(timeout_ms: u64) -> bool {
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
 
     while std::time::Instant::now() < deadline {
-        let l = unsafe { GetAsyncKeyState(VK_LSHIFT.0 as i32) } as u16;
-        let r = unsafe { GetAsyncKeyState(VK_RSHIFT.0 as i32) } as u16;
+        let l = unsafe { GetAsyncKeyState(i32::from(VK_LSHIFT.0)) }.cast_unsigned();
+        let r = unsafe { GetAsyncKeyState(i32::from(VK_RSHIFT.0)) }.cast_unsigned();
 
         let released = (l & 0x8000) == 0 && (r & 0x8000) == 0;
         if released {

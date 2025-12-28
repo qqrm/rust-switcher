@@ -26,7 +26,7 @@ pub(crate) fn register_main_class(class_name: PCWSTR, hinstance: HINSTANCE) -> R
     };
 
     unsafe {
-        if RegisterClassExW(&wc) == 0 {
+        if RegisterClassExW(&raw const wc) == 0 {
             return Err(helpers::last_error());
         }
     }
@@ -44,7 +44,7 @@ pub(crate) fn compute_window_size(style: WINDOW_STYLE) -> Result<(i32, i32)> {
         bottom: CLIENT_H,
     };
 
-    unsafe { AdjustWindowRectEx(&mut rect, style, false, WINDOW_EX_STYLE(0))? };
+    unsafe { AdjustWindowRectEx(&raw mut rect, style, false, WINDOW_EX_STYLE(0))? };
 
     Ok((rect.right - rect.left, rect.bottom - rect.top))
 }
@@ -128,15 +128,15 @@ pub(crate) fn message_loop() -> Result<()> {
     unsafe {
         let mut msg = MSG::default();
         loop {
-            let r = GetMessageW(&mut msg, None, 0, 0);
+            let r = GetMessageW(&raw mut msg, None, 0, 0);
             if r.0 == -1 {
                 return Err(helpers::last_error());
             }
             if r.0 == 0 {
                 break;
             }
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+            let _ = TranslateMessage(&raw const msg);
+            DispatchMessageW(&raw const msg);
         }
     }
     Ok(())

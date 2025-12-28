@@ -125,7 +125,7 @@ pub fn create_controls(hwnd: HWND, state: &mut AppState) -> windows::core::Resul
 fn debug_read_client_rect(hwnd: HWND) -> (i32, i32) {
     unsafe {
         let mut rc = RECT::default();
-        let _ = GetClientRect(hwnd, &mut rc);
+        let _ = GetClientRect(hwnd, &raw mut rc);
         (rc.right - rc.left, rc.bottom - rc.top)
     }
 }
@@ -158,7 +158,7 @@ fn create_settings_group(
             text: w!("Start on startup"),
             style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
             rect: RectI::new(left_x + 12, top_y + 28, l.group_w_left - 24, 20),
-            menu: ControlId::Autostart.hmenu(),
+            menu: Some(ControlId::Autostart.hmenu()),
         },
     )?;
 
@@ -170,7 +170,7 @@ fn create_settings_group(
             text: w!("Show tray icon"),
             style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
             rect: RectI::new(left_x + 12, top_y + 52, l.group_w_left - 24, 20),
-            menu: ControlId::Tray.hmenu(),
+            menu: Some(ControlId::Tray.hmenu()),
         },
     )?;
 
@@ -194,7 +194,7 @@ fn create_settings_group(
             text: w!("100"),
             style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, ES_NUMBER),
             rect: RectI::new(left_x + 12, top_y + 104, 60, 22),
-            menu: ControlId::DelayMs.hmenu(),
+            menu: Some(ControlId::DelayMs.hmenu()),
         },
     )?;
 
@@ -294,7 +294,7 @@ fn create_hotkey_rows(
         g.w_label,
         g.w_edit,
         w!("Convert last word:"),
-        ControlId::HotkeyLastWord.hmenu(),
+        Some(ControlId::HotkeyLastWord.hmenu()),
     )?;
     hy += 28;
 
@@ -305,7 +305,7 @@ fn create_hotkey_rows(
         g.w_label,
         g.w_edit,
         w!("Autoconvert pause:"),
-        ControlId::HotkeyPause.hmenu(),
+        Some(ControlId::HotkeyPause.hmenu()),
     )?;
     hy += 28;
 
@@ -316,7 +316,7 @@ fn create_hotkey_rows(
         g.w_label,
         g.w_edit,
         w!("Convert selection:"),
-        ControlId::HotkeySelection.hmenu(),
+        Some(ControlId::HotkeySelection.hmenu()),
     )?;
     hy += 28;
 
@@ -327,7 +327,7 @@ fn create_hotkey_rows(
         g.w_label,
         g.w_edit,
         w!("Switch keyboard layout:"),
-        ControlId::HotkeySwitchLayout.hmenu(),
+        Some(ControlId::HotkeySwitchLayout.hmenu()),
     )?;
 
     Ok(())
@@ -360,7 +360,7 @@ fn create_buttons(hwnd: HWND, state: &mut AppState, l: &UiLayout) -> windows::co
             text: w!("Exit"),
             style: btn_style,
             rect: RectI::new(l.left_x + 12, btn_y, 110, btn_h),
-            menu: ControlId::Exit.hmenu(),
+            menu: Some(ControlId::Exit.hmenu()),
         },
     )?;
 
@@ -372,7 +372,7 @@ fn create_buttons(hwnd: HWND, state: &mut AppState, l: &UiLayout) -> windows::co
             text: w!("Apply"),
             style: btn_style,
             rect: RectI::new(l.right_x + 40, btn_y, 90, btn_h),
-            menu: ControlId::Apply.hmenu(),
+            menu: Some(ControlId::Apply.hmenu()),
         },
     )?;
 
@@ -384,7 +384,7 @@ fn create_buttons(hwnd: HWND, state: &mut AppState, l: &UiLayout) -> windows::co
             text: w!("Cancel"),
             style: btn_style,
             rect: RectI::new(l.right_x + 140, btn_y, 90, btn_h),
-            menu: ControlId::Cancel.hmenu(),
+            menu: Some(ControlId::Cancel.hmenu()),
         },
     )?;
 

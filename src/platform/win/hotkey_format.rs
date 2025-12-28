@@ -35,23 +35,29 @@ pub(crate) fn format_hotkey_sequence(seq: Option<config::HotkeySequence>) -> Str
 fn format_hotkey_chord(ch: config::HotkeyChord) -> String {
     fn vk_to_display(vk: u32) -> String {
         if (0x41..=0x5A).contains(&vk) || (0x30..=0x39).contains(&vk) {
-            return (vk as u8 as char).to_string();
+            let Ok(vk_u8) = u8::try_from(vk) else {
+                return vk.to_string();
+            };
+            return (vk_u8 as char).to_string();
         }
 
         let sc = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) };
         if sc == 0 {
-            return format!("VK 0x{:02X}", vk);
+            return format!("VK 0x{vk:02X}");
         }
 
-        let lparam = ((sc as i32) << 16) as i32;
+        let lparam = (sc.cast_signed() << 16) as i32;
 
         let mut buf = [0u16; 64];
         let len = unsafe { GetKeyNameTextW(lparam, &mut buf) };
         if len <= 0 {
-            return format!("VK 0x{:02X}", vk);
+            return format!("VK 0x{vk:02X}");
         }
 
-        String::from_utf16_lossy(&buf[..(len as usize)])
+        let Ok(len) = usize::try_from(len) else {
+            return String::new(); // или return vk.to_string(), если это функция форматирования
+        };
+        String::from_utf16_lossy(&buf[..len])
     }
 
     let mut parts: Vec<String> = Vec::new();

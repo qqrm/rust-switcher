@@ -63,26 +63,35 @@ fn report_hook_error(hwnd: HWND, state: &mut crate::app::AppState, e: &windows::
 }
 
 extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code != HC_ACTION as i32 {
+    if code != HC_ACTION.cast_signed() {
         let h = HOOK_HANDLE.load(Ordering::Relaxed);
         let hook = (h != 0).then_some(HHOOK(h as *mut _));
         return unsafe { CallNextHookEx(hook, code, wparam, lparam) };
     }
 
-    let msg = wparam.0 as u32;
+    let h = HOOK_HANDLE.load(Ordering::Relaxed);
+    let hook = (h != 0).then_some(HHOOK(h as *mut _));
+
+    let Ok(msg) = u32::try_from(wparam.0) else {
+        return unsafe { CallNextHookEx(hook, code, wparam, lparam) };
+    };
+
     let kb = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
     let vk = normalize_vk(kb);
     let is_mod = mod_bit_for_vk(vk).is_some();
 
-    let decision = if is_keydown_msg(msg) {
+    let is_keydown = is_keydown_msg(msg);
+    let is_keyup = is_keyup_msg(msg);
+
+    let decision = if is_keydown {
         handle_keydown(vk, is_mod)
-    } else if is_keyup_msg(msg) {
+    } else if is_keyup {
         handle_keyup(vk, is_mod)
     } else {
         Ok(HookDecision::Pass)
     };
 
-    if is_keydown_msg(msg) && matches!(decision.as_ref(), Ok(HookDecision::Pass)) {
+    if is_keydown && matches!(decision.as_ref(), Ok(HookDecision::Pass)) {
         let typed = input::ring_buffer::record_keydown(kb, vk);
 
         if typed.is_some()
@@ -101,7 +110,7 @@ extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     }
 
     match decision {
-        Ok(d) if d.should_swallow() && !(is_mod && is_keyup_msg(msg)) => return LRESULT(1),
+        Ok(d) if d.should_swallow() && !(is_mod && is_keyup) => return LRESULT(1),
         Ok(_) => {}
         Err(e) => {
             if let Some(hwnd) = main_hwnd() {
@@ -112,8 +121,6 @@ extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         }
     }
 
-    let h = HOOK_HANDLE.load(Ordering::Relaxed);
-    let hook = (h != 0).then_some(HHOOK(h as *mut _));
     unsafe { CallNextHookEx(hook, code, wparam, lparam) }
 }
 

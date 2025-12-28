@@ -3,7 +3,10 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{PostMessageW, WM_APP},
 };
 
-use crate::app::{AppState, UiError};
+use crate::{
+    app::{AppState, UiError},
+    platform::win::tray::balloon_error,
+};
 
 /// Application private message used to signal that the UI error queue is non empty.
 ///
@@ -44,7 +47,7 @@ pub fn drain_one_and_present(hwnd: HWND, state: &mut AppState) {
         );
     };
 
-    crate::platform::win::tray::balloon_error(hwnd, &err.title, &err.user_text)
+    balloon_error(hwnd, &err.title, &err.user_text)
         .inspect_err(|_| show_message_box(&err.title, &err.user_text))
         .ok();
 }
@@ -72,7 +75,7 @@ pub fn push(
         return;
     }
 
-    let debug_text = format!("{:?}", err);
+    let debug_text = format!("{err:?}");
 
     state.errors.push_back(UiError {
         title: title.to_string(),
@@ -81,9 +84,8 @@ pub fn push(
     });
 
     unsafe {
-        if let Err(_e) = PostMessageW(Some(hwnd), WM_APP_ERROR, WPARAM(0), LPARAM(0)) {
-            #[cfg(debug_assertions)]
-            tracing::warn!(error=?_e, "PostMessageW(WM_APP_ERROR) failed");
+        if let Err(e) = PostMessageW(Some(hwnd), WM_APP_ERROR, WPARAM(0), LPARAM(0)) {
+            tracing::warn!(error=?e, "PostMessageW(WM_APP_ERROR) failed");
         }
     }
 }

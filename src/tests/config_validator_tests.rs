@@ -92,7 +92,7 @@ fn no_sequences_ok() {
 #[test]
 fn only_one_sequence_ok() {
     assert_ok(mk_cfg(
-        Some(seq1(MOD_CONTROL.0, b'A' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
         None,
         None,
         None,
@@ -102,124 +102,123 @@ fn only_one_sequence_ok() {
 #[test]
 fn no_duplicates_ok() {
     assert_ok(mk_cfg(
-        Some(seq1(MOD_CONTROL.0, b'A' as u32)),
-        Some(seq1(MOD_ALT.0, b'B' as u32)),
-        Some(seq1(MOD_SHIFT.0, b'C' as u32)),
-        Some(seq1(MOD_WIN.0, b'D' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
+        Some(seq1(MOD_WIN.0, u32::from(b'D'))),
     ));
 }
 
 #[test]
 fn allowed_duplicate_last_word_and_selection_ok() {
-    let same = seq1(MOD_CONTROL.0, b'X' as u32);
+    let same = seq1(MOD_CONTROL.0, u32::from(b'X'));
     assert_ok(mk_cfg(
         Some(same),
-        Some(seq1(MOD_ALT.0, b'B' as u32)),
-        Some(seq1(MOD_CONTROL.0, b'X' as u32)),
-        Some(seq1(MOD_SHIFT.0, b'C' as u32)),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
     ));
 }
 
 #[test]
 fn duplicate_pause_and_layout_err() {
-    let dup = seq1(MOD_ALT.0, b'B' as u32);
+    let dup = seq1(MOD_ALT.0, u32::from(b'B'));
 
     let err = assert_err(mk_cfg(
-        Some(seq1(MOD_CONTROL.0, b'A' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
         Some(dup),
-        Some(seq1(MOD_SHIFT.0, b'C' as u32)),
-        Some(seq1(MOD_ALT.0, b'B' as u32)),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
     ));
 
     assert_has_common_error_shape(&err);
     assert!(err.contains(PAUSE), "{err}");
     assert!(err.contains(SWITCH_LAYOUT), "{err}");
     assert!(
-        err.contains(&format!("• '{}' and '{}'\n", PAUSE, SWITCH_LAYOUT)),
+        err.contains(&format!("• '{PAUSE}' and '{SWITCH_LAYOUT}'\n")),
         "{err}"
     );
 }
 
 #[test]
 fn duplicate_last_word_and_pause_err() {
-    let dup = seq1(MOD_CONTROL.0, b'A' as u32);
+    let dup = seq1(MOD_CONTROL.0, u32::from(b'A'));
 
     let err = assert_err(mk_cfg(
         Some(dup),
-        Some(seq1(MOD_CONTROL.0, b'A' as u32)),
-        Some(seq1(MOD_SHIFT.0, b'C' as u32)),
-        Some(seq1(MOD_ALT.0, b'B' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
     ));
 
     assert_has_common_error_shape(&err);
     assert!(err.contains(CONVERT_LAST_WORD), "{err}");
     assert!(err.contains(PAUSE), "{err}");
     assert!(
-        err.contains(&format!("• '{}' and '{}'\n", CONVERT_LAST_WORD, PAUSE)),
+        err.contains(&format!("• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n")),
         "{err}"
     );
 }
 
 #[test]
 fn duplicate_selection_and_pause_err() {
-    let dup = seq1(MOD_CONTROL.0, b'A' as u32);
+    let dup = seq1(MOD_CONTROL.0, u32::from(b'A'));
 
     let err = assert_err(mk_cfg(
-        Some(seq1(MOD_SHIFT.0, b'C' as u32)),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
         Some(dup),
-        Some(seq1(MOD_CONTROL.0, b'A' as u32)),
-        Some(seq1(MOD_ALT.0, b'B' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
     ));
 
     assert_has_common_error_shape(&err);
     assert!(err.contains(CONVERT_SELECTION), "{err}");
     assert!(err.contains(PAUSE), "{err}");
     assert!(
-        err.contains(&format!("• '{}' and '{}'\n", PAUSE, CONVERT_SELECTION)),
+        err.contains(&format!("• '{PAUSE}' and '{CONVERT_SELECTION}'\n")),
         "{err}"
     );
 }
 
 #[test]
 fn allowed_duplicate_pair_but_third_action_same_still_err_lists_two_pairs() {
-    let same = seq1(MOD_CONTROL.0, b'X' as u32);
+    let same = seq1(MOD_CONTROL.0, u32::from(b'X'));
 
     let err = assert_err(mk_cfg(
         Some(same),
-        Some(seq1(MOD_CONTROL.0, b'X' as u32)),
-        Some(seq1(MOD_CONTROL.0, b'X' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
         None,
     ));
 
     assert_has_common_error_shape(&err);
 
-    let expected_1 = format!("• '{}' and '{}'\n", CONVERT_LAST_WORD, PAUSE);
-    let expected_2 = format!("• '{}' and '{}'\n", PAUSE, CONVERT_SELECTION);
+    let expected_1 = format!("• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n");
+    let expected_2 = format!("• '{PAUSE}' and '{CONVERT_SELECTION}'\n");
 
     assert!(err.contains(&expected_1), "{err}");
     assert!(err.contains(&expected_2), "{err}");
 
-    let forbidden = format!("• '{}' and '{}'\n", CONVERT_LAST_WORD, CONVERT_SELECTION);
+    let forbidden = format!("• '{CONVERT_LAST_WORD}' and '{CONVERT_SELECTION}'\n");
     assert!(!err.contains(&forbidden), "{err}");
 }
 
 #[test]
 fn two_independent_duplicate_pairs_err_lists_both_in_stable_order() {
-    let a = seq1(MOD_CONTROL.0, b'A' as u32);
-    let b = seq1(MOD_ALT.0, b'B' as u32);
+    let a = seq1(MOD_CONTROL.0, u32::from(b'A'));
+    let b = seq1(MOD_ALT.0, u32::from(b'B'));
 
     let err = assert_err(mk_cfg(
         Some(a),
-        Some(seq1(MOD_CONTROL.0, b'A' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
         Some(b),
-        Some(seq1(MOD_ALT.0, b'B' as u32)),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
     ));
 
     assert_has_common_error_shape(&err);
 
     let expected = format!(
-        "Duplicate hotkey sequences found:\n\n• '{}' and '{}'\n• '{}' and '{}'\n\nEach action must have a unique hotkey sequence.",
-        CONVERT_LAST_WORD, PAUSE, CONVERT_SELECTION, SWITCH_LAYOUT
+        "Duplicate hotkey sequences found:\n\n• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n• '{CONVERT_SELECTION}' and '{SWITCH_LAYOUT}'\n\nEach action must have a unique hotkey sequence."
     );
 
     assert_eq!(err, expected);
@@ -227,60 +226,75 @@ fn two_independent_duplicate_pairs_err_lists_both_in_stable_order() {
 
 #[test]
 fn duplicates_across_non_adjacent_actions_err() {
-    let dup = seq1(MOD_SHIFT.0, b'Z' as u32);
+    let dup = seq1(MOD_SHIFT.0, u32::from(b'Z'));
 
     let err = assert_err(mk_cfg(
         Some(dup),
         None,
-        Some(seq1(MOD_CONTROL.0, b'A' as u32)),
-        Some(seq1(MOD_SHIFT.0, b'Z' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'Z'))),
     ));
 
     assert_has_common_error_shape(&err);
     assert!(
-        err.contains(&format!(
-            "• '{}' and '{}'\n",
-            CONVERT_LAST_WORD, SWITCH_LAYOUT
-        )),
+        err.contains(&format!("• '{CONVERT_LAST_WORD}' and '{SWITCH_LAYOUT}'\n")),
         "{err}"
     );
 }
 
 #[test]
 fn different_max_gap_is_not_duplicate_current_behavior() {
-    let s1 = seq1_gap(MOD_CONTROL.0, b'K' as u32, 200);
-    let s2 = seq1_gap(MOD_CONTROL.0, b'K' as u32, 400);
+    let s1 = seq1_gap(MOD_CONTROL.0, u32::from(b'K'), 200);
+    let s2 = seq1_gap(MOD_CONTROL.0, u32::from(b'K'), 400);
 
     assert_ok(mk_cfg(Some(s1), Some(s2), None, None));
 }
 
 #[test]
 fn different_mods_vks_is_not_duplicate_current_behavior() {
-    let s1 = seq1_modsvks(MOD_CONTROL.0, 0, b'K' as u32);
-    let s2 = seq1_modsvks(MOD_CONTROL.0, 1, b'K' as u32);
+    let s1 = seq1_modsvks(MOD_CONTROL.0, 0, u32::from(b'K'));
+    let s2 = seq1_modsvks(MOD_CONTROL.0, 1, u32::from(b'K'));
 
     assert_ok(mk_cfg(Some(s1), Some(s2), None, None));
 }
 
 #[test]
 fn different_second_chord_is_not_duplicate_current_behavior() {
-    let s1 = seq2(MOD_CONTROL.0, b'A' as u32, MOD_SHIFT.0, b'B' as u32, 250);
-    let s2 = seq2(MOD_CONTROL.0, b'A' as u32, MOD_SHIFT.0, b'C' as u32, 250);
+    let s1 = seq2(
+        MOD_CONTROL.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'B'),
+        250,
+    );
+    let s2 = seq2(
+        MOD_CONTROL.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'C'),
+        250,
+    );
 
     assert_ok(mk_cfg(Some(s1), Some(s2), None, None));
 }
 
 #[test]
 fn same_two_chord_sequence_is_duplicate_err() {
-    let s = seq2(MOD_CONTROL.0, b'A' as u32, MOD_SHIFT.0, b'B' as u32, 250);
+    let s = seq2(
+        MOD_CONTROL.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'B'),
+        250,
+    );
 
     let err = assert_err(mk_cfg(
         Some(s),
         Some(seq2(
             MOD_CONTROL.0,
-            b'A' as u32,
+            u32::from(b'A'),
             MOD_SHIFT.0,
-            b'B' as u32,
+            u32::from(b'B'),
             250,
         )),
         None,
@@ -289,20 +303,20 @@ fn same_two_chord_sequence_is_duplicate_err() {
 
     assert_has_common_error_shape(&err);
     assert!(
-        err.contains(&format!("• '{}' and '{}'\n", CONVERT_LAST_WORD, PAUSE)),
+        err.contains(&format!("• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n")),
         "{err}"
     );
 }
 
 #[test]
 fn none_values_are_ignored_when_searching_duplicates() {
-    let dup = seq1(MOD_ALT.0, b'Q' as u32);
+    let dup = seq1(MOD_ALT.0, u32::from(b'Q'));
 
     let err = assert_err(mk_cfg(
         None,
         Some(dup),
         None,
-        Some(seq1(MOD_ALT.0, b'Q' as u32)),
+        Some(seq1(MOD_ALT.0, u32::from(b'Q'))),
     ));
 
     assert_has_common_error_shape(&err);
@@ -312,12 +326,12 @@ fn none_values_are_ignored_when_searching_duplicates() {
 
 #[test]
 fn error_message_includes_only_unique_pairs_once() {
-    let s = seq1(MOD_CONTROL.0, b'X' as u32);
+    let s = seq1(MOD_CONTROL.0, u32::from(b'X'));
 
     let err = assert_err(mk_cfg(
         Some(s),
-        Some(seq1(MOD_CONTROL.0, b'X' as u32)),
-        Some(seq1(MOD_CONTROL.0, b'X' as u32)),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
         None,
     ));
 

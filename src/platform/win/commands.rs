@@ -10,18 +10,18 @@ use crate::{app::ControlId, platform::ui::error_notifier::T_UI, utils::helpers};
     debug_assertions,
     tracing::instrument(level = "info", skip_all, fields(msg, id, notif))
 )]
-pub(crate) fn on_command(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+pub(crate) fn on_command(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     #[cfg(debug_assertions)]
     tracing::Span::current().record("msg", "WM_COMMAND");
 
-    let id = helpers::loword(wparam.0) as i32;
-    let notif = helpers::hiword(wparam.0) as u32;
+    let id = i32::from(helpers::loword(wparam.0));
+    let notif = u32::from(helpers::hiword(wparam.0));
 
     #[cfg(debug_assertions)]
     {
         tracing::Span::current().record("id", id);
-        tracing::Span::current().record("notif", notif as i64);
-        eprintln!("ui.command: id={} notif={} lparam={}", id, notif, _lparam.0);
+        tracing::Span::current().record("notif", i64::from(notif));
+        eprintln!("ui.command: id={} notif={} lparam={}", id, notif, lparam.0);
     }
 
     if let Some(r) = handle_hotkey_capture_focus(hwnd, id, notif) {
@@ -58,7 +58,7 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
                 state.hotkey_capture.last_input_tick_ms = 0;
 
                 #[cfg(debug_assertions)]
-                eprintln!("hotkey.capture: start slot={:?}", slot);
+                eprintln!("hotkey.capture: start slot={slot:?}");
             });
             Some(LRESULT(0))
         }
@@ -68,7 +68,7 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
                 state.hotkey_capture.active = false;
 
                 #[cfg(debug_assertions)]
-                eprintln!("hotkey.capture: stop slot={:?}", slot);
+                eprintln!("hotkey.capture: stop slot={slot:?}");
             });
             Some(LRESULT(0))
         }

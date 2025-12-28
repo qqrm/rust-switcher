@@ -12,25 +12,25 @@ use windows::Win32::{
 static HOOK_HANDLE: AtomicIsize = AtomicIsize::new(0);
 
 extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code != HC_ACTION as i32 {
+    if code != HC_ACTION.cast_signed() {
         let h = HOOK_HANDLE.load(Ordering::Relaxed);
         let hook = (h != 0).then_some(HHOOK(h as *mut _));
         return unsafe { CallNextHookEx(hook, code, wparam, lparam) };
     }
 
-    let msg = wparam.0 as u32;
+    let msg = u32::try_from(wparam.0);
     let _ms = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
 
     let should_invalidate = matches!(
         msg,
-        WM_LBUTTONDOWN
+        Ok(WM_LBUTTONDOWN
             | WM_LBUTTONDBLCLK
             | WM_RBUTTONDOWN
             | WM_RBUTTONDBLCLK
             | WM_MBUTTONDOWN
             | WM_MBUTTONDBLCLK
             | WM_MOUSEWHEEL
-            | WM_MOUSEHWHEEL
+            | WM_MOUSEHWHEEL)
     );
 
     if should_invalidate {
@@ -47,14 +47,11 @@ pub fn install() {
         return;
     }
 
-    match unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(proc), None, 0) } {
-        Ok(h) => {
-            HOOK_HANDLE.store(h.0 as isize, Ordering::Relaxed);
-            #[cfg(debug_assertions)]
-            eprintln!("RustSwitcher: WH_MOUSE_LL installed");
-        }
-        Err(_) => {
-            // Молча: это не критично для работы приложения.
-        }
+    if let Ok(h) = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(proc), None, 0) } {
+        HOOK_HANDLE.store(h.0 as isize, Ordering::Relaxed);
+        #[cfg(debug_assertions)]
+        eprintln!("RustSwitcher: WH_MOUSE_LL installed");
+    } else {
+        // Молча: это не критично для работы приложения.
     }
 }
