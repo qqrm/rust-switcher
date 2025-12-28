@@ -19,12 +19,9 @@ use windows::{
         Graphics::Gdi::{DeleteObject, HFONT, HGDIOBJ},
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
-            DefWindowProcW, GetWindowLongPtrW, PostQuitMessage, SetWindowLongPtrW, ShowWindow,
-            SW_SHOW, GWLP_USERDATA,
-            WM_COMMAND, WM_CREATE, 
-            WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-            WM_CTLCOLORSTATIC, WM_DESTROY, 
-            WM_HOTKEY, WM_TIMER, WS_MAXIMIZEBOX,
+            DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, PostQuitMessage, SW_SHOW,
+            SetWindowLongPtrW, ShowWindow, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+            WM_CTLCOLORSTATIC, WM_DESTROY, WM_HOTKEY, WM_TIMER, WS_MAXIMIZEBOX,
             WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
         },
     },
@@ -39,10 +36,10 @@ use self::{
     },
 };
 use crate::{
-    tray::WM_APP_TRAY,
     app::AppState,
     config, helpers,
     hotkeys::{HotkeyAction, action_from_id, register_from_config},
+    tray::WM_APP_TRAY,
     ui::{
         self,
         error_notifier::{T_CONFIG, T_UI, drain_one_and_present},
@@ -313,16 +310,18 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
         }
         WM_APP_TRAY => {
             let lparam_val = lparam.0 as u32;
-            
+
             match lparam_val {
                 0x1007b => {
-                    let window_visible = unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() };
+                    let window_visible = unsafe {
+                        windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool()
+                    };
                     let _ = crate::tray::show_tray_context_menu(hwnd, window_visible);
                 }
                 _ => return LRESULT(0),
             }
-            
-            return LRESULT(0)
+
+            LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
