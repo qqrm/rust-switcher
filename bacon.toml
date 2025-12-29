@@ -10,7 +10,7 @@ env.RUST_LOG = "trace"
 command = [
     "cmd",
     "/c",
-    "cargo +nightly fmt --check && cargo +nightly clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::cargo -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -A clippy::multiple_crate_versions && cargo +nightly run --features debug-tracing",
+    "taskkill /F /T /IM rust-switcher.exe >NUL 2>NUL & cargo +nightly fmt --check && cargo +nightly clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::cargo -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -A clippy::multiple_crate_versions && cargo +nightly run --features debug-tracing",
 ]
 need_stdout = true
 allow_warnings = false
@@ -21,7 +21,7 @@ on_change_strategy = "kill_then_restart"
 command = [
     "cmd",
     "/c",
-    "cargo +nightly fmt --check && cargo +nightly clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::cargo -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -A clippy::multiple_crate_versions && cargo +nightly run --release --locked",
+    "taskkill /F /T /IM rust-switcher.exe >NUL 2>NUL & cargo +nightly fmt --check && cargo +nightly clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::cargo -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -A clippy::multiple_crate_versions && cargo +nightly run --release --locked",
 ]
 need_stdout = true
 allow_warnings = false
@@ -33,7 +33,7 @@ env.RUST_TEST_NOCAPTURE = "1"
 command = [
     "cmd",
     "/c",
-    "cargo +nightly fmt --check && cargo +nightly clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::cargo -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -A clippy::multiple_crate_versions && cargo +nightly test -- --nocapture",
+    "taskkill /F /T /IM rust-switcher.exe >NUL 2>NUL & cargo +nightly fmt --check && cargo +nightly clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::cargo -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -A clippy::multiple_crate_versions && cargo +nightly test -- --nocapture",
 ]
 need_stdout = true
 allow_warnings = false
