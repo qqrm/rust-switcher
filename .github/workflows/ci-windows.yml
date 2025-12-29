@@ -14,35 +14,80 @@ concurrency:
   group: ci-windows-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  TARGET: x86_64-pc-windows-msvc
+
 jobs:
-  test:
+  lint:
+    name: Lint (fmt, clippy)
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: Setup Rust (from rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          target: x86_64-pc-windows-msvc
+          toolchain: rust-toolchain.toml
+          target: ${{ env.TARGET }}
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-${{ env.TARGET }}
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --locked --target ${{ env.TARGET }} --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: windows-latest
+    needs: lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (from rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: rust-toolchain.toml
+          target: ${{ env.TARGET }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-${{ env.TARGET }}
 
       - name: Run tests
-        run: cargo test --target x86_64-pc-windows-msvc -- --nocapture
+        run: cargo test --locked --target ${{ env.TARGET }} -- --nocapture
 
   build:
+    name: Build (release)
     runs-on: windows-latest
     needs: test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: Setup Rust (from rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          target: x86_64-pc-windows-msvc
+          toolchain: rust-toolchain.toml
+          target: ${{ env.TARGET }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-${{ env.TARGET }}
 
       - name: Build (release, locked)
-        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+        run: cargo build --release --locked --target ${{ env.TARGET }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -50,5 +95,5 @@ jobs:
           name: windows-binary
           if-no-files-found: error
           path: |
-            target/x86_64-pc-windows-msvc/release/*.exe
-            target/x86_64-pc-windows-msvc/release/*.pdb
+            target/${{ env.TARGET }}/release/*.exe
+            target/${{ env.TARGET }}/release/*.pdb

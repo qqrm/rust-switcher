@@ -2,74 +2,56 @@
 
 ![Screenshot](assets/screenshots/overview.png)
 
-### Что это
+Rust Switcher это утилита для Windows для конвертации текста между RU и EN раскладками и автоконвертации последнего слова при наборе.
 
-Rust Switcher это утилита для Windows, которая:
-- переключает раскладку
-- умеет конвертировать выделенный текст между RU и EN раскладками
-- умеет конвертировать последний введенный фрагмент по хоткею
-- поддерживает автоконвертацию последнего слова при наборе (экспериментально)
+## Возможности
 
-### Скриншот
+- Конвертация выделенного текста RU EN
+- Конвертация последнего введенного слова по хоткею
+- Автоконвертация последнего слова при наборе (можно поставить на паузу)
+- Tray icon и настройки
 
-Файл: `assets/screenshots/overview.png`
+## Системные требования
 
-Если хочешь другой путь, меняешь ссылку в начале README.
+- Windows 11
+- Rust nightly (см. `rust-toolchain.toml`)
+- MSVC toolchain (Visual Studio 2022 Build Tools)
 
-### Сборка и запуск
+## Установка и запуск
 
-Требования:
-- Rust nightly или stable (зависит от включенных фич)
-- Windows 10 или 11
+Сборка:
+- `cargo +nightly build`
 
-Команды:
-- `cargo run`
-- `cargo run --release`
+Запуск:
+- `cargo +nightly run`
 
-### Конфигурация
+Release сборка:
+- `cargo +nightly build --release --locked`
 
-- Параметры задержек и поведения живут в настройках приложения
-- Логи включаются через `RUST_LOG`
+## Разработка
 
-### Профилирование
+### Быстрый цикл через Bacon
 
-Рекомендуется `samply` на Windows для сэмплинг профилирования.
-Пример:
-- `samply record target\debug\rust-switcher.exe`
+Проект содержит `bacon.toml` и строгий раннер `scripts/bacon_strict.ps1`.
 
-### Статус
+Установка:
+- `cargo install bacon`
 
-Проект в активной разработке. Автоконвертация является экспериментальной и будет донастраиваться.
+Запуск:
+- `bacon`
 
-### What is it
+Горячие клавиши Bacon:
+- `d` dev
+- `r` release
+- `t` tests
+- `p` dushnota
 
-Rust Switcher is a Windows utility that:
-- switches keyboard layouts
-- converts selected text between RU and EN layouts
-- converts the last typed chunk via hotkey
-- supports experimental auto conversion on typing boundaries
+### Проверки перед PR
 
-### Build and run
+- `cargo +nightly fmt --check`
+- `cargo +nightly clippy -- -D warnings`
+- `cargo +nightly test`
 
-Requirements:
-- Rust nightly or stable depending on enabled features
-- Windows 10 or 11
+## Конфигурация
 
-Commands:
-- `cargo run`
-- `cargo run --release`
-
-### Configuration
-
-- Behavior and delays are configured via app settings
-- Logging via `RUST_LOG`
-
-### Profiling
-
-Use `samply` on Windows for sampling profiling.
-Example:
-- `samply record target\debug\rust-switcher.exe`
-
-### Status
-
-Work in progress. AutoConvert is experimental and will be tuned.
+Настройки меняются в GUI. Логирование контролируется feature флагом и переменной `RUST_LOG`.
