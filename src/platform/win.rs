@@ -504,7 +504,7 @@ fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
 
     if let Err(e) = balloon_info(hwnd, "RustSwitcher", &body) {
         #[cfg(debug_assertions)]
-        eprintln!("tray balloon failed: {e:?}");
+        tracing::warn!(error = ?e, "tray balloon failed");
     }
 }
 

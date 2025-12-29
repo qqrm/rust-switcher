@@ -139,7 +139,7 @@ pub fn install(hwnd: HWND, state: &mut crate::app::AppState) {
         Ok(h) => {
             HOOK_HANDLE.store(h.0 as isize, Ordering::Relaxed);
             #[cfg(debug_assertions)]
-            eprintln!("RustSwitcher: WH_KEYBOARD_LL installed");
+            tracing::info!("WH_KEYBOARD_LL installed");
         }
         Err(e) => {
             crate::platform::ui::error_notifier::push(

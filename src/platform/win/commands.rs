@@ -19,9 +19,7 @@ pub(crate) fn on_command(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT 
 
     #[cfg(debug_assertions)]
     {
-        tracing::Span::current().record("id", id);
-        tracing::Span::current().record("notif", i64::from(notif));
-        eprintln!("ui.command: id={} notif={} lparam={}", id, notif, lparam.0);
+        tracing::trace!(id, notif, lparam = lparam.0 as i64, "ui.command");
     }
 
     if let Some(r) = handle_hotkey_capture_focus(hwnd, id, notif) {
@@ -58,7 +56,7 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
                 state.hotkey_capture.last_input_tick_ms = 0;
 
                 #[cfg(debug_assertions)]
-                eprintln!("hotkey.capture: start slot={slot:?}");
+                tracing::debug!(slot = ?slot, "hotkey.capture.start");
             });
             Some(LRESULT(0))
         }
@@ -68,7 +66,7 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
                 state.hotkey_capture.active = false;
 
                 #[cfg(debug_assertions)]
-                eprintln!("hotkey.capture: stop slot={slot:?}");
+                tracing::debug!(slot = ?slot, "hotkey.capture.stop");
             });
             Some(LRESULT(0))
         }

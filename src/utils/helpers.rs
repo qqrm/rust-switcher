@@ -197,7 +197,7 @@ pub fn init_app_user_model_id() -> windows::core::Result<()> {
 
 #[cfg(debug_assertions)]
 pub fn debug_log(msg: &str) {
-    eprintln!("RustSwitcher: {msg}");
+    tracing::debug!(message = %msg, "debug");
 }
 
 #[cfg(debug_assertions)]
