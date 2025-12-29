@@ -496,13 +496,13 @@ fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
         format_hotkey(state.hotkey_values.pause)
     };
 
-    let toggled = true;
+    let toggled;
 
     let body = if state.paused {
-        //toggled = false;
+        toggled = false;
         format!("Status: paused.\nAuto convert: OFF.\nToggle: {hotkey_text}")
     } else {
-        //toggled = true;
+        toggled = true;
         format!("Status: active.\nAuto convert: ON.\nToggle: {hotkey_text}")
     };
 

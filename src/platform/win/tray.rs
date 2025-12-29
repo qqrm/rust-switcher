@@ -248,6 +248,7 @@ pub fn switch_tray_icon(hwnd: HWND, use_green: bool) -> windows::core::Result<()
         };
         
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
+        nid.uCallbackMessage = WM_APP_TRAY;
         nid.hIcon = icon;
         
         let result = shell_notify(NIM_MODIFY, &nid, "switch_tray_icon");
