@@ -344,6 +344,8 @@ fn should_autoconvert_word(
 ) -> Result<(), SkipReason> {
     use lingua::Language;
 
+    const MIN_CONVERTED_EN_CONF_FOR_OVERRIDE: f64 = 0.80;
+
     let (word_core, _word_punct) = split_trailing_convertible_punct(word);
     let (conv_core, _conv_punct) = split_trailing_convertible_punct(converted);
 
@@ -365,11 +367,18 @@ fn should_autoconvert_word(
     let c_ru = confidence(detector, conv_core, Language::Russian);
     let c_en = confidence(detector, conv_core, Language::English);
 
+    // Keep the English guard: do not convert real English words to Russian.
     if w_is_ascii && is_plausible_english_like_token(word_core) {
         return Err(SkipReason::AlreadyCorrect);
     }
+
+    // Russian guard is conditional: if conversion yields a strong English candidate, do not short circuit.
     if w_is_cyr && is_plausible_russian_like_token(word_core) {
-        return Err(SkipReason::AlreadyCorrect);
+        let converted_looks_english = is_plausible_english_like_token(conv_core)
+            && c_en >= MIN_CONVERTED_EN_CONF_FOR_OVERRIDE;
+        if !converted_looks_english {
+            return Err(SkipReason::AlreadyCorrect);
+        }
     }
 
     let w_best = w_ru.max(w_en);
