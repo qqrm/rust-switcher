@@ -233,6 +233,50 @@ pub fn balloon_info(hwnd: HWND, title: &str, text: &str) -> windows::core::Resul
     )
 }
 
+pub fn switch_tray_icon(hwnd: HWND, use_green: bool) -> windows::core::Result<()> {
+    unsafe {
+        let icon = if use_green {
+            green_icon(hwnd)?
+        } else {
+            default_icon(hwnd)?
+        };
+        let mut nid = NOTIFYICONDATAW {
+            cbSize: core::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: hwnd,
+            uID: TRAY_UID,
+            ..Default::default()
+        };
+        
+        nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
+        nid.uCallbackMessage = WM_APP_TRAY;
+        nid.hIcon = icon;
+        
+        let result = shell_notify(NIM_MODIFY, &nid, "switch_tray_icon");
+        result 
+    }
+}
+
+unsafe fn green_icon(hwnd: HWND) -> windows::core::Result<windows::Win32::UI::WindowsAndMessaging::HICON> {
+    let hinst = unsafe { GetWindowLongPtrW(hwnd, GWLP_HINSTANCE) };
+    let hinst = HINSTANCE(hinst as *mut core::ffi::c_void);
+
+    let h = unsafe {
+        LoadImageW(
+            Some(hinst),
+            #[allow(clippy::manual_dangling_ptr)]
+            PCWSTR(2usize as *const u16),  // ← Resource ID 2 (green icon)
+            IMAGE_ICON,
+            0,
+            0,
+            LR_SHARED,
+        )
+        .map(|h| windows::Win32::UI::WindowsAndMessaging::HICON(h.0))
+    };
+    let h = h?; 
+
+    Ok(h)
+}
+
 unsafe fn default_icon(
     hwnd: HWND,
 ) -> windows::core::Result<windows::Win32::UI::WindowsAndMessaging::HICON> {

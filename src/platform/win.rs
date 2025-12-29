@@ -48,7 +48,7 @@ use crate::{
             self,
             error_notifier::{T_CONFIG, T_UI, drain_one_and_present},
         },
-        win::tray::{WM_APP_TRAY, balloon_info, remove_icon},
+        win::{self, tray::{WM_APP_TRAY, balloon_info, remove_icon}},
     },
     ui_call, ui_try,
     utils::helpers,
@@ -496,9 +496,13 @@ fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
         format_hotkey(state.hotkey_values.pause)
     };
 
+    let toggled;
+
     let body = if state.paused {
+        toggled = false;
         format!("Status: paused.\nAuto convert: OFF.\nToggle: {hotkey_text}")
     } else {
+        toggled = true;
         format!("Status: active.\nAuto convert: ON.\nToggle: {hotkey_text}")
     };
 
@@ -506,6 +510,8 @@ fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
         #[cfg(debug_assertions)]
         tracing::warn!(error = ?e, "tray balloon failed");
     }
+
+    let _ = win::tray::switch_tray_icon(hwnd, toggled);
 }
 
 fn handle_convert_smart(state: &mut AppState) {

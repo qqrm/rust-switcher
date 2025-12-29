@@ -4,3 +4,4 @@
 // resource contents are omitted.
 1 24 "res/windows/app.manifest"
 1 ICON "res/windows/icon.ico"
+2 ICON "res/windows/icon_green.ico"
