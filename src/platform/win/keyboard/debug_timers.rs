@@ -44,7 +44,7 @@ pub fn handle_timer(hwnd: HWND, id: usize) -> Option<LRESULT> {
             crate::platform::ui::info_notifier::push(
                 hwnd,
                 state,
-                "Test title в›‘пёЏ",
+                "Test title",
                 "Notification test info",
             );
         });
