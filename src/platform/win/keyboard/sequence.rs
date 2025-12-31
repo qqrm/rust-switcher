@@ -127,12 +127,7 @@ pub(crate) fn try_match_any_sequence(
     chord: config::HotkeyChord,
     now_ms: u64,
 ) -> windows::core::Result<bool> {
-    for slot in [
-        crate::app::HotkeySlot::SwitchLayout,
-        crate::app::HotkeySlot::LastWord,
-        crate::app::HotkeySlot::Selection,
-        crate::app::HotkeySlot::Pause,
-    ] {
+    for slot in HotkeySlot::MATCH_PRIORITY {
         if try_match_sequence(hwnd, state, slot, chord, now_ms)? {
             return Ok(true);
         }

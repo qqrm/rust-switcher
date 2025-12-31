@@ -26,6 +26,22 @@ pub enum HotkeySlot {
     SwitchLayout,
 }
 
+impl HotkeySlot {
+    pub const ALL: [Self; 4] = [
+        Self::LastWord,
+        Self::Pause,
+        Self::Selection,
+        Self::SwitchLayout,
+    ];
+
+    pub const MATCH_PRIORITY: [Self; 4] = [
+        Self::SwitchLayout,
+        Self::LastWord,
+        Self::Selection,
+        Self::Pause,
+    ];
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct HotkeyValues {
     pub last_word: Option<config::Hotkey>,
@@ -174,6 +190,17 @@ pub struct AppState {
     pub active_switch_layout_sequence: Option<config::HotkeySequence>,
     pub switch_layout_waiting_second: bool,
     pub switch_layout_first_tick_ms: u64,
+}
+
+impl AppState {
+    pub fn hotkey_hwnd(&self, slot: HotkeySlot) -> HWND {
+        match slot {
+            HotkeySlot::LastWord => self.hotkeys.last_word,
+            HotkeySlot::Pause => self.hotkeys.pause,
+            HotkeySlot::Selection => self.hotkeys.selection,
+            HotkeySlot::SwitchLayout => self.hotkeys.switch_layout,
+        }
+    }
 }
 
 #[derive(Debug, Default)]

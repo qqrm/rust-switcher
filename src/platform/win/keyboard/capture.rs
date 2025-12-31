@@ -1,5 +1,3 @@
-use windows::Win32::Foundation::HWND;
-
 use crate::{config, platform::win::format_hotkey_sequence, utils::helpers};
 
 pub(crate) fn chord_to_hotkey(ch: config::HotkeyChord) -> config::Hotkey {
@@ -57,17 +55,8 @@ pub(crate) fn store_captured_hotkey(
     state.hotkey_values.set(slot, Some(chord_to_hotkey(chord)));
 
     let text = format_hotkey_sequence(Some(seq));
-    let target = ui_hotkey_target(state, slot);
+    let target = state.hotkey_hwnd(slot);
 
     helpers::set_edit_text(target, &text)?;
     Ok(())
-}
-
-pub(crate) fn ui_hotkey_target(state: &crate::app::AppState, slot: crate::app::HotkeySlot) -> HWND {
-    match slot {
-        crate::app::HotkeySlot::LastWord => state.hotkeys.last_word,
-        crate::app::HotkeySlot::Pause => state.hotkeys.pause,
-        crate::app::HotkeySlot::Selection => state.hotkeys.selection,
-        crate::app::HotkeySlot::SwitchLayout => state.hotkeys.switch_layout,
-    }
 }

@@ -39,7 +39,7 @@ use self::{
     },
 };
 use crate::{
-    app::AppState,
+    app::{AppState, HotkeySlot},
     config,
     domain::text::{last_word::autoconvert_last_word, switch_keyboard_layout},
     input::hotkeys::{HotkeyAction, action_from_id},
@@ -64,6 +64,61 @@ fn set_hwnd_text(hwnd: HWND, s: &str) -> windows::core::Result<()> {
     helpers::set_edit_text(hwnd, s)
 }
 
+fn config_hotkey_for_slot(cfg: &config::Config, slot: HotkeySlot) -> Option<config::Hotkey> {
+    match slot {
+        HotkeySlot::LastWord => cfg.hotkey_convert_last_word,
+        HotkeySlot::Pause => cfg.hotkey_pause,
+        HotkeySlot::Selection => cfg.hotkey_convert_selection,
+        HotkeySlot::SwitchLayout => cfg.hotkey_switch_layout,
+    }
+}
+
+fn config_sequence_for_slot(
+    cfg: &config::Config,
+    slot: HotkeySlot,
+) -> Option<config::HotkeySequence> {
+    match slot {
+        HotkeySlot::LastWord => cfg.hotkey_convert_last_word_sequence,
+        HotkeySlot::Pause => cfg.hotkey_pause_sequence,
+        HotkeySlot::Selection => cfg.hotkey_convert_selection_sequence,
+        HotkeySlot::SwitchLayout => cfg.hotkey_switch_layout_sequence,
+    }
+}
+
+fn set_config_hotkey_for_slot(
+    cfg: &mut config::Config,
+    slot: HotkeySlot,
+    hk: Option<config::Hotkey>,
+) {
+    match slot {
+        HotkeySlot::LastWord => cfg.hotkey_convert_last_word = hk,
+        HotkeySlot::Pause => cfg.hotkey_pause = hk,
+        HotkeySlot::Selection => cfg.hotkey_convert_selection = hk,
+        HotkeySlot::SwitchLayout => cfg.hotkey_switch_layout = hk,
+    }
+}
+
+fn set_config_sequence_for_slot(
+    cfg: &mut config::Config,
+    slot: HotkeySlot,
+    seq: Option<config::HotkeySequence>,
+) {
+    match slot {
+        HotkeySlot::LastWord => cfg.hotkey_convert_last_word_sequence = seq,
+        HotkeySlot::Pause => cfg.hotkey_pause_sequence = seq,
+        HotkeySlot::Selection => cfg.hotkey_convert_selection_sequence = seq,
+        HotkeySlot::SwitchLayout => cfg.hotkey_switch_layout_sequence = seq,
+    }
+}
+
+fn hotkey_text(seq: Option<config::HotkeySequence>, hk: Option<config::Hotkey>) -> String {
+    if seq.is_some() {
+        format_hotkey_sequence(seq)
+    } else {
+        format_hotkey(hk)
+    }
+}
+
 fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::core::Result<()> {
     helpers::set_checkbox(state.checkboxes.autostart, cfg.start_on_startup);
     helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms)?;
@@ -71,33 +126,12 @@ fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::co
     state.hotkey_values = crate::app::HotkeyValues::from_config(cfg);
     state.hotkey_sequence_values = crate::app::HotkeySequenceValues::from_config(cfg);
 
-    let last_word_text = if cfg.hotkey_convert_last_word_sequence.is_some() {
-        format_hotkey_sequence(cfg.hotkey_convert_last_word_sequence)
-    } else {
-        format_hotkey(cfg.hotkey_convert_last_word)
-    };
-    set_hwnd_text(state.hotkeys.last_word, &last_word_text)?;
-
-    let pause_text = if cfg.hotkey_pause_sequence.is_some() {
-        format_hotkey_sequence(cfg.hotkey_pause_sequence)
-    } else {
-        format_hotkey(cfg.hotkey_pause)
-    };
-    set_hwnd_text(state.hotkeys.pause, &pause_text)?;
-
-    let selection_text = if cfg.hotkey_convert_selection_sequence.is_some() {
-        format_hotkey_sequence(cfg.hotkey_convert_selection_sequence)
-    } else {
-        format_hotkey(cfg.hotkey_convert_selection)
-    };
-    set_hwnd_text(state.hotkeys.selection, &selection_text)?;
-
-    let switch_layout_text = if cfg.hotkey_switch_layout_sequence.is_some() {
-        format_hotkey_sequence(cfg.hotkey_switch_layout_sequence)
-    } else {
-        format_hotkey(cfg.hotkey_switch_layout)
-    };
-    set_hwnd_text(state.hotkeys.switch_layout, &switch_layout_text)?;
+    for slot in HotkeySlot::ALL {
+        let seq = config_sequence_for_slot(cfg, slot);
+        let hk = config_hotkey_for_slot(cfg, slot);
+        let text = hotkey_text(seq, hk);
+        set_hwnd_text(state.hotkey_hwnd(slot), &text)?;
+    }
 
     Ok(())
 }
@@ -106,10 +140,9 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
     cfg.start_on_startup = helpers::get_checkbox(state.checkboxes.autostart);
     cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
 
-    cfg.hotkey_convert_last_word_sequence = state.hotkey_sequence_values.last_word;
-    cfg.hotkey_pause_sequence = state.hotkey_sequence_values.pause;
-    cfg.hotkey_convert_selection_sequence = state.hotkey_sequence_values.selection;
-    cfg.hotkey_switch_layout_sequence = state.hotkey_sequence_values.switch_layout;
+    for slot in HotkeySlot::ALL {
+        set_config_sequence_for_slot(&mut cfg, slot, state.hotkey_sequence_values.get(slot));
+    }
 
     fn hk_or_none_if_double(
         seq: Option<config::HotkeySequence>,
@@ -121,19 +154,21 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
         }
     }
 
-    cfg.hotkey_convert_last_word = hk_or_none_if_double(
-        cfg.hotkey_convert_last_word_sequence,
-        state.hotkey_values.last_word,
-    );
-    cfg.hotkey_pause = hk_or_none_if_double(cfg.hotkey_pause_sequence, state.hotkey_values.pause);
-    cfg.hotkey_convert_selection = hk_or_none_if_double(
-        cfg.hotkey_convert_selection_sequence,
-        state.hotkey_values.selection,
-    );
-    cfg.hotkey_switch_layout = match cfg.hotkey_switch_layout_sequence {
-        Some(_) => None,
-        None => state.hotkey_values.switch_layout,
-    };
+    for slot in HotkeySlot::ALL {
+        let seq = state.hotkey_sequence_values.get(slot);
+        let hk = state.hotkey_values.get(slot);
+        let hk = match slot {
+            HotkeySlot::SwitchLayout => {
+                if seq.is_some() {
+                    None
+                } else {
+                    hk
+                }
+            }
+            _ => hk_or_none_if_double(seq, hk),
+        };
+        set_config_hotkey_for_slot(&mut cfg, slot, hk);
+    }
 
     cfg
 }
