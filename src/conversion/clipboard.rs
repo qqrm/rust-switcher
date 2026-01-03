@@ -1,15 +1,20 @@
 use std::ptr::null_mut;
 
-use windows::Win32::{
-    Foundation::{HANDLE, HGLOBAL},
-    System::{
-        DataExchange::{
-            CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-            OpenClipboard, SetClipboardData,
+use windows::{
+    Win32::{
+        Foundation::{HANDLE, HGLOBAL},
+        System::{
+            DataExchange::{
+                CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData,
+                GetClipboardSequenceNumber, OpenClipboard, SetClipboardData,
+            },
+            Memory::{
+                GMEM_MOVEABLE, GlobalAlloc, GlobalFree, GlobalLock, GlobalSize, GlobalUnlock,
+            },
+            Ole::{IDataObject, OleGetClipboard, OleInitialize, OleSetClipboard, OleUninitialize},
         },
-        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalFree, GlobalLock, GlobalSize, GlobalUnlock},
-        Ole::{IDataObject, OleGetClipboard, OleInitialize, OleSetClipboard, OleUninitialize},
     },
+    core::HRESULT,
 };
 
 /// Win32 clipboard format id for UTF 16 text (`CF_UNICODETEXT`).
@@ -129,11 +134,12 @@ struct OleGuard {
 }
 
 impl OleGuard {
-    fn init() -> Option<Self> {
-        unsafe {
-            OleInitialize(null_mut()).ok()?;
+    fn init() -> Result<Option<Self>, windows::core::Error> {
+        match unsafe { OleInitialize(null_mut()) } {
+            Ok(_) => Ok(Some(Self { active: true })),
+            Err(e) if e.code() == HRESULT(0x8001_0106_u32 as i32) => Ok(None),
+            Err(e) => Err(e),
         }
-        Some(Self { active: true })
     }
 }
 
@@ -147,19 +153,27 @@ impl Drop for OleGuard {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ClipboardFormatData {
+    format: u32,
+    data: Vec<u8>,
+}
+
 pub enum ClipboardSnapshot {
     Ole {
         data_object: IDataObject,
-        _ole: OleGuard,
+        _ole: Option<OleGuard>,
     },
-    Unicode(String),
+    Formats {
+        formats: Vec<ClipboardFormatData>,
+    },
 }
 
 /// Captures a snapshot of clipboard contents.
 ///
 /// Returns `None` if the clipboard cannot be opened or captured.
 pub fn snapshot() -> Option<ClipboardSnapshot> {
-    if let Some(ole) = OleGuard::init() {
+    if let Ok(ole) = OleGuard::init() {
         if let Ok(data_object) = unsafe { OleGetClipboard() } {
             return Some(ClipboardSnapshot::Ole {
                 data_object,
@@ -168,8 +182,45 @@ pub fn snapshot() -> Option<ClipboardSnapshot> {
         }
     }
 
-    let text = get_unicode_text()?;
-    Some(ClipboardSnapshot::Unicode(text))
+    let _clip = ClipboardGuard::open()?;
+
+    let mut formats = Vec::new();
+    let mut format = 0u32;
+
+    loop {
+        format = unsafe { EnumClipboardFormats(format) };
+        if format == 0 {
+            break;
+        }
+
+        let handle = match unsafe { GetClipboardData(format) } {
+            Ok(h) if !h.0.is_null() => h,
+            _ => continue,
+        };
+
+        let hglobal = HGLOBAL(handle.0);
+        let size = unsafe { GlobalSize(hglobal) };
+        if size == 0 {
+            continue;
+        }
+
+        let ptr = unsafe { GlobalLock(hglobal) };
+        if ptr.is_null() {
+            continue;
+        }
+
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, size) };
+        let data = slice.to_vec();
+        let _ = unsafe { GlobalUnlock(hglobal) };
+
+        formats.push(ClipboardFormatData { format, data });
+    }
+
+    if formats.is_empty() {
+        return None;
+    }
+
+    Some(ClipboardSnapshot::Formats { formats })
 }
 
 /// Restores a clipboard snapshot.
@@ -180,7 +231,51 @@ pub fn restore_snapshot(snapshot: &ClipboardSnapshot) -> bool {
         ClipboardSnapshot::Ole { data_object, .. } => unsafe {
             OleSetClipboard(data_object).is_ok()
         },
-        ClipboardSnapshot::Unicode(text) => set_unicode_text(text),
+        ClipboardSnapshot::Formats { formats } => {
+            let Some(_clip) = ClipboardGuard::open() else {
+                return false;
+            };
+
+            unsafe {
+                let _ = EmptyClipboard();
+            }
+
+            formats.iter().all(|entry| {
+                let Ok(hmem) = (unsafe { GlobalAlloc(GMEM_MOVEABLE, entry.data.len()) }) else {
+                    tracing::warn!("GlobalAlloc failed while restoring clipboard");
+                    return false;
+                };
+
+                let mut mem = GlobalMem::new(hmem);
+
+                let ptr = unsafe { GlobalLock(hmem) };
+                if ptr.is_null() {
+                    tracing::warn!("GlobalLock returned null while restoring clipboard");
+                    return false;
+                }
+
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        entry.data.as_ptr(),
+                        ptr.cast(),
+                        entry.data.len(),
+                    );
+                }
+                let _ = unsafe { GlobalUnlock(hmem) };
+
+                let handle = HANDLE(hmem.0);
+                match unsafe { SetClipboardData(entry.format, Some(handle)) } {
+                    Ok(_) => {
+                        mem.disarm();
+                        true
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = ?e, "SetClipboardData failed while restoring clipboard");
+                        false
+                    }
+                }
+            })
+        }
     }
 }
 
