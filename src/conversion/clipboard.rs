@@ -2,10 +2,10 @@ use windows::Win32::{
     Foundation::{HANDLE, HGLOBAL},
     System::{
         DataExchange::{
-            CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-            OpenClipboard, SetClipboardData,
+            CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData,
+            GetClipboardSequenceNumber, OpenClipboard, SetClipboardData,
         },
-        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalFree, GlobalLock, GlobalSize, GlobalUnlock},
     },
 };
 
@@ -64,6 +64,16 @@ pub fn get_unicode_text() -> Option<String> {
         }
 
         let hglobal = HGLOBAL(handle.0);
+        let size = GlobalSize(hglobal);
+        if size == 0 {
+            return None;
+        }
+
+        let max_units = size / std::mem::size_of::<u16>();
+        if max_units == 0 {
+            return None;
+        }
+
         let ptr = GlobalLock(hglobal) as *const u16;
         if ptr.is_null() {
             return None;
@@ -71,7 +81,7 @@ pub fn get_unicode_text() -> Option<String> {
 
         // Scan for NUL terminator.
         let mut len = 0usize;
-        while *ptr.add(len) != 0 {
+        while len < max_units && *ptr.add(len) != 0 {
             len += 1;
         }
 
@@ -81,6 +91,137 @@ pub fn get_unicode_text() -> Option<String> {
         let _ = GlobalUnlock(hglobal);
         Some(text)
     }
+}
+
+struct GlobalMem {
+    handle: HGLOBAL,
+    owned: bool,
+}
+
+impl GlobalMem {
+    fn new(handle: HGLOBAL) -> Self {
+        Self {
+            handle,
+            owned: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.owned = false;
+    }
+}
+
+impl Drop for GlobalMem {
+    fn drop(&mut self) {
+        if self.owned && !self.handle.0.is_null() {
+            unsafe {
+                let _ = GlobalFree(self.handle);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ClipboardFormatData {
+    format: u32,
+    data: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClipboardSnapshot {
+    formats: Vec<ClipboardFormatData>,
+}
+
+impl ClipboardSnapshot {
+    fn new(formats: Vec<ClipboardFormatData>) -> Self {
+        Self { formats }
+    }
+}
+
+/// Captures a snapshot of all clipboard formats with global memory payloads.
+///
+/// Returns `None` if the clipboard cannot be opened.
+pub fn snapshot() -> Option<ClipboardSnapshot> {
+    let _clip = ClipboardGuard::open()?;
+
+    let mut formats = Vec::new();
+    let mut format = 0u32;
+
+    loop {
+        format = unsafe { EnumClipboardFormats(format) };
+        if format == 0 {
+            break;
+        }
+
+        let handle = match unsafe { GetClipboardData(format) } {
+            Ok(h) if !h.0.is_null() => h,
+            _ => continue,
+        };
+
+        let hglobal = HGLOBAL(handle.0);
+        let size = unsafe { GlobalSize(hglobal) };
+        if size == 0 {
+            continue;
+        }
+
+        let ptr = unsafe { GlobalLock(hglobal) };
+        if ptr.is_null() {
+            continue;
+        }
+
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, size) };
+        let data = slice.to_vec();
+        let _ = unsafe { GlobalUnlock(hglobal) };
+
+        formats.push(ClipboardFormatData { format, data });
+    }
+
+    Some(ClipboardSnapshot::new(formats))
+}
+
+/// Restores a clipboard snapshot.
+///
+/// Returns `true` when all formats were restored successfully.
+pub fn restore_snapshot(snapshot: &ClipboardSnapshot) -> bool {
+    let Some(_clip) = ClipboardGuard::open() else {
+        return false;
+    };
+
+    unsafe {
+        let _ = EmptyClipboard();
+    }
+
+    snapshot.formats.iter().all(|entry| {
+        let Ok(hmem) = (unsafe { GlobalAlloc(GMEM_MOVEABLE, entry.data.len()) }) else {
+            tracing::warn!("GlobalAlloc failed while restoring clipboard");
+            return false;
+        };
+
+        let mut mem = GlobalMem::new(hmem);
+
+        let ptr = unsafe { GlobalLock(hmem) };
+        if ptr.is_null() {
+            tracing::warn!("GlobalLock returned null while restoring clipboard");
+            return false;
+        }
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(entry.data.as_ptr(), ptr.cast(), entry.data.len());
+        }
+        let _ = unsafe { GlobalUnlock(hmem) };
+
+        let handle = HANDLE(hmem.0);
+        match unsafe { SetClipboardData(entry.format, Some(handle)) } {
+            Ok(_) => {
+                mem.disarm();
+                true
+            }
+            Err(e) => {
+                tracing::warn!(error = ?e, "SetClipboardData failed while restoring clipboard");
+                false
+            }
+        }
+    })
 }
 
 /// Replaces clipboard content with UTF 16 text (`CF_UNICODETEXT`).
@@ -124,6 +265,8 @@ pub fn set_unicode_text(text: &str) -> bool {
             }
         };
 
+        let mut mem = GlobalMem::new(hmem);
+
         let ptr = GlobalLock(hmem).cast::<u16>();
         if ptr.is_null() {
             tracing::warn!("GlobalLock returned null");
@@ -135,7 +278,10 @@ pub fn set_unicode_text(text: &str) -> bool {
 
         let handle = HANDLE(hmem.0);
         match SetClipboardData(CF_UNICODETEXT_ID, Some(handle)) {
-            Ok(_) => true,
+            Ok(_) => {
+                mem.disarm();
+                true
+            }
             Err(e) => {
                 tracing::warn!(error = ?e, "SetClipboardData failed");
                 false

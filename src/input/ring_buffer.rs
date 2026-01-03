@@ -159,10 +159,6 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
         return None;
     }
 
-    if let Ok(mut j) = journal().lock() {
-        j.invalidate_if_foreground_changed();
-    }
-
     let vk_u16 = u16::try_from(vk).ok()?;
     let vk = VIRTUAL_KEY(vk_u16);
 
@@ -170,24 +166,28 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
         VK_ESCAPE | VK_DELETE | VK_INSERT | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_HOME
         | VK_END | VK_PRIOR | VK_NEXT => {
             if let Ok(mut j) = journal().lock() {
+                j.invalidate_if_foreground_changed();
                 j.clear();
             }
             return None;
         }
         VK_BACK => {
             if let Ok(mut j) = journal().lock() {
+                j.invalidate_if_foreground_changed();
                 j.backspace();
             }
             return None;
         }
         VK_RETURN => {
             if let Ok(mut j) = journal().lock() {
+                j.invalidate_if_foreground_changed();
                 j.push_str("\n");
             }
             return Some("\n".to_string());
         }
         VK_TAB => {
             if let Ok(mut j) = journal().lock() {
+                j.invalidate_if_foreground_changed();
                 j.push_str("\t");
             }
             return Some("\t".to_string());
@@ -197,6 +197,7 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
 
     if mods_ctrl_or_alt_down() {
         if let Ok(mut j) = journal().lock() {
+            j.invalidate_if_foreground_changed();
             j.clear();
         }
         return None;
@@ -204,13 +205,11 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
 
     let s = decode_typed_text(kb, vk)?;
 
-    if s.chars().any(char::is_alphanumeric)
-        && let Ok(mut j) = journal().lock()
-    {
-        j.last_token_autoconverted = false;
-    }
-
     if let Ok(mut j) = journal().lock() {
+        j.invalidate_if_foreground_changed();
+        if s.chars().any(char::is_alphanumeric) {
+            j.last_token_autoconverted = false;
+        }
         j.push_str(&s);
     }
 

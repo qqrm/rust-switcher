@@ -27,6 +27,8 @@ use crate::{
     },
 };
 
+const MAX_SELECTION_CHARS: usize = 512;
+
 /// Virtual key code for the `C` key.
 ///
 /// Used together with Ctrl to trigger the standard Copy shortcut.
@@ -69,7 +71,7 @@ fn try_convert_selection_from_clipboard(
 /// otherwise `false`.
 #[tracing::instrument(level = "trace", skip(state))]
 pub fn convert_selection_if_any(state: &mut AppState) -> bool {
-    match convert_selection_outcome(state, 256) {
+    match convert_selection_outcome(state, MAX_SELECTION_CHARS) {
         ConvertOutcome::Noop => false,
         ConvertOutcome::Ok => true,
         ConvertOutcome::Err(e) => {
@@ -92,7 +94,7 @@ pub fn convert_selection(state: &mut AppState) {
         return;
     }
 
-    match convert_selection_outcome(state, 256) {
+    match convert_selection_outcome(state, MAX_SELECTION_CHARS) {
         ConvertOutcome::Noop => tracing::trace!("no selection"),
         ConvertOutcome::Ok => {}
         ConvertOutcome::Err(e) => {
@@ -328,7 +330,7 @@ pub fn wait_shift_released(timeout_ms: u64) -> bool {
 /// This guard minimizes side effects by restoring only when the clipboard sequence number changed.
 struct ClipboardRestore {
     before_seq: u32,
-    old: Option<String>,
+    snapshot: Option<clip::ClipboardSnapshot>,
 }
 
 impl ClipboardRestore {
@@ -337,7 +339,7 @@ impl ClipboardRestore {
         let before_seq = unsafe { GetClipboardSequenceNumber() };
         Self {
             before_seq,
-            old: clip::get_unicode_text(),
+            snapshot: clip::snapshot(),
         }
     }
 
@@ -354,8 +356,8 @@ impl Drop for ClipboardRestore {
             return;
         }
 
-        if let Some(old_text) = self.old.as_deref() {
-            let _ = clip::set_unicode_text(old_text);
+        if let Some(snapshot) = self.snapshot.as_ref() {
+            let _ = clip::restore_snapshot(snapshot);
         }
     }
 }
