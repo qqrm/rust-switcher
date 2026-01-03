@@ -159,62 +159,60 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
         return None;
     }
 
-    if let Ok(mut j) = journal().lock() {
-        j.invalidate_if_foreground_changed();
-    }
-
     let vk_u16 = u16::try_from(vk).ok()?;
     let vk = VIRTUAL_KEY(vk_u16);
 
+    enum JournalAction {
+        Clear,
+        Backspace,
+        Push(String),
+    }
+
+    let mut action: Option<JournalAction> = None;
+    let mut output: Option<String> = None;
+
     match vk {
         VK_ESCAPE | VK_DELETE | VK_INSERT | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_HOME
-        | VK_END | VK_PRIOR | VK_NEXT => {
-            if let Ok(mut j) = journal().lock() {
-                j.clear();
-            }
-            return None;
-        }
-        VK_BACK => {
-            if let Ok(mut j) = journal().lock() {
-                j.backspace();
-            }
-            return None;
-        }
+        | VK_END | VK_PRIOR | VK_NEXT => action = Some(JournalAction::Clear),
+        VK_BACK => action = Some(JournalAction::Backspace),
         VK_RETURN => {
-            if let Ok(mut j) = journal().lock() {
-                j.push_str("\n");
-            }
-            return Some("\n".to_string());
+            output = Some("\n".to_string());
+            action = Some(JournalAction::Push("\n".to_string()));
         }
         VK_TAB => {
-            if let Ok(mut j) = journal().lock() {
-                j.push_str("\t");
-            }
-            return Some("\t".to_string());
+            output = Some("\t".to_string());
+            action = Some(JournalAction::Push("\t".to_string()));
         }
         _ => {}
     }
 
     if mods_ctrl_or_alt_down() {
-        if let Ok(mut j) = journal().lock() {
-            j.clear();
-        }
-        return None;
+        action = Some(JournalAction::Clear);
     }
 
-    let s = decode_typed_text(kb, vk)?;
-
-    if s.chars().any(char::is_alphanumeric)
-        && let Ok(mut j) = journal().lock()
-    {
-        j.last_token_autoconverted = false;
+    if action.is_none() {
+        let s = decode_typed_text(kb, vk)?;
+        output = Some(s.clone());
+        action = Some(JournalAction::Push(s));
     }
 
     if let Ok(mut j) = journal().lock() {
-        j.push_str(&s);
+        j.invalidate_if_foreground_changed();
+        if let Some(action) = action {
+            match action {
+                JournalAction::Clear => j.clear(),
+                JournalAction::Backspace => j.backspace(),
+                JournalAction::Push(s) => {
+                    if s.chars().any(char::is_alphanumeric) {
+                        j.last_token_autoconverted = false;
+                    }
+                    j.push_str(&s);
+                }
+            }
+        }
     }
 
-    Some(s)
+    output
 }
 
 pub fn take_last_word_with_suffix() -> Option<(String, String)> {
