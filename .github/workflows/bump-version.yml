@@ -1,0 +1,64 @@
+name: Bump patch version
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: "!contains(github.event.head_commit.message, 'Bump version to v')"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump Cargo.toml patch version
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          new_version=$(python - <<'PY'
+          from __future__ import annotations
+
+          import re
+          import tomllib
+          from pathlib import Path
+
+          path = Path("Cargo.toml")
+          data = tomllib.loads(path.read_text(encoding="utf-8"))
+          version = data["package"]["version"]
+          major, minor, patch = version.split(".")
+          new_version = f"{major}.{minor}.{int(patch) + 1}"
+
+          updated = re.sub(
+              r'(?m)^version = "([^"]+)"',
+              f'version = "{new_version}"',
+              path.read_text(encoding="utf-8"),
+              count=1,
+          )
+          path.write_text(updated, encoding="utf-8")
+          print(new_version)
+          PY
+          )
+          echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No version change detected."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml
+          git commit -m "Bump version to v${{ steps.bump.outputs.new_version }}"
+          git tag "v${{ steps.bump.outputs.new_version }}"
+          git push --follow-tags
