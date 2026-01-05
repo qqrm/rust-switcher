@@ -39,7 +39,7 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --locked --target ${{ env.TARGET }} --all-targets -- -D warnings
+        run: cargo clippy --target ${{ env.TARGET }} --all-targets -- -D warnings
 
   test:
     name: Test
@@ -58,7 +58,7 @@ jobs:
           key: ${{ runner.os }}-${{ env.TARGET }}
 
       - name: Run tests
-        run: cargo test --locked --target ${{ env.TARGET }} -- --nocapture
+        run: cargo test --target ${{ env.TARGET }} -- --nocapture
 
   build:
     name: Build (release)
@@ -76,8 +76,8 @@ jobs:
         with:
           key: ${{ runner.os }}-${{ env.TARGET }}
 
-      - name: Build (release, locked)
-        run: cargo build --release --locked --target ${{ env.TARGET }}
+      - name: Build (release)
+        run: cargo build --release --target ${{ env.TARGET }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
