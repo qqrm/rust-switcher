@@ -1,72 +1,181 @@
-name: Release binaries (Windows)
+name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        type: choice
+        required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-pc-windows-msvc
-            bin_ext: ".exe"
-          - target: aarch64-pc-windows-msvc
-            bin_ext: ".exe"
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Ensure main branch
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "Release workflow must be run on main branch. Current ref: $GITHUB_REF"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
-      - name: Build
-        shell: bash
+      - name: Cargo fmt
+        run: cargo fmt --check
+
+      - name: Determine test args
+        id: test-args
         run: |
-          set -euo pipefail
-          cargo build --release --locked --target "${{ matrix.target }}"
+          python - <<'PY' > /tmp/test_args
+          import json
+          import subprocess
 
-      - name: Package
+          metadata = json.loads(
+              subprocess.check_output(
+                  ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+                  text=True,
+              )
+          )
+          args = "--workspace" if len(metadata.get("workspace_members", [])) > 1 else ""
+          print(args)
+          PY
+          echo "args=$(cat /tmp/test_args)" >> "$GITHUB_OUTPUT"
+
+      - name: Cargo test
+        run: cargo test --all-features ${{ steps.test-args.outputs.args }}
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --locked
+
+      - name: Bump version
+        run: cargo set-version --bump ${{ inputs.bump }}
+
+      - name: Determine version and tag
+        id: version
+        run: |
+          python - <<'PY' > /tmp/version
+          import json
+          import subprocess
+          from pathlib import Path
+
+          metadata = json.loads(
+              subprocess.check_output(
+                  ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+                  text=True,
+              )
+          )
+          workspace_root = Path(metadata["workspace_root"]).resolve()
+          manifest_path = workspace_root / "Cargo.toml"
+          package = next(
+              pkg for pkg in metadata["packages"] if Path(pkg["manifest_path"]).resolve() == manifest_path
+          )
+          version = package["version"]
+          print(version)
+          PY
+          version=$(cat /tmp/version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tag does not exist
+        run: |
+          if git show-ref --tags --verify --quiet "refs/tags/${{ steps.version.outputs.tag }}"; then
+            echo "Tag ${{ steps.version.outputs.tag }} already exists."
+            exit 1
+          fi
+
+      - name: Commit release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          if git diff --cached --quiet; then
+            echo "No changes to commit after version bump."
+            exit 1
+          fi
+          git commit -m "release: ${{ steps.version.outputs.tag }}"
+
+      - name: Create tag
+        run: git tag "${{ steps.version.outputs.tag }}"
+
+      - name: Push commit and tag
+        run: |
+          git push origin HEAD:main
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
+
+  build-windows:
+    runs-on: windows-latest
+    needs: release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package asset
+        id: package
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $bin = "rust-switcher"
-          $version = $env:GITHUB_REF_NAME.Substring(1)
-          $target = "${{ matrix.target }}"
-          $out = "$bin-$version-$target.zip"
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path "target\$target\release\$bin${{ matrix.bin_ext }}" -DestinationPath "dist\$out" -Force
+          $version = "${{ needs.release.outputs.version }}"
+          $asset = "rust-switcher-$version-windows-x86_64.zip"
+          Compress-Archive -Path "target/release/rust-switcher.exe" -DestinationPath $asset -Force
+          "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Upload artifact
+      - name: Upload asset
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
-          path: dist/*
+          name: windows-asset
+          path: ${{ steps.package.outputs.asset }}
           if-no-files-found: error
 
-  release:
-    name: Create GitHub Release
+  github-release:
     runs-on: ubuntu-latest
-    needs: build
+    needs:
+      - release
+      - build-windows
 
     steps:
-      - name: Download artifacts
+      - name: Download asset
         uses: actions/download-artifact@v4
         with:
-          path: dist
-          merge-multiple: true
+          name: windows-asset
 
-      - name: Publish Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
-          generate_release_notes: true
+          tag_name: ${{ needs.release.outputs.tag }}
+          name: ${{ needs.release.outputs.tag }}
+          files: rust-switcher-${{ needs.release.outputs.version }}-windows-x86_64.zip
