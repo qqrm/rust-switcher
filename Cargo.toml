@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 description = "Windows keyboard layout switcher and text conversion utility"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/qqrm/rust-switcher"
 homepage = "https://github.com/qqrm/rust-switcher"
+readme = "README.md"
 keywords = ["windows", "winapi", "keyboard", "hotkey", "tray"]
 categories = ["gui", "os::windows-apis"]
 
@@ -58,3 +59,7 @@ panic = "abort"
 
 [dev-dependencies]
 tracing-test = "0.2.5"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.zip"
+bin-dir = "{ bin }{ binary-ext }"
