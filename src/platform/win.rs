@@ -321,8 +321,8 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
 
         WM_CTLCOLORDLG | WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => on_ctlcolor(wparam, lparam),
         WM_SYSCOMMAND => {
-            let cmd = (wparam.0 as u32) & 0xFFF0;
-            if cmd == SC_CLOSE {
+            let cmd = wparam.0 & 0xFFF0usize;
+            if cmd == SC_CLOSE as usize {
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
                 return LRESULT(0);
             }
