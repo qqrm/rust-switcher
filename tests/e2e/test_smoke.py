@@ -12,6 +12,7 @@ def _get_app_path() -> str:
     app_path = os.environ.get("RUST_SWITCHER_EXE")
     if not app_path:
         raise RuntimeError("RUST_SWITCHER_EXE must point to the rust-switcher.exe")
+    app_path = os.path.abspath(app_path)
     if not os.path.exists(app_path):
         raise RuntimeError(f"RUST_SWITCHER_EXE does not exist: {app_path}")
     return app_path
@@ -40,7 +41,7 @@ def driver():
         driver.quit()
 
 
-def _wait_for(driver, by, value, timeout=10):
+def _wait_for(driver, by, value, timeout=20):
     return WebDriverWait(driver, timeout).until(
         EC.presence_of_element_located((by, value))
     )

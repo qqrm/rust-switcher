@@ -113,18 +113,29 @@ jobs:
       - name: Build (debug)
         run: cargo build --target ${{ env.TARGET }}
 
+      - name: Resolve app path
+        shell: powershell
+        run: |
+          $exePath = Resolve-Path "target/${{ env.TARGET }}/debug/rust-switcher.exe"
+          "RUST_SWITCHER_EXE=$exePath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Start WinAppDriver
         shell: powershell
         run: |
           $logPath = Join-Path $env:RUNNER_TEMP "WinAppDriver.log"
           Start-Process -FilePath "${env:ProgramFiles(x86)}\Windows Application Driver\WinAppDriver.exe" -ArgumentList "4723/wd/hub /log $logPath" -PassThru | Out-Null
-          Start-Sleep -Seconds 2
+          for ($i = 0; $i -lt 15; $i++) {
+            try {
+              $resp = Invoke-WebRequest -Uri "http://127.0.0.1:4723/status" -UseBasicParsing -TimeoutSec 2
+              if ($resp.StatusCode -eq 200) { break }
+            } catch {}
+            Start-Sleep -Seconds 2
+          }
 
       - name: Run E2E tests
         env:
-          RUST_SWITCHER_EXE: target/${{ env.TARGET }}/debug/rust-switcher.exe
           WINAPPDRIVER_URL: http://127.0.0.1:4723/wd/hub
-        run: pytest tests/e2e
+        run: pytest -vv tests/e2e
 
       - name: Upload WinAppDriver log
         if: always()
