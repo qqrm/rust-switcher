@@ -4,6 +4,14 @@
 
 1. Создайте секрет репозитория `CARGO_REGISTRY_TOKEN` с токеном crates.io.
 
+## Что происходит при каждом вливе в `main`
+
+- Workflow **Bump patch version** автоматически повышает patch-версию в `Cargo.toml`,
+  создаёт коммит `Bump version to vX.Y.Z` и тег `vX.Y.Z`.
+- Публикация в crates.io выполняется автоматически (при наличии секрета
+  `CARGO_REGISTRY_TOKEN`).
+- GitHub Release создаётся автоматически.
+
 ## Выпуск релиза
 
 1. Откройте GitHub Actions и запустите workflow **Release** вручную.
