@@ -110,8 +110,12 @@ jobs:
       - name: Resolve WinAppDriver path
         shell: powershell
         run: |
-          $cmd = Get-Command WinAppDriver.exe -ErrorAction Stop
-          "WINAPPDRIVER_EXE=$($cmd.Source)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $exePath = "${env:ProgramFiles(x86)}\\Windows Application Driver\\WinAppDriver.exe"
+          if (-not (Test-Path $exePath)) {
+            Write-Error "WinAppDriver not found at expected path: $exePath"
+            exit 1
+          }
+          "WINAPPDRIVER_EXE=$exePath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install Python dependencies
         run: pip install -r tests/e2e/requirements.txt
