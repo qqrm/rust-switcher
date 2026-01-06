@@ -1,213 +1,91 @@
-name: Release
+name: Update Rust toolchain
 
 on:
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
-    inputs:
-      bump:
-        description: Version bump type
-        type: choice
-        required: true
-        default: patch
-        options:
-          - patch
-          - minor
-          - major
-
-permissions:
-  contents: write
 
 jobs:
-  release:
+  update:
     runs-on: ubuntu-latest
-    env:
-      RUST_TOOLCHAIN: stable
-      CARGO_EDIT_VERSION: "0.13.0"
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.tag.outputs.tag }}
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
-      - name: Verify main branch
-        if: ${{ github.ref != 'refs/heads/main' }}
-        run: |
-          echo "Release workflow must be run on main branch. Current ref: $GITHUB_REF"
-          exit 1
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
 
-      - name: Install Rust toolchain
+      - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ runner.os }}-x86_64-unknown-linux-gnu
-          shared-key: release-${{ runner.os }}-x86_64-unknown-linux-gnu-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/rust-toolchain.toml') }}
+          toolchain: stable
+          components: clippy,rustfmt
 
-      - name: Cache cargo binaries
-        id: cargo-bin-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.CARGO_EDIT_VERSION }}
-
-      - name: Format check
-        run: cargo fmt --check
-
-      - name: Compute test args
-        id: test-args
+      - name: Capture current stable version
+        id: rust
+        shell: bash
         run: |
-          python - <<'PY' > /tmp/test_args
-          import json
-          import subprocess
-
-          metadata = json.loads(
-              subprocess.check_output(
-                  ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-                  text=True,
-              )
-          )
-          args = "--workspace" if len(metadata.get("workspace_members", [])) > 1 else ""
-          print(args)
-          PY
-          echo "args=$(cat /tmp/test_args)" >> "$GITHUB_OUTPUT"
-
-      - name: Run tests
-        run: cargo test --all-features ${{ steps.test-args.outputs.args }}
-
-      - name: Install cargo-edit
-        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-edit --locked --version $CARGO_EDIT_VERSION
-
-      - name: Bump version
-        run: cargo set-version --bump ${{ inputs.bump }}
-
-      - name: Read crate version
-        id: version
-        run: |
-          python - <<'PY' > /tmp/version
-          import json
-          import subprocess
-          from pathlib import Path
-
-          metadata = json.loads(
-              subprocess.check_output(
-                  ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-                  text=True,
-              )
-          )
-          workspace_root = Path(metadata["workspace_root"]).resolve()
-          manifest_path = workspace_root / "Cargo.toml"
-          package = next(
-              pkg for pkg in metadata["packages"] if Path(pkg["manifest_path"]).resolve() == manifest_path
-          )
-          version = package["version"]
-          print(version)
-          PY
-          version=$(cat /tmp/version)
+          set -euo pipefail
+          version="$(rustup run stable rustc --version | awk '{print $2}')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Set release tag
-        id: tag
-        run: echo "tag=v${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
-
-      - name: Check tag does not exist
+      - name: Update rust-toolchain.toml
+        id: update
+        shell: bash
         run: |
-          if git show-ref --tags --verify --quiet "refs/tags/${{ steps.tag.outputs.tag }}"; then
-            echo "Tag ${{ steps.tag.outputs.tag }} already exists."
-            exit 1
+          set -euo pipefail
+          version="${{ steps.rust.outputs.version }}"
+
+          if [ -f rust-toolchain.toml ] && grep -qE "^channel\s*=\s*\"$version\"$" rust-toolchain.toml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-      - name: Configure git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cat > rust-toolchain.toml <<EOT
+          [toolchain]
+          channel = "$version"
+          components = ["clippy", "rustfmt"]
+          profile = "minimal"
+          EOT
 
-      - name: Stage release files
-        run: |
-          git add Cargo.toml Cargo.lock
-          if git diff --cached --quiet; then
-            echo "No changes to commit after version bump."
-            exit 1
-          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Commit release
-        run: git commit -m "release: ${{ steps.tag.outputs.tag }}"
+      - name: Run rustfmt
+        if: steps.update.outputs.changed == 'true'
+        run: rustup run stable cargo fmt --all
 
-      - name: Create tag
-        run: git tag "${{ steps.tag.outputs.tag }}"
+      - name: Run clippy
+        if: steps.update.outputs.changed == 'true'
+        run: rustup run stable cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Push commit
-        run: git push origin HEAD:main
+      - name: Run tests
+        if: steps.update.outputs.changed == 'true'
+        run: rustup run stable cargo test
 
-      - name: Push tag
-        run: git push origin "${{ steps.tag.outputs.tag }}"
-
-      - name: Publish to crates.io
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
-
-  build-windows:
-    runs-on: windows-latest
-    needs: release
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Create pull request
+        id: cpr
+        if: steps.update.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
         with:
-          ref: ${{ needs.release.outputs.tag }}
-          fetch-depth: 0
-          fetch-tags: true
+          commit-message: "chore: update rust toolchain to ${{ steps.rust.outputs.version }}"
+          title: "chore: update rust toolchain to ${{ steps.rust.outputs.version }}"
+          body: |
+            ## Summary
+            - Update the pinned Rust toolchain to `${{ steps.rust.outputs.version }}`.
+            - Regenerate `rust-toolchain.toml` with minimal profile and lint components.
+            - Reformat sources and run the CI test suite against the new toolchain.
+          branch: chore/update-rust-toolchain
+          labels: dependencies
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          delete-branch: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
+      - name: Enable auto-merge
+        if: steps.update.outputs.changed == 'true' && steps.cpr.outputs.pull-request-number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          key: build-windows-${{ runner.os }}-x86_64-pc-windows-msvc
-          shared-key: build-windows-${{ runner.os }}-x86_64-pc-windows-msvc-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/rust-toolchain.toml') }}
-
-      - name: Build Windows binary
-        run: cargo build --release --locked
-
-      - name: Package Windows asset
-        id: package
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $version = "${{ needs.release.outputs.version }}"
-          $asset = "rust-switcher-$version-windows-x86_64.zip"
-          Compress-Archive -Path "target/release/rust-switcher.exe" -DestinationPath $asset -Force
-          "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Upload Windows asset
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-asset
-          path: ${{ steps.package.outputs.asset }}
-          if-no-files-found: error
-
-  github-release:
-    runs-on: ubuntu-latest
-    needs:
-      - release
-      - build-windows
-
-    steps:
-      - name: Download Windows asset
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-asset
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.release.outputs.tag }}
-          name: ${{ needs.release.outputs.tag }}
-          files: rust-switcher-${{ needs.release.outputs.version }}-windows-x86_64.zip
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: squash
+          token: ${{ secrets.GITHUB_TOKEN }}
