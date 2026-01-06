@@ -33,7 +33,7 @@ on:
         default: true
 
       do_publish_crates:
-        description: "Step 2 (Ubuntu): publish to crates.io (uses tag ref)"
+        description: "Step 2 (Windows): publish to crates.io (uses tag ref)"
         type: boolean
         required: true
         default: true
@@ -272,7 +272,7 @@ jobs:
 
   publish_crates:
     name: "Step 2 - publish to crates.io (tag ref)"
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: determine_tag
     if: "${{ inputs.do_publish_crates }}"
 
@@ -291,10 +291,18 @@ jobs:
           shared-key: "release"
 
       - name: Verify nightly toolchain
-        shell: bash
+        shell: pwsh
         run: |
-          rustc -Vv
-          rustc -Vv | grep -q 'release:.*nightly'
+          $vv = (rustc -Vv) -join "`n"
+          Write-Host $vv
+          if ($vv -notmatch "release:\s+.*nightly") {
+            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly."
+            exit 1
+          }
+
+      - name: Build (locked)
+        shell: pwsh
+        run: cargo build -p rust-switcher --release --locked
 
       - name: Publish to crates.io
         env:
