@@ -11,7 +11,7 @@ run-name: "Release on ${{ github.ref_name }} bump ${{ inputs.bump }} | bump_tag=
 #   Step 4: create GitHub Release and attach the zip (tag)
 # - Caching and tooling:
 #   - Use Swatinem/rust-cache@v2 in all jobs to cache cargo registry, git deps, and target artifacts
-#   - Use cargo-binstall to install helper cargo subcommands fast (cargo-edit)
+#   - Use cargo-binstall to install helper cargo subcommands fast (cargo-set-version)
 
 on:
   workflow_dispatch:
@@ -103,9 +103,9 @@ jobs:
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@v1.16.6
 
-      - name: Install cargo-edit via binstall
+      - name: Install cargo-set-version via binstall
         shell: pwsh
-        run: cargo binstall cargo-edit -y --version 0.13.0
+        run: cargo binstall cargo-set-version -y
 
       - name: Compute next version from latest repo tag and Cargo.toml, set version, update lock
         id: version
