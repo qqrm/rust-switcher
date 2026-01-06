@@ -22,7 +22,7 @@ env:
 jobs:
   lint:
     name: Lint (fmt, clippy)
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: lint
     steps:
       - name: Checkout
@@ -62,7 +62,7 @@ jobs:
 
   build:
     name: Build (release)
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: test
     steps:
       - name: Checkout
@@ -90,7 +90,7 @@ jobs:
 
   e2e:
     name: E2E (WinAppDriver)
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: build
     steps:
       - name: Checkout
@@ -103,6 +103,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ runner.os }}-${{ env.TARGET }}
+
+      - name: Runner info
+        shell: powershell
+        run: |
+          systeminfo | Select-String "OS Name","OS Version","System Type"
+          Get-ChildItem Env: | Sort-Object Name | Select-Object -First 50
 
       - name: Install WinAppDriver
         shell: powershell
@@ -123,12 +129,17 @@ jobs:
       - name: Resolve WinAppDriver path
         shell: powershell
         run: |
-          $winAppDriverExe = Join-Path ${env:ProgramFiles(x86)} "Windows Application Driver\WinAppDriver.exe"
-          if (-not (Test-Path $winAppDriverExe)) {
-            Write-Error "WinAppDriver.exe not found at: $winAppDriverExe"
-            Get-ChildItem -Force (Split-Path $winAppDriverExe -Parent) -ErrorAction SilentlyContinue | Format-List
+          $candidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} "Windows Application Driver\WinAppDriver.exe"),
+            (Join-Path ${env:ProgramFiles} "Windows Application Driver\WinAppDriver.exe")
+          )
+
+          $winAppDriverExe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $winAppDriverExe) {
+            Write-Error "WinAppDriver.exe not found. Tried: $($candidates -join '; ')"
             exit 1
           }
+
           "WINAPPDRIVER_EXE=$winAppDriverExe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build (debug)
@@ -147,9 +158,7 @@ jobs:
           $outPath = Join-Path $env:RUNNER_TEMP "WinAppDriver.out.txt"
           $errPath = Join-Path $env:RUNNER_TEMP "WinAppDriver.err.txt"
 
-          if (Test-Path $logPath) { Remove-Item -Force $logPath }
-          if (Test-Path $outPath) { Remove-Item -Force $outPath }
-          if (Test-Path $errPath) { Remove-Item -Force $errPath }
+          Remove-Item -Force -ErrorAction SilentlyContinue $logPath, $outPath, $errPath
 
           $args = @("4723/wd/hub", "/log", $logPath)
 
@@ -164,6 +173,7 @@ jobs:
           Start-Sleep -Seconds 1
 
           if ($proc.HasExited) {
+            $proc.WaitForExit()
             Write-Error "WinAppDriver exited immediately with code $($proc.ExitCode)"
             if (Test-Path $errPath) { Write-Host "stderr tail:"; Get-Content -Tail 200 $errPath }
             if (Test-Path $outPath) { Write-Host "stdout tail:"; Get-Content -Tail 200 $outPath }
@@ -182,7 +192,10 @@ jobs:
           }
 
           if (-not $ready) {
+            if ($proc.HasExited) { $proc.WaitForExit() }
             Write-Error "WinAppDriver did not start listening on port 4723 (exited=$($proc.HasExited) code=$($proc.ExitCode))"
+            Write-Host "netstat:"
+            netstat -ano | findstr ":4723" | Out-String | Write-Host
             if (Test-Path $errPath) { Write-Host "stderr tail:"; Get-Content -Tail 200 $errPath }
             if (Test-Path $outPath) { Write-Host "stdout tail:"; Get-Content -Tail 200 $outPath }
             if (Test-Path $logPath) { Write-Host "log tail:"; Get-Content -Tail 200 $logPath }
