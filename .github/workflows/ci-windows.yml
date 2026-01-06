@@ -24,13 +24,13 @@ jobs:
     name: Lint (fmt, clippy)
     runs-on: windows-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust (from rust-toolchain.toml)
+      - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
-      - name: Rust cache
+      - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ runner.os }}-${{ env.TARGET }}
@@ -38,7 +38,7 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
 
-      - name: Clippy
+      - name: Run Clippy
         run: cargo clippy --target ${{ env.TARGET }} --all-targets -- -D warnings
 
   test:
@@ -46,13 +46,13 @@ jobs:
     runs-on: windows-latest
     needs: lint
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust (from rust-toolchain.toml)
+      - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
-      - name: Rust cache
+      - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ runner.os }}-${{ env.TARGET }}
@@ -65,21 +65,21 @@ jobs:
     runs-on: windows-latest
     needs: test
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust (from rust-toolchain.toml)
+      - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
-      - name: Rust cache
+      - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ runner.os }}-${{ env.TARGET }}
 
-      - name: Build (release)
+      - name: Build release binary
         run: cargo build --release --target ${{ env.TARGET }}
 
-      - name: Upload artifact
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
