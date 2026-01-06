@@ -9,6 +9,9 @@ run-name: "Release on ${{ github.ref_name }} bump ${{ inputs.bump }} | bump_tag=
 #   Step 2: publish to crates.io from tag
 #   Step 3: build Windows zip from tag
 #   Step 4: create GitHub Release and attach the zip (tag)
+# - Caching and tooling:
+#   - Use Swatinem/rust-cache@v2 in all jobs to cache cargo registry, git deps, and target artifacts
+#   - Use cargo-binstall to install helper cargo subcommands fast (cargo-edit)
 
 on:
   workflow_dispatch:
@@ -76,14 +79,16 @@ jobs:
           Write-Error "Release workflow must be run on main branch when do_bump_and_tag=true. Current ref: $env:GITHUB_REF"
           exit 1
 
-      - name: Checkout (full history and tags)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Rust build (cargo, target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release"
 
       - name: Verify nightly toolchain
         shell: pwsh
@@ -95,21 +100,22 @@ jobs:
             exit 1
           }
 
-      - name: Install cargo-edit
-        shell: pwsh
-        run: cargo install cargo-edit --locked --version 0.13.0
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.16.6
 
-      - name: Compute next version from latest repo tag, set version, update lock
+      - name: Install cargo-edit via binstall
+        shell: pwsh
+        run: cargo binstall cargo-edit -y --version 0.13.0
+
+      - name: Compute next version from latest repo tag and Cargo.toml, set version, update lock
         id: version
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
 
-          git fetch --tags --force origin
-
-          function Parse-TagToSemVer([string]$tag) {
-            if ($tag -match '^v(\d+)\.(\d+)\.(\d+)$') {
+          function Parse-SemVer([string]$s) {
+            if ($s -match '^(\d+)\.(\d+)\.(\d+)$') {
               return [pscustomobject]@{
                 Major = [int]$Matches[1]
                 Minor = [int]$Matches[2]
@@ -138,50 +144,75 @@ jobs:
             return $n
           }
 
-          $tags = git tag -l "v[0-9]*.[0-9]*.[0-9]*"
-          $latest = $null
-
-          foreach ($t in $tags) {
-            $sv = Parse-TagToSemVer $t
-            if ($null -eq $sv) { continue }
-            if ($null -eq $latest) {
-              $latest = $sv
-              continue
-            }
-            if ((Compare-SemVer $sv $latest) -gt 0) { $latest = $sv }
-          }
-
-          if ($null -eq $latest) {
-            $latest = [pscustomobject]@{ Major = 0; Minor = 0; Patch = 0 }
-          }
-
           $bump = "${{ inputs.bump }}"
-          $candidate = Bump-SemVer $latest $bump
 
-          $maxRetries = 200
+          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          if (-not $meta.workspace_members -or $meta.workspace_members.Count -lt 1) {
+            throw "cargo metadata returned empty workspace_members"
+          }
+          $memberId = $meta.workspace_members[0]
+          $pkg = $meta.packages | Where-Object { $_.id -eq $memberId } | Select-Object -First 1
+          if (-not $pkg) { throw "Unable to determine workspace root package from cargo metadata" }
+
+          $currentVersionStr = $pkg.version
+          $current = Parse-SemVer $currentVersionStr
+          if ($null -eq $current) { throw "Current Cargo.toml version is not semver X.Y.Z: $currentVersionStr" }
+
+          $tagsRaw = git ls-remote --tags origin "refs/tags/v[0-9]*.[0-9]*.[0-9]*"
+          $latestTag = $null
+          foreach ($line in $tagsRaw) {
+            $parts = $line -split "`t"
+            if ($parts.Count -lt 2) { continue }
+            $ref = $parts[1]
+            if ($ref -notmatch '^refs/tags/v(\d+)\.(\d+)\.(\d+)$') { continue }
+            $sv = [pscustomobject]@{
+              Major = [int]$Matches[1]
+              Minor = [int]$Matches[2]
+              Patch = [int]$Matches[3]
+            }
+            if ($null -eq $latestTag) { $latestTag = $sv; continue }
+            if ((Compare-SemVer $sv $latestTag) -gt 0) { $latestTag = $sv }
+          }
+
+          if ($null -eq $latestTag) {
+            $latestTag = [pscustomobject]@{ Major = 0; Minor = 0; Patch = 0 }
+          }
+
+          $base = $latestTag
+          if ((Compare-SemVer $current $base) -gt 0) { $base = $current }
+
+          $candidate = Bump-SemVer $base $bump
+
+          $maxRetries = 500
           for ($i = 0; $i -lt $maxRetries; $i++) {
             $version = SemVer-ToString $candidate
             $tag = "v$version"
 
-            $remote = git ls-remote --tags origin "refs/tags/$tag"
-            if (-not $remote) {
-              cargo set-version $version
-
-              cargo build -p rust-switcher --release
-
-              "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-              "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-              Write-Host "Latest tag in repo: v$($latest.Major).$($latest.Minor).$($latest.Patch)"
-              Write-Host "Chosen: $tag"
-              break
+            if ($version -eq $currentVersionStr) {
+              $candidate.Patch++
+              continue
             }
 
-            $candidate.Patch++
-            if ($i -eq ($maxRetries - 1)) {
-              throw "Unable to find a free tag after $maxRetries attempts starting from $tag"
+            $remoteTag = git ls-remote --tags origin "refs/tags/$tag"
+            if ($remoteTag) {
+              $candidate.Patch++
+              continue
             }
+
+            cargo set-version $version
+            $changed = git diff --name-only -- Cargo.toml
+            if (-not $changed) {
+              throw "cargo set-version produced no changes for version=$version"
+            }
+
+            cargo build -p rust-switcher --release
+
+            "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            break
           }
+
+          if (-not (Test-Path $env:GITHUB_OUTPUT)) { throw "GITHUB_OUTPUT not found" }
 
       - name: Configure git identity
         shell: pwsh
@@ -194,7 +225,9 @@ jobs:
         run: |
           git add Cargo.toml Cargo.lock
           git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) { throw "No changes to commit after version bump" }
+          if ($LASTEXITCODE -eq 0) {
+            throw "No changes to commit after version selection. version=${{ steps.version.outputs.version }} tag=${{ steps.version.outputs.tag }}"
+          }
           git commit -m "release: ${{ steps.version.outputs.tag }}"
 
       - name: Create tag locally
@@ -234,6 +267,7 @@ jobs:
             echo "existing_tag is required when do_bump_and_tag=false" >&2
             exit 1
           fi
+
           echo "tag=${{ inputs.existing_tag }}" >> "$GITHUB_OUTPUT"
 
   publish_crates:
@@ -247,11 +281,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: "${{ needs.determine_tag.outputs.tag }}"
-          fetch-depth: 0
-          fetch-tags: true
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Rust build (cargo, target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release"
 
       - name: Verify nightly toolchain
         shell: bash
@@ -278,11 +315,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: "${{ needs.determine_tag.outputs.tag }}"
-          fetch-depth: 0
-          fetch-tags: true
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Rust build (cargo, target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release"
 
       - name: Verify nightly toolchain
         shell: pwsh
