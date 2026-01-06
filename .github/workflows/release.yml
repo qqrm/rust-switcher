@@ -76,10 +76,26 @@ jobs:
         id: meta
         shell: pwsh
         run: |
-          $version = python -c "import tomllib, pathlib; d=tomllib.loads(pathlib.Path('Cargo.toml').read_text('utf-8')); print(d['package']['version'])"
+          $meta = (cargo metadata --no-deps --format-version 1) | ConvertFrom-Json
+
+          $workspaceRoot = [System.IO.Path]::GetFullPath($meta.workspace_root)
+          $rootManifest = [System.IO.Path]::GetFullPath((Join-Path $workspaceRoot "Cargo.toml"))
+
+          $pkg = $meta.packages | Where-Object {
+            [System.IO.Path]::GetFullPath($_.manifest_path) -eq $rootManifest
+          } | Select-Object -First 1
+
+          if (-not $pkg) {
+            Write-Host "Root package not found via cargo metadata. workspace_root=$workspaceRoot"
+            exit 1
+          }
+
+          $version = $pkg.version
           $tag = "v$version"
+
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
           Write-Host "Version: $version"
           Write-Host "Tag: $tag"
 
