@@ -9,9 +9,9 @@ This document captures the minimal end-to-end checks we want to keep stable.
    - Start the app and ensure the process stays alive.
 2. **Main window appears**
    - Find the window by `Name = RustSwitcher`.
-3. **Key UI state toggle**
-   - Toggle a primary UI state (MVP: **"Start on startup"** checkbox).
-   - Verify the toggle state changes.
+3. **Key UI state change**
+   - Update a primary UI state (MVP: **"Delay before switching"** field).
+   - Verify the value changes.
 4. **Status/controls visible**
    - Verify core controls are visible (e.g. "Apply" button and hotkey labels like
      "Autoconvert pause:").

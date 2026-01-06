@@ -35,8 +35,9 @@ def driver():
     finally:
         try:
             driver.close_app()
-        finally:
-            driver.quit()
+        except Exception:
+            pass
+        driver.quit()
 
 
 def _wait_for(driver, by, value, timeout=10):
@@ -45,25 +46,26 @@ def _wait_for(driver, by, value, timeout=10):
     )
 
 
-def _toggle_state(element) -> str:
-    return element.get_attribute("Toggle.ToggleState")
+def _text_value(element) -> str:
+    return element.get_attribute("Value.Value")
 
 
 def test_smoke_main_window_and_controls(driver):
     main_window = _wait_for(driver, AppiumBy.NAME, "RustSwitcher")
     assert main_window.is_displayed()
 
-    autostart_checkbox = _wait_for(driver, AppiumBy.NAME, "Start on startup")
+    delay_input = _wait_for(driver, AppiumBy.ACCESSIBILITY_ID, "1003")
     apply_button = _wait_for(driver, AppiumBy.NAME, "Apply")
     autoconvert_label = _wait_for(driver, AppiumBy.NAME, "Autoconvert pause:")
 
-    assert autostart_checkbox.is_displayed()
+    assert delay_input.is_displayed()
     assert apply_button.is_displayed()
     assert autoconvert_label.is_displayed()
 
-    before = _toggle_state(autostart_checkbox)
-    autostart_checkbox.click()
-    after = _toggle_state(autostart_checkbox)
+    before = _text_value(delay_input)
+    delay_input.clear()
+    delay_input.send_keys("250")
+    after = _text_value(delay_input)
 
     assert before != after
 
