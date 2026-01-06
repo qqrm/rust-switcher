@@ -24,25 +24,25 @@ jobs:
       CARGO_EDIT_VERSION: "0.13.0"
     outputs:
       version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
+      tag: ${{ steps.tag.outputs.tag }}
 
     steps:
-      - name: Ensure main branch
+      - name: Verify main branch
         if: ${{ github.ref != 'refs/heads/main' }}
         run: |
           echo "Release workflow must be run on main branch. Current ref: $GITHUB_REF"
           exit 1
 
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Install Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust cache
+      - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ runner.os }}-x86_64-unknown-linux-gnu
@@ -55,10 +55,10 @@ jobs:
           path: ~/.cargo/bin
           key: cargo-bin-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.CARGO_EDIT_VERSION }}
 
-      - name: Cargo fmt
+      - name: Format check
         run: cargo fmt --check
 
-      - name: Determine test args
+      - name: Compute test args
         id: test-args
         run: |
           python - <<'PY' > /tmp/test_args
@@ -76,7 +76,7 @@ jobs:
           PY
           echo "args=$(cat /tmp/test_args)" >> "$GITHUB_OUTPUT"
 
-      - name: Cargo test
+      - name: Run tests
         run: cargo test --all-features ${{ steps.test-args.outputs.args }}
 
       - name: Install cargo-edit
@@ -86,7 +86,7 @@ jobs:
       - name: Bump version
         run: cargo set-version --bump ${{ inputs.bump }}
 
-      - name: Determine version and tag
+      - name: Read crate version
         id: version
         run: |
           python - <<'PY' > /tmp/version
@@ -110,33 +110,42 @@ jobs:
           PY
           version=$(cat /tmp/version)
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure tag does not exist
+      - name: Set release tag
+        id: tag
+        run: echo "tag=v${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag does not exist
         run: |
-          if git show-ref --tags --verify --quiet "refs/tags/${{ steps.version.outputs.tag }}"; then
-            echo "Tag ${{ steps.version.outputs.tag }} already exists."
+          if git show-ref --tags --verify --quiet "refs/tags/${{ steps.tag.outputs.tag }}"; then
+            echo "Tag ${{ steps.tag.outputs.tag }} already exists."
             exit 1
           fi
 
-      - name: Commit release
+      - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Stage release files
+        run: |
           git add Cargo.toml Cargo.lock
           if git diff --cached --quiet; then
             echo "No changes to commit after version bump."
             exit 1
           fi
-          git commit -m "release: ${{ steps.version.outputs.tag }}"
+
+      - name: Commit release
+        run: git commit -m "release: ${{ steps.tag.outputs.tag }}"
 
       - name: Create tag
-        run: git tag "${{ steps.version.outputs.tag }}"
+        run: git tag "${{ steps.tag.outputs.tag }}"
 
-      - name: Push commit and tag
-        run: |
-          git push origin HEAD:main
-          git push origin "${{ steps.version.outputs.tag }}"
+      - name: Push commit
+        run: git push origin HEAD:main
+
+      - name: Push tag
+        run: git push origin "${{ steps.tag.outputs.tag }}"
 
       - name: Publish to crates.io
         env:
@@ -148,26 +157,26 @@ jobs:
     needs: release
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release.outputs.tag }}
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Install Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust cache
+      - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           key: build-windows-${{ runner.os }}-x86_64-pc-windows-msvc
           shared-key: build-windows-${{ runner.os }}-x86_64-pc-windows-msvc-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/rust-toolchain.toml') }}
 
-      - name: Build release binary
+      - name: Build Windows binary
         run: cargo build --release --locked
 
-      - name: Package asset
+      - name: Package Windows asset
         id: package
         shell: pwsh
         run: |
@@ -177,7 +186,7 @@ jobs:
           Compress-Archive -Path "target/release/rust-switcher.exe" -DestinationPath $asset -Force
           "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Upload asset
+      - name: Upload Windows asset
         uses: actions/upload-artifact@v4
         with:
           name: windows-asset
@@ -191,12 +200,12 @@ jobs:
       - build-windows
 
     steps:
-      - name: Download asset
+      - name: Download Windows asset
         uses: actions/download-artifact@v4
         with:
           name: windows-asset
 
-      - name: Publish GitHub Release
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.tag }}
