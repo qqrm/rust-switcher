@@ -87,3 +87,49 @@ jobs:
           path: |
             target/${{ env.TARGET }}/release/*.exe
             target/${{ env.TARGET }}/release/*.pdb
+
+  e2e:
+    name: E2E (WinAppDriver)
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (from rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-${{ env.TARGET }}
+
+      - name: Install WinAppDriver
+        run: choco install winappdriver -y
+
+      - name: Install Python dependencies
+        run: pip install -r tests/e2e/requirements.txt
+
+      - name: Build (debug)
+        run: cargo build --target ${{ env.TARGET }}
+
+      - name: Start WinAppDriver
+        shell: powershell
+        run: |
+          $logPath = Join-Path $env:RUNNER_TEMP "WinAppDriver.log"
+          Start-Process -FilePath "${env:ProgramFiles(x86)}\Windows Application Driver\WinAppDriver.exe" -ArgumentList "4723/wd/hub /log $logPath" -PassThru | Out-Null
+          Start-Sleep -Seconds 2
+
+      - name: Run E2E tests
+        env:
+          RUST_SWITCHER_EXE: target/${{ env.TARGET }}/debug/rust-switcher.exe
+          WINAPPDRIVER_URL: http://127.0.0.1:4723/wd/hub
+        run: pytest tests/e2e
+
+      - name: Upload WinAppDriver log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winappdriver-log
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/WinAppDriver.log
