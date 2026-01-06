@@ -194,7 +194,7 @@ jobs:
             }
 
             $remoteTag = git ls-remote --tags origin "refs/tags/$tag"
-            if ($remoteTag) {
+          if ($remoteTag) {
               $candidate.Patch++
               continue
             }
@@ -205,7 +205,7 @@ jobs:
               throw "cargo set-version produced no changes for version=$version"
             }
 
-            cargo build -p rust-switcher --release
+            cargo generate-lockfile
 
             "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -270,6 +270,113 @@ jobs:
 
           echo "tag=${{ inputs.existing_tag }}" >> "$GITHUB_OUTPUT"
 
+  build_windows_binary:
+    name: "Step 3 - build Windows binary (tag ref)"
+    runs-on: windows-latest
+    needs: determine_tag
+    if: "${{ inputs.do_github_release }}"
+
+    outputs:
+      exe: "${{ steps.build.outputs.exe }}"
+
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+        with:
+          ref: "${{ needs.determine_tag.outputs.tag }}"
+
+      - name: Setup Rust toolchain (rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Rust build (cargo, target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release"
+
+      - name: Verify nightly toolchain
+        shell: pwsh
+        run: |
+          $vv = (rustc -Vv) -join "`n"
+          Write-Host $vv
+          if ($vv -notmatch "release:\s+.*nightly") {
+            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly."
+            exit 1
+          }
+
+      - name: Build (locked)
+        id: build
+        shell: pwsh
+        run: |
+          cargo build -p rust-switcher --release --locked
+          "exe=target/release/rust-switcher.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: "${{ steps.build.outputs.exe }}"
+          if-no-files-found: error
+
+  build_windows_asset:
+    name: "Step 4 - package Windows zip (tag ref)"
+    runs-on: windows-latest
+    needs: [determine_tag, build_windows_binary]
+    if: "${{ inputs.do_github_release }}"
+
+    outputs:
+      asset: "${{ steps.package.outputs.asset }}"
+
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+        with:
+          ref: "${{ needs.determine_tag.outputs.tag }}"
+
+      - name: Setup Rust toolchain (rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache Rust build (cargo, target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release"
+
+      - name: Verify nightly toolchain
+        shell: pwsh
+        run: |
+          $vv = (rustc -Vv) -join "`n"
+          Write-Host $vv
+          if ($vv -notmatch "release:\s+.*nightly") {
+            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly."
+            exit 1
+          }
+
+      - name: Download built binary
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-binary
+
+      - name: Package zip
+        id: package
+        shell: pwsh
+        run: |
+          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $memberId = $meta.workspace_members[0]
+          $pkg = $meta.packages | Where-Object { $_.id -eq $memberId } | Select-Object -First 1
+          if (-not $pkg) { throw "Unable to determine workspace root package from cargo metadata" }
+
+          $version = $pkg.version
+          $asset = "rust-switcher-$version-windows-x86_64.zip"
+
+          Compress-Archive -Path "rust-switcher.exe" -DestinationPath $asset -Force
+          "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-asset
+          path: "${{ steps.package.outputs.asset }}"
+          if-no-files-found: error
+
   publish_crates:
     name: "Step 2 - publish to crates.io (tag ref)"
     runs-on: windows-latest
@@ -300,76 +407,13 @@ jobs:
             exit 1
           }
 
-      - name: Build (locked)
-        shell: pwsh
-        run: cargo build -p rust-switcher --release --locked
-
-      - name: Publish to crates.io
+      - name: Publish to crates.io (no verify)
         env:
           CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
-        run: cargo publish --locked
-
-  build_windows_asset:
-    name: "Step 3 - build Windows zip (tag ref)"
-    runs-on: windows-latest
-    needs: determine_tag
-    if: "${{ inputs.do_github_release }}"
-
-    outputs:
-      asset: "${{ steps.package.outputs.asset }}"
-
-    steps:
-      - name: Checkout at tag
-        uses: actions/checkout@v4
-        with:
-          ref: "${{ needs.determine_tag.outputs.tag }}"
-
-      - name: Setup Rust toolchain (rust-toolchain.toml)
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-
-      - name: Cache Rust build (cargo, target)
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "release"
-
-      - name: Verify nightly toolchain
-        shell: pwsh
-        run: |
-          $vv = (rustc -Vv) -join "`n"
-          Write-Host $vv
-          if ($vv -notmatch "release:\s+.*nightly") {
-            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly."
-            exit 1
-          }
-
-      - name: Build (locked)
-        shell: pwsh
-        run: cargo build -p rust-switcher --release --locked
-
-      - name: Package zip
-        id: package
-        shell: pwsh
-        run: |
-          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $memberId = $meta.workspace_members[0]
-          $pkg = $meta.packages | Where-Object { $_.id -eq $memberId } | Select-Object -First 1
-          if (-not $pkg) { throw "Unable to determine workspace root package from cargo metadata" }
-
-          $version = $pkg.version
-          $asset = "rust-switcher-$version-windows-x86_64.zip"
-
-          Compress-Archive -Path "target/release/rust-switcher.exe" -DestinationPath $asset -Force
-          "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-asset
-          path: "${{ steps.package.outputs.asset }}"
-          if-no-files-found: error
+        run: cargo publish --locked --no-verify
 
   github_release:
-    name: "Step 4 - publish GitHub Release (tag ref)"
+    name: "Step 5 - publish GitHub Release (tag ref)"
     runs-on: ubuntu-latest
     needs: [determine_tag, build_windows_asset]
     if: "${{ inputs.do_github_release }}"
