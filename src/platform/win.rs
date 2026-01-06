@@ -42,6 +42,7 @@ pub(crate) const AUTOSTART_ARG: &str = "--autostart";
 use crate::{
     app::AppState,
     config,
+    domain::outcome::ActionOutcome,
     domain::text::{last_word::autoconvert_last_word, switch_keyboard_layout},
     input::hotkeys::{HotkeyAction, action_from_id},
     platform::{
@@ -509,7 +510,8 @@ fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
 }
 
 fn handle_convert_smart(state: &mut AppState) {
-    if crate::conversion::convert_selection_if_any(state) {
+    let outcome = crate::conversion::convert_selection_if_any(state);
+    if matches!(outcome, ActionOutcome::Applied | ActionOutcome::Failed(_)) {
         return;
     }
     crate::conversion::convert_last_word(state);

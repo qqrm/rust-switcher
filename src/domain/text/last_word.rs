@@ -17,6 +17,7 @@ use super::{mapping::convert_ru_en_bidirectional, switch_keyboard_layout, wait_s
 use crate::{
     app::AppState,
     conversion::input::{KeySequence, send_text_unicode},
+    domain::outcome::{ActionOutcome, Failure, SkipReason},
 };
 
 const VK_BACKSPACE_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x08);
@@ -29,21 +30,21 @@ const MIN_CONFIDENCE_GAIN: f64 = 0.25;
 
 static AUTOCONVERT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
-pub fn convert_last_word(state: &mut AppState) {
-    convert_last_word_impl(state, true);
+pub fn convert_last_word(state: &mut AppState) -> ActionOutcome {
+    convert_last_word_impl(state, true)
 }
 
-pub fn autoconvert_last_word(state: &mut AppState) {
+pub fn autoconvert_last_word(state: &mut AppState) -> ActionOutcome {
     if !foreground_window_alive() {
         tracing::warn!("foreground window is null");
-        return;
+        return ActionOutcome::Skipped(SkipReason::ForegroundUnavailable);
     }
 
     let _guard = match AutoconvertGuard::try_acquire() {
         Ok(g) => g,
         Err(reason) => {
             tracing::trace!(reason = %reason.as_str(), "autoconvert skip: reentry");
-            return;
+            return ActionOutcome::Skipped(reason);
         }
     };
 
@@ -51,7 +52,7 @@ pub fn autoconvert_last_word(state: &mut AppState) {
 
     let Some(payload) = take_last_word_payload() else {
         tracing::trace!("journal: no last word");
-        return;
+        return ActionOutcome::Skipped(SkipReason::NoLastWord);
     };
 
     let mut restore = JournalRestore::new(&payload);
@@ -60,7 +61,7 @@ pub fn autoconvert_last_word(state: &mut AppState) {
         Ok(v) => v,
         Err(reason) => {
             tracing::trace!(reason = %reason.as_str(), "autoconvert skip: candidate");
-            return;
+            return ActionOutcome::Skipped(reason);
         }
     };
 
@@ -68,14 +69,14 @@ pub fn autoconvert_last_word(state: &mut AppState) {
 
     if let Err(reason) = should_autoconvert_word(detector, &payload.word, &converted) {
         tracing::trace!(reason = %reason.as_str(), "autoconvert skip: decision");
-        return;
+        return ActionOutcome::Skipped(reason);
     }
 
     tracing::trace!(word = %payload.word, converted = %converted, "autoconvert decision");
 
     if let Err(err) = apply_last_word_replacement(&payload, &converted) {
         tracing::warn!(error = %err.as_str(), "autoconvert apply failed");
-        return;
+        return ActionOutcome::Failed(Failure::InputError);
     }
 
     update_journal(&payload, &converted);
@@ -86,6 +87,8 @@ pub fn autoconvert_last_word(state: &mut AppState) {
         Ok(()) => tracing::trace!("layout switched (autoconvert)"),
         Err(e) => tracing::warn!(error = ?e, "layout switch failed (autoconvert)"),
     }
+
+    ActionOutcome::Applied
 }
 
 struct AutoconvertGuard;
@@ -130,35 +133,6 @@ impl Drop for JournalRestore<'_> {
         }
         update_journal(self.payload, &self.payload.word);
         tracing::trace!("autoconvert: journal restored");
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub(crate) enum SkipReason {
-    Reentry,
-    SuffixHasNewline,
-    NotAWord,
-    NoChangeAfterConvert,
-    TooShort,
-    ScriptCheckFailed,
-    AlreadyCorrect,
-    ConvertedConfidenceLow,
-    NotBetterEnough,
-}
-
-impl SkipReason {
-    fn as_str(self) -> &'static str {
-        match self {
-            SkipReason::Reentry => "reentry",
-            SkipReason::SuffixHasNewline => "suffix_has_newline",
-            SkipReason::NotAWord => "not_a_word",
-            SkipReason::NoChangeAfterConvert => "no_change_after_convert",
-            SkipReason::TooShort => "too_short",
-            SkipReason::ScriptCheckFailed => "script_check_failed",
-            SkipReason::AlreadyCorrect => "already_correct",
-            SkipReason::ConvertedConfidenceLow => "converted_confidence_low",
-            SkipReason::NotBetterEnough => "not_better_enough",
-        }
     }
 }
 
@@ -480,29 +454,29 @@ fn apply_last_word_replacement(p: &LastWordPayload, converted: &str) -> Result<(
 }
 
 #[tracing::instrument(level = "trace", skip(state))]
-fn convert_last_word_impl(state: &mut AppState, switch_layout: bool) {
+fn convert_last_word_impl(state: &mut AppState, switch_layout: bool) -> ActionOutcome {
     if !foreground_window_alive() {
         tracing::warn!("foreground window is null");
-        return;
+        return ActionOutcome::Skipped(SkipReason::ForegroundUnavailable);
     }
 
     if switch_layout && !wait_shift_released(150) {
         tracing::info!("wait_shift_released returned false");
-        return;
+        return ActionOutcome::Skipped(SkipReason::ShiftPressed);
     }
 
     sleep_before_convert(state);
 
     let Some(payload) = take_last_word_payload() else {
         tracing::info!("journal: no last word");
-        return;
+        return ActionOutcome::Skipped(SkipReason::NoLastWord);
     };
 
     let mut restore = JournalRestore::new(&payload);
 
     if payload.suffix_has_newline {
         tracing::trace!("suffix contains newline, skipping convert_last_word");
-        return;
+        return ActionOutcome::Skipped(SkipReason::SuffixHasNewline);
     }
 
     let converted = convert_ru_en_bidirectional(&payload.word);
@@ -510,7 +484,7 @@ fn convert_last_word_impl(state: &mut AppState, switch_layout: bool) {
 
     if let Err(err) = apply_last_word_replacement(&payload, &converted) {
         tracing::warn!(error = %err.as_str(), "convert apply failed");
-        return;
+        return ActionOutcome::Failed(Failure::InputError);
     }
 
     update_journal(&payload, &converted);
@@ -522,6 +496,8 @@ fn convert_last_word_impl(state: &mut AppState, switch_layout: bool) {
             Err(e) => tracing::warn!(error = ?e, "layout switch failed"),
         }
     }
+
+    ActionOutcome::Applied
 }
 
 fn foreground_window_alive() -> bool {

@@ -25,6 +25,7 @@ use crate::{
             send_text_unicode,
         },
     },
+    domain::outcome::{ActionOutcome, Failure, SkipReason},
 };
 
 const MAX_SELECTION_CHARS: usize = 512;
@@ -48,80 +49,63 @@ const VK_DELETE_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x2E);
 /// - restores previous clipboard contents via `ClipboardRestore`
 ///
 /// Return value:
-/// - `None` if there is no eligible selection (empty, multiline, too long, or clipboard did not change)
-/// - `Some(Ok(()))` if selection was converted successfully
-/// - `Some(Err(ConvertSelectionError))` if selection was present but the conversion pipeline failed
+/// - `ActionOutcome::Skipped` when there is no eligible selection
+/// - `ActionOutcome::Applied` if selection was converted successfully
+/// - `ActionOutcome::Failed` if selection was present but the conversion pipeline failed
 ///
 /// Architectural note:
 /// This function does not perform UI safety checks (foreground window, modifier keys).
 /// Callers on the UI boundary should gate calls with `GetForegroundWindow` and `wait_shift_released`.
-fn try_convert_selection_from_clipboard(
-    state: &mut AppState,
-    max_chars: usize,
-) -> Option<std::result::Result<(), ConvertSelectionError>> {
-    copy_selection_text_with_clipboard_restore(max_chars).map(|s| {
-        tracing::trace!(len = s.chars().count(), "selection detected");
-        convert_selection_from_text(state, &s)
-    })
-}
+fn try_convert_selection_from_clipboard(state: &mut AppState, max_chars: usize) -> ActionOutcome {
+    let selection = match read_selection_text_with_clipboard_restore(max_chars) {
+        Ok(selection) => selection,
+        Err(SelectionReadError::Skip(reason)) => return ActionOutcome::Skipped(reason),
+        Err(SelectionReadError::Fail(failure)) => return ActionOutcome::Failed(failure),
+    };
 
-/// Converts the currently selected text, if there is any selection.
-///
-/// Returns `true` if a non empty eligible selection was found (conversion attempted),
-/// otherwise `false`.
-#[tracing::instrument(level = "trace", skip(state))]
-pub fn convert_selection_if_any(state: &mut AppState) -> bool {
-    match convert_selection_outcome(state, MAX_SELECTION_CHARS) {
-        ConvertOutcome::Noop => false,
-        ConvertOutcome::Ok => true,
-        ConvertOutcome::Err(e) => {
-            tracing::warn!(user_text = e.user_text(), error = ?e, "selection conversion failed");
-            true
+    tracing::trace!(len = selection.chars().count(), "selection detected");
+    match convert_selection_from_text(state, &selection) {
+        Ok(()) => ActionOutcome::Applied,
+        Err(e) => {
+            tracing::warn!(error = ?e, "selection conversion failed");
+            ActionOutcome::Failed(Failure::InputError)
         }
     }
 }
 
-pub fn convert_selection(state: &mut AppState) {
+/// Converts the currently selected text, if there is any selection.
+#[tracing::instrument(level = "trace", skip(state))]
+pub fn convert_selection_if_any(state: &mut AppState) -> ActionOutcome {
+    convert_selection_outcome(state, MAX_SELECTION_CHARS)
+}
+
+pub fn convert_selection(state: &mut AppState) -> ActionOutcome {
     tracing::trace!("convert_selection called");
     let fg = unsafe { GetForegroundWindow() };
     if fg.0.is_null() {
         tracing::warn!("foreground window is null");
-        return;
+        return ActionOutcome::Skipped(SkipReason::ForegroundUnavailable);
     }
 
     if !wait_shift_released(150) {
         tracing::info!("wait_shift_released returned false");
-        return;
+        return ActionOutcome::Skipped(SkipReason::ShiftPressed);
     }
 
-    match convert_selection_outcome(state, MAX_SELECTION_CHARS) {
-        ConvertOutcome::Noop => tracing::trace!("no selection"),
-        ConvertOutcome::Ok => {}
-        ConvertOutcome::Err(e) => {
-            tracing::warn!(user_text = e.user_text(), error = ?e, "selection conversion failed");
-        }
-    }
-}
-
-/// High level outcome of a conversion attempt.
-///
-/// This is designed for UI boundary code to decide whether to notify the user.
-#[derive(Debug)]
-enum ConvertOutcome {
-    Noop,
-    Ok,
-    Err(ConvertSelectionError),
+    convert_selection_outcome(state, MAX_SELECTION_CHARS)
 }
 
 /// Attempts to convert selection and returns a high level outcome.
 ///
 /// This function does not perform UI safety checks.
-fn convert_selection_outcome(state: &mut AppState, max_chars: usize) -> ConvertOutcome {
-    match try_convert_selection_from_clipboard(state, max_chars) {
-        None => ConvertOutcome::Noop,
-        Some(Ok(())) => ConvertOutcome::Ok,
-        Some(Err(e)) => ConvertOutcome::Err(e),
-    }
+fn convert_selection_outcome(state: &mut AppState, max_chars: usize) -> ActionOutcome {
+    try_convert_selection_from_clipboard(state, max_chars)
+}
+
+#[derive(Debug)]
+enum SelectionReadError {
+    Skip(SkipReason),
+    Fail(Failure),
 }
 
 /// Errors that can occur while replacing the current selection with converted text.
@@ -133,16 +117,6 @@ enum ConvertSelectionError {
     InsertConverted,
     /// Failed to reselect the inserted text within the retry budget.
     Reselect,
-}
-
-impl ConvertSelectionError {
-    fn user_text(&self) -> &'static str {
-        match self {
-            Self::Delete => "Failed to delete selection",
-            Self::InsertConverted => "Failed to insert converted text",
-            Self::Reselect => "Failed to reselect inserted text",
-        }
-    }
 }
 
 /// Replaces currently selected text with layout converted text.
@@ -364,23 +338,46 @@ impl Drop for ClipboardRestore {
 
 /// Copies current selection via Ctrl+C, reads Unicode text from clipboard, then restores clipboard.
 ///
-/// Returns `None` when selection is empty, multiline, too long, or clipboard did not change.
+/// Returns a `SkipReason` when selection is empty, multiline, too long, or clipboard did not change.
 /// `max_chars` is counted in Unicode scalar values.
-fn copy_selection_text_with_clipboard_restore(max_chars: usize) -> Option<String> {
+fn read_selection_text_with_clipboard_restore(
+    max_chars: usize,
+) -> Result<String, SelectionReadError> {
     let restore = ClipboardRestore::capture();
     let before_seq = restore.before_seq();
 
-    send_ctrl_combo(VK_C_KEY)
-        .then(|| clip::wait_change(before_seq, 10, 20))
-        .filter(|&changed| changed)
-        .and_then(|_| clip::get_unicode_text())
-        .filter(|s| is_convertible_selection(s, max_chars))
+    if !send_ctrl_combo(VK_C_KEY) {
+        return Err(SelectionReadError::Fail(Failure::InputError));
+    }
+
+    if !clip::wait_change(before_seq, 10, 20) {
+        return Err(SelectionReadError::Skip(SkipReason::NoSelection));
+    }
+
+    let Some(text) = clip::get_unicode_text() else {
+        return Err(SelectionReadError::Skip(SkipReason::NotText));
+    };
+
+    validate_selection_text(&text, max_chars).map_err(SelectionReadError::Skip)?;
+    Ok(text)
 }
 
 /// Checks whether clipboard text is eligible for selection conversion.
 ///
 /// Optimization:
 /// `s.chars().nth(max_chars).is_none()` stops early for long strings, unlike `chars().count()`.
-fn is_convertible_selection(s: &str, max_chars: usize) -> bool {
-    !s.is_empty() && !s.contains('\n') && !s.contains('\r') && s.chars().nth(max_chars).is_none()
+fn validate_selection_text(s: &str, max_chars: usize) -> Result<(), SkipReason> {
+    if s.is_empty() {
+        return Err(SkipReason::ClipboardEmpty);
+    }
+
+    if s.contains('\n') || s.contains('\r') {
+        return Err(SkipReason::SelectionMultiline);
+    }
+
+    if s.chars().nth(max_chars).is_some() {
+        return Err(SkipReason::SelectionTooLong);
+    }
+
+    Ok(())
 }
