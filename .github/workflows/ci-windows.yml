@@ -107,6 +107,12 @@ jobs:
       - name: Install WinAppDriver
         run: choco install winappdriver -y
 
+      - name: Resolve WinAppDriver path
+        shell: powershell
+        run: |
+          $cmd = Get-Command WinAppDriver.exe -ErrorAction Stop
+          "WINAPPDRIVER_EXE=$($cmd.Source)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Install Python dependencies
         run: pip install -r tests/e2e/requirements.txt
 
@@ -123,13 +129,18 @@ jobs:
         shell: powershell
         run: |
           $logPath = Join-Path $env:RUNNER_TEMP "WinAppDriver.log"
-          Start-Process -FilePath "${env:ProgramFiles(x86)}\Windows Application Driver\WinAppDriver.exe" -ArgumentList "4723/wd/hub /log $logPath" -PassThru | Out-Null
-          for ($i = 0; $i -lt 15; $i++) {
-            try {
-              $resp = Invoke-WebRequest -Uri "http://127.0.0.1:4723/status" -UseBasicParsing -TimeoutSec 2
-              if ($resp.StatusCode -eq 200) { break }
-            } catch {}
+          Start-Process -FilePath "${env:WINAPPDRIVER_EXE}" -ArgumentList "4723/wd/hub /log $logPath" -PassThru | Out-Null
+          $ready = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            if (Test-NetConnection -ComputerName 127.0.0.1 -Port 4723 -InformationLevel Quiet) {
+              $ready = $true
+              break
+            }
             Start-Sleep -Seconds 2
+          }
+          if (-not $ready) {
+            Write-Error "WinAppDriver did not start listening on port 4723"
+            exit 1
           }
 
       - name: Run E2E tests

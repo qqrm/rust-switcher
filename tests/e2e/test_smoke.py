@@ -1,4 +1,5 @@
 import os
+import time
 
 import pytest
 from appium import webdriver
@@ -30,7 +31,15 @@ def driver():
     )
 
     server_url = os.environ.get("WINAPPDRIVER_URL", "http://127.0.0.1:4723/wd/hub")
-    driver = webdriver.Remote(server_url, options=options)
+    driver = None
+    for attempt in range(10):
+        try:
+            driver = webdriver.Remote(server_url, options=options)
+            break
+        except Exception:
+            if attempt == 9:
+                raise
+            time.sleep(2)
     try:
         yield driver
     finally:
@@ -38,7 +47,8 @@ def driver():
             driver.close_app()
         except Exception:
             pass
-        driver.quit()
+        if driver is not None:
+            driver.quit()
 
 
 def _wait_for(driver, by, value, timeout=20):
