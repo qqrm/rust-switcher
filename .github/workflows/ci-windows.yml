@@ -107,18 +107,27 @@ jobs:
       - name: Install WinAppDriver
         run: choco install winappdriver -y
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tests/e2e/requirements.txt
+
       - name: Resolve WinAppDriver path
         shell: powershell
         run: |
-          $exePath = "${env:ProgramFiles(x86)}\\Windows Application Driver\\WinAppDriver.exe"
-          if (-not (Test-Path $exePath)) {
-            Write-Error "WinAppDriver not found at expected path: $exePath"
+          $winAppDriverExe = Join-Path ${env:ProgramFiles(x86)} "Windows Application Driver\WinAppDriver.exe"
+          if (-not (Test-Path $winAppDriverExe)) {
+            Write-Error "WinAppDriver.exe not found at: $winAppDriverExe"
+            Get-ChildItem -Force (Split-Path $winAppDriverExe -Parent) -ErrorAction SilentlyContinue | Format-List
             exit 1
           }
-          "WINAPPDRIVER_EXE=$exePath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Install Python dependencies
-        run: pip install -r tests/e2e/requirements.txt
+          "WINAPPDRIVER_EXE=$winAppDriverExe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build (debug)
         run: cargo build --target ${{ env.TARGET }}
@@ -133,24 +142,27 @@ jobs:
         shell: powershell
         run: |
           $logPath = Join-Path $env:RUNNER_TEMP "WinAppDriver.log"
-          Start-Process -FilePath "${env:WINAPPDRIVER_EXE}" -ArgumentList "4723/wd/hub /log $logPath" -PassThru | Out-Null
+          $proc = Start-Process -FilePath "${env:WINAPPDRIVER_EXE}" -ArgumentList "4723/wd/hub /log $logPath" -PassThru
           $ready = $false
-          for ($i = 0; $i -lt 30; $i++) {
+          for ($i = 0; $i -lt 60; $i++) {
             if (Test-NetConnection -ComputerName 127.0.0.1 -Port 4723 -InformationLevel Quiet) {
               $ready = $true
               break
             }
-            Start-Sleep -Seconds 2
+            Start-Sleep -Seconds 1
           }
           if (-not $ready) {
             Write-Error "WinAppDriver did not start listening on port 4723"
+            if (Test-Path $logPath) { Get-Content -Tail 200 $logPath }
             exit 1
           }
 
       - name: Run E2E tests
+        shell: powershell
         env:
           WINAPPDRIVER_URL: http://127.0.0.1:4723/wd/hub
-        run: pytest -vv tests/e2e
+        run: |
+          python -m pytest -vv tests/e2e
 
       - name: Upload WinAppDriver log
         if: always()
