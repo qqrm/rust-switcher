@@ -67,15 +67,14 @@ jobs:
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@v1
-
+        
       - name: Verify nightly toolchain
         shell: pwsh
         run: |
-          $v = rustc -Vv
-          $v | Write-Host
-          if ($v -notmatch "nightly") {
-            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not contain 'nightly'."
-            exit 1
+          $vv = (rustc -Vv) -join "`n"
+          Write-Host $vv
+          if ($vv -notmatch "nightly") {
+            throw "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not contain 'nightly'."
           }
 
       - name: Smoke build (release)
