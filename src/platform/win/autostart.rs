@@ -172,6 +172,12 @@ fn create_shortcut(link_path: &Path, exe_path: &Path) -> windows::core::Result<(
         "IShellLinkW::SetPath",
     )?;
 
+    let args_w = to_wide(OsStr::new(super::AUTOSTART_ARG));
+    with_ctx(
+        unsafe { shell_link.SetArguments(PCWSTR(args_w.as_ptr())) },
+        "IShellLinkW::SetArguments",
+    )?;
+
     if let Some(dir) = exe_path.parent() {
         let dir_w = to_wide(dir.as_os_str());
         with_ctx(

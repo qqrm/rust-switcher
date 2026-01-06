@@ -38,6 +38,7 @@ use self::{
         set_window_icons,
     },
 };
+pub(crate) const AUTOSTART_ARG: &str = "--autostart";
 use crate::{
     app::AppState,
     config,
@@ -285,7 +286,7 @@ fn on_create(hwnd: HWND) -> LRESULT {
 /// This function is called from `main` after the single instance
 /// guard has been acquired.  It performs all initialization that
 /// requires unsafe code and returns any error to the caller.
-pub fn run() -> Result<()> {
+pub fn run(start_hidden: bool) -> Result<()> {
     unsafe {
         visuals::init_visuals();
         let class_name = w!("RustSwitcherMainWindow");
@@ -300,7 +301,8 @@ pub fn run() -> Result<()> {
 
         let hwnd = create_main_window(class_name, hinstance, style, x, y, window_w, window_h)?;
         set_window_icons(hwnd, hinstance);
-        let _ = ShowWindow(hwnd, SW_SHOW);
+        let show_cmd = if start_hidden { SW_HIDE } else { SW_SHOW };
+        let _ = ShowWindow(hwnd, show_cmd);
 
         message_loop()?;
     }

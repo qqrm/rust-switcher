@@ -19,7 +19,8 @@ fn main() -> windows::core::Result<()> {
         return Ok(());
     };
 
-    platform::win::run()
+    let start_hidden = std::env::args().any(|arg| arg == platform::win::AUTOSTART_ARG);
+    platform::win::run(start_hidden)
 }
 
 #[cfg(test)]
