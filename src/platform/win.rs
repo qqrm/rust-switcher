@@ -544,10 +544,14 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
     with_state_mut(hwnd, |state| match action {
         HotkeyAction::PauseToggle => {
             tracing::warn!(msg = "autoconvert_toggle", source = "hotkey_pause_toggle");
-            handle_pause_toggle(hwnd, state)
+            handle_pause_toggle(hwnd, state);
         }
-        HotkeyAction::ConvertLastWord => handle_convert_smart(state),
-        HotkeyAction::ConvertSelection => crate::conversion::convert_selection(state),
+        HotkeyAction::ConvertLastWord => {
+            handle_convert_smart(state);
+        }
+        HotkeyAction::ConvertSelection => {
+            let _ = crate::conversion::convert_selection(state);
+        }
         HotkeyAction::SwitchLayout => {
             let _ = switch_keyboard_layout();
         }
