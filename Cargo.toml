@@ -49,8 +49,11 @@ debug-tracing = ["tracing", "tracing-subscriber"]
 
 
 [build-dependencies]
-windows = { version = "0.62", features = ["Win32_System_SystemServices"] }
 embed-resource = "3.0"
+
+[target.'cfg(windows)'.build-dependencies]
+windows = { version = "0.62", features = ["Win32_System_SystemServices"] }
+
 
 [profile.release]
 lto = true
