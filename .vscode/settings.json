@@ -1,5 +1,11 @@
 {
   "terminal.integrated.profiles.windows": {
+    "PowerShell 7": {
+      "path": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "args": [
+        "-NoLogo"
+      ]
+    },
     "VS 2022 Dev PowerShell": {
       "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       "args": [
@@ -12,6 +18,6 @@
       ]
     }
   },
-  "terminal.integrated.defaultProfile.windows": "VS 2022 Dev PowerShell",
+  "terminal.integrated.defaultProfile.windows": "PowerShell 7",
   "explorer.sortOrder": "mixed"
 }
