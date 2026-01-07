@@ -42,8 +42,10 @@ pub(crate) const AUTOSTART_ARG: &str = "--autostart";
 use crate::{
     app::AppState,
     config,
-    domain::outcome::ActionOutcome,
-    domain::text::{last_word::autoconvert_last_word, switch_keyboard_layout},
+    domain::{
+        outcome::ActionOutcome,
+        text::{last_word::autoconvert_last_word, switch_keyboard_layout},
+    },
     input::hotkeys::{HotkeyAction, action_from_id},
     platform::{
         ui::{
