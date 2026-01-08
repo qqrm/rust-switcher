@@ -304,8 +304,8 @@ jobs:
           set -euo pipefail
           cargo publish --locked --no-verify
 
-  build_linux_asset:
-    name: "Step 3 - build and package Linux archive (tag ref)"
+  build_windows_gnu_asset:
+    name: "Step 3 - build and package Windows (GNU) archive on Linux (tag ref)"
     runs-on: ubuntu-latest
     needs: determine_tag
     if: ${{ inputs.do_github_release }}
@@ -337,13 +337,21 @@ jobs:
             exit 1
           fi
 
-      - name: Build (locked)
+      - name: Install Windows GNU toolchain
         shell: bash
         run: |
           set -euo pipefail
-          cargo build -p rust-switcher --release --locked
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 zip
+          rustup target add x86_64-pc-windows-gnu
 
-      - name: Package tar.gz
+      - name: Build (locked, Windows GNU target)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p rust-switcher --release --locked --target x86_64-pc-windows-gnu
+
+      - name: Package zip
         id: package
         shell: bash
         env:
@@ -370,33 +378,35 @@ jobs:
             exit 1
           fi
 
-          asset="rust-switcher-$version-linux-x86_64.tar.gz"
-          install -m 0755 target/release/rust-switcher ./rust-switcher
-          tar -czf "$asset" rust-switcher
+          asset="rust-switcher-$version-windows-x86_64-gnu.zip"
+          install -m 0755 target/x86_64-pc-windows-gnu/release/rust-switcher.exe ./rust-switcher.exe
+          zip -9 "$asset" rust-switcher.exe
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-asset
+          name: windows-gnu-asset
           path: ${{ steps.package.outputs.asset }}
           if-no-files-found: error
 
   github_release:
     name: "Step 4 - publish GitHub Release (tag ref)"
     runs-on: ubuntu-latest
-    needs: [determine_tag, build_linux_asset, publish_crates]
+    needs: [determine_tag, build_windows_gnu_asset, publish_crates]
     if: ${{ inputs.do_github_release }}
 
     steps:
-      - name: Download Linux asset
+      - name: Download Windows GNU asset
         uses: actions/download-artifact@v4
         with:
-          name: linux-asset
+          name: windows-gnu-asset
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.determine_tag.outputs.tag }}
           name: ${{ needs.determine_tag.outputs.tag }}
-          files: "*.tar.gz"
+          files: |
+            "*.tar.gz"
+            "*.zip"
