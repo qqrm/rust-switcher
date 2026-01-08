@@ -5,6 +5,7 @@
 //! routines, the application state, and the UI construction code to
 //! present a settings window and respond to user actions.
 
+mod themes;
 mod autostart;
 mod commands;
 pub(crate) mod hotkey_format;
