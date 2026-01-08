@@ -2,13 +2,13 @@ name: Release
 run-name: "Release on ${{ github.ref_name }} bump ${{ inputs.bump }} | bump_tag=${{ inputs.do_bump_and_tag }} crates=${{ inputs.do_publish_crates }} github=${{ inputs.do_github_release }}"
 
 # Requirements (do not remove):
-# - Target platform: Windows (MSVC), we ship rust-switcher.exe zipped for GitHub Release
+# - Target platform: Linux, we ship rust-switcher binary packaged for GitHub Release
 # - Rust toolchain: nightly, pinned by rust-toolchain.toml in repo root
 # - Release flow:
 #   Step 1: bump version + commit + tag + push (main)
 #   Step 2: publish to crates.io from tag
-#   Step 3: build Windows zip from tag
-#   Step 4: create GitHub Release and attach the zip (tag)
+#   Step 3: build Linux archive from tag
+#   Step 4: create GitHub Release and attach the archive (tag)
 # - Caching and tooling:
 #   - Use Swatinem/rust-cache@v2 in all jobs to cache cargo registry, git deps, and target artifacts
 #   - Use cargo-binstall to install helper cargo subcommands fast (cargo-set-version)
@@ -27,19 +27,19 @@ on:
           - major
 
       do_bump_and_tag:
-        description: "Step 1 (Windows): bump version, commit, create tag, push to main"
+        description: "Step 1 (Linux): bump version, commit, create tag, push to main"
         type: boolean
         required: true
         default: true
 
       do_publish_crates:
-        description: "Step 2 (Windows): publish to crates.io (uses tag ref)"
+        description: "Step 2 (Linux): publish to crates.io (uses tag ref)"
         type: boolean
         required: true
         default: true
 
       do_github_release:
-        description: "Steps 3-4: build Windows zip + publish GitHub Release (uses tag ref)"
+        description: "Steps 3-4: build Linux archive + publish GitHub Release (uses tag ref)"
         type: boolean
         required: true
         default: true
@@ -63,8 +63,8 @@ env:
 
 jobs:
   bump_and_tag:
-    name: "Step 1 - bump version and create tag on main (Windows)"
-    runs-on: windows-latest
+    name: "Step 1 - bump version and create tag on main (Linux)"
+    runs-on: ubuntu-latest
     if: "${{ inputs.do_bump_and_tag }}"
 
     outputs:
@@ -74,9 +74,9 @@ jobs:
     steps:
       - name: Verify main branch
         if: "${{ github.ref != 'refs/heads/main' }}"
-        shell: pwsh
+        shell: bash
         run: |
-          Write-Error "Release workflow must be run on main branch when do_bump_and_tag=true. Current ref: $env:GITHUB_REF"
+          echo "Release workflow must be run on main branch when do_bump_and_tag=true. Current ref: $GITHUB_REF" >&2
           exit 1
 
       - name: Checkout
@@ -91,151 +91,138 @@ jobs:
           shared-key: "release"
 
       - name: Verify nightly toolchain
-        shell: pwsh
+        shell: bash
         run: |
-          $vv = (rustc -Vv) -join "`n"
-          Write-Host $vv
-          if ($vv -notmatch "release:\s+.*nightly") {
-            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly."
+          set -euo pipefail
+          rustc -Vv
+          if ! rustc -Vv | grep -q "release:.*nightly"; then
+            echo "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly." >&2
             exit 1
-          }
+          fi
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@v1.16.6
 
       - name: Install cargo-set-version via binstall
-        shell: pwsh
+        shell: bash
         run: cargo binstall cargo-set-version -y
 
       - name: Compute next version from latest repo tag and Cargo.toml, set version, update lock
         id: version
-        shell: pwsh
+        shell: bash
+        env:
+          BUMP: "${{ inputs.bump }}"
         run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
+          set -euo pipefail
 
-          function Parse-SemVer([string]$s) {
-            if ($s -match '^(\d+)\.(\d+)\.(\d+)$') {
-              return [pscustomobject]@{
-                Major = [int]$Matches[1]
-                Minor = [int]$Matches[2]
-                Patch = [int]$Matches[3]
-              }
-            }
-            return $null
-          }
+          read -r version tag < <(python - <<'PY'
+import json
+import os
+import re
+import subprocess
+import sys
 
-          function Compare-SemVer($a, $b) {
-            if ($a.Major -ne $b.Major) { return [Math]::Sign($a.Major - $b.Major) }
-            if ($a.Minor -ne $b.Minor) { return [Math]::Sign($a.Minor - $b.Minor) }
-            return [Math]::Sign($a.Patch - $b.Patch)
-          }
+bump = os.environ["BUMP"]
 
-          function SemVer-ToString($v) { return "$($v.Major).$($v.Minor).$($v.Patch)" }
 
-          function Bump-SemVer($v, [string]$bumpKind) {
-            $n = [pscustomobject]@{ Major = $v.Major; Minor = $v.Minor; Patch = $v.Patch }
-            switch ($bumpKind) {
-              "major" { $n.Major++; $n.Minor = 0; $n.Patch = 0 }
-              "minor" { $n.Minor++; $n.Patch = 0 }
-              "patch" { $n.Patch++ }
-              default { throw "Unexpected bump kind: $bumpKind" }
-            }
-            return $n
-          }
+def parse(s: str):
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)$", s)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
 
-          $bump = "${{ inputs.bump }}"
 
-          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          if (-not $meta.workspace_members -or $meta.workspace_members.Count -lt 1) {
-            throw "cargo metadata returned empty workspace_members"
-          }
-          $memberId = $meta.workspace_members[0]
-          $pkg = $meta.packages | Where-Object { $_.id -eq $memberId } | Select-Object -First 1
-          if (-not $pkg) { throw "Unable to determine workspace root package from cargo metadata" }
+def bump_ver(version, kind: str):
+    major, minor, patch = version
+    if kind == "major":
+        return (major + 1, 0, 0)
+    if kind == "minor":
+        return (major, minor + 1, 0)
+    if kind == "patch":
+        return (major, minor, patch + 1)
+    raise SystemExit(f"Unexpected bump kind: {kind}")
 
-          $currentVersionStr = $pkg.version
-          $current = Parse-SemVer $currentVersionStr
-          if ($null -eq $current) { throw "Current Cargo.toml version is not semver X.Y.Z: $currentVersionStr" }
 
-          $tagsRaw = git ls-remote --tags origin "refs/tags/v[0-9]*.[0-9]*.[0-9]*"
-          $latestTag = $null
-          foreach ($line in $tagsRaw) {
-            $parts = $line -split "`t"
-            if ($parts.Count -lt 2) { continue }
-            $ref = $parts[1]
-            if ($ref -notmatch '^refs/tags/v(\d+)\.(\d+)\.(\d+)$') { continue }
-            $sv = [pscustomobject]@{
-              Major = [int]$Matches[1]
-              Minor = [int]$Matches[2]
-              Patch = [int]$Matches[3]
-            }
-            if ($null -eq $latestTag) { $latestTag = $sv; continue }
-            if ((Compare-SemVer $sv $latestTag) -gt 0) { $latestTag = $sv }
-          }
+meta = json.loads(
+    subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"])
+)
+member_id = meta["workspace_members"][0]
+pkg = next(pkg for pkg in meta["packages"] if pkg["id"] == member_id)
+current_version = pkg["version"]
+current = parse(current_version)
+if current is None:
+    raise SystemExit(f"Current Cargo.toml version is not semver X.Y.Z: {current_version}")
 
-          if ($null -eq $latestTag) {
-            $latestTag = [pscustomobject]@{ Major = 0; Minor = 0; Patch = 0 }
-          }
+tags_raw = subprocess.check_output(
+    ["git", "ls-remote", "--tags", "origin", "refs/tags/v[0-9]*.[0-9]*.[0-9]*"]
+).decode()
+tags = []
+for line in tags_raw.splitlines():
+    parts = line.split("\t")
+    if len(parts) < 2:
+        continue
+    ref = parts[1]
+    match = re.match(r"^refs/tags/v(\d+)\.(\d+)\.(\d+)$", ref)
+    if not match:
+        continue
+    tags.append(tuple(int(part) for part in match.groups()))
 
-          $base = $latestTag
-          if ((Compare-SemVer $current $base) -gt 0) { $base = $current }
+latest = max(tags) if tags else (0, 0, 0)
+base = max(current, latest)
+candidate = bump_ver(base, bump)
+for _ in range(500):
+    version = f"{candidate[0]}.{candidate[1]}.{candidate[2]}"
+    tag = f"v{version}"
+    if version == current_version:
+        candidate = (candidate[0], candidate[1], candidate[2] + 1)
+        continue
+    remote = subprocess.check_output(
+        ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}"]
+    ).decode().strip()
+    if remote:
+        candidate = (candidate[0], candidate[1], candidate[2] + 1)
+        continue
+    print(version, tag)
+    sys.exit(0)
 
-          $candidate = Bump-SemVer $base $bump
+raise SystemExit("Failed to find available version tag after 500 attempts")
+PY
+          )
 
-          $maxRetries = 500
-          for ($i = 0; $i -lt $maxRetries; $i++) {
-            $version = SemVer-ToString $candidate
-            $tag = "v$version"
+          cargo set-version "$version"
+          if [ -z "$(git diff --name-only -- Cargo.toml)" ]; then
+            echo "cargo set-version produced no changes for version=$version" >&2
+            exit 1
+          fi
 
-            if ($version -eq $currentVersionStr) {
-              $candidate.Patch++
-              continue
-            }
+          cargo generate-lockfile
 
-            $remoteTag = git ls-remote --tags origin "refs/tags/$tag"
-          if ($remoteTag) {
-              $candidate.Patch++
-              continue
-            }
-
-            cargo set-version $version
-            $changed = git diff --name-only -- Cargo.toml
-            if (-not $changed) {
-              throw "cargo set-version produced no changes for version=$version"
-            }
-
-            cargo generate-lockfile
-
-            "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            break
-          }
-
-          if (-not (Test-Path $env:GITHUB_OUTPUT)) { throw "GITHUB_OUTPUT not found" }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Configure git identity
-        shell: pwsh
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Commit release changes
-        shell: pwsh
+        shell: bash
         run: |
           git add Cargo.toml Cargo.lock
           git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) {
-            throw "No changes to commit after version selection. version=${{ steps.version.outputs.version }} tag=${{ steps.version.outputs.tag }}"
-          }
+          if [ $? -eq 0 ]; then
+            echo "No changes to commit after version selection. version=${{ steps.version.outputs.version }} tag=${{ steps.version.outputs.tag }}" >&2
+            exit 1
+          fi
           git commit -m "release: ${{ steps.version.outputs.tag }}"
 
       - name: Create tag locally
-        shell: pwsh
+        shell: bash
         run: git tag "${{ steps.version.outputs.tag }}"
 
       - name: Push commit and tag to origin
-        shell: pwsh
+        shell: bash
         run: git push --atomic origin HEAD:main "${{ steps.version.outputs.tag }}"
 
   determine_tag:
@@ -270,14 +257,14 @@ jobs:
 
           echo "tag=${{ inputs.existing_tag }}" >> "$GITHUB_OUTPUT"
 
-  build_windows_binary:
-    name: "Step 3 - build Windows binary (tag ref)"
-    runs-on: windows-latest
+  build_linux_binary:
+    name: "Step 3 - build Linux binary (tag ref)"
+    runs-on: ubuntu-latest
     needs: determine_tag
     if: "${{ inputs.do_github_release }}"
 
     outputs:
-      exe: "${{ steps.build.outputs.exe }}"
+      bin: "${{ steps.build.outputs.bin }}"
 
     steps:
       - name: Checkout at tag
@@ -294,33 +281,34 @@ jobs:
           shared-key: "release"
 
       - name: Verify nightly toolchain
-        shell: pwsh
+        shell: bash
         run: |
-          $vv = (rustc -Vv) -join "`n"
-          Write-Host $vv
-          if ($vv -notmatch "release:\s+.*nightly") {
-            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly."
+          set -euo pipefail
+          rustc -Vv
+          if ! rustc -Vv | grep -q "release:.*nightly"; then
+            echo "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly." >&2
             exit 1
-          }
+          fi
 
       - name: Build (locked)
         id: build
-        shell: pwsh
+        shell: bash
         run: |
+          set -euo pipefail
           cargo build -p rust-switcher --release --locked
-          "exe=target/release/rust-switcher.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          echo "bin=target/release/rust-switcher" >> "$GITHUB_OUTPUT"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-binary
-          path: "${{ steps.build.outputs.exe }}"
+          name: linux-binary
+          path: "${{ steps.build.outputs.bin }}"
           if-no-files-found: error
 
-  build_windows_asset:
-    name: "Step 4 - package Windows zip (tag ref)"
-    runs-on: windows-latest
-    needs: [determine_tag, build_windows_binary]
+  build_linux_asset:
+    name: "Step 4 - package Linux archive (tag ref)"
+    runs-on: ubuntu-latest
+    needs: [determine_tag, build_linux_binary]
     if: "${{ inputs.do_github_release }}"
 
     outputs:
@@ -341,45 +329,52 @@ jobs:
           shared-key: "release"
 
       - name: Verify nightly toolchain
-        shell: pwsh
+        shell: bash
         run: |
-          $vv = (rustc -Vv) -join "`n"
-          Write-Host $vv
-          if ($vv -notmatch "release:\s+.*nightly") {
-            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly."
+          set -euo pipefail
+          rustc -Vv
+          if ! rustc -Vv | grep -q "release:.*nightly"; then
+            echo "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly." >&2
             exit 1
-          }
+          fi
 
       - name: Download built binary
         uses: actions/download-artifact@v4
         with:
-          name: windows-binary
+          name: linux-binary
 
-      - name: Package zip
+      - name: Package archive
         id: package
-        shell: pwsh
+        shell: bash
         run: |
-          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $memberId = $meta.workspace_members[0]
-          $pkg = $meta.packages | Where-Object { $_.id -eq $memberId } | Select-Object -First 1
-          if (-not $pkg) { throw "Unable to determine workspace root package from cargo metadata" }
+          set -euo pipefail
 
-          $version = $pkg.version
-          $asset = "rust-switcher-$version-windows-x86_64.zip"
+          version=$(cargo metadata --no-deps --format-version 1 | python - <<'PY'
+import json
+import sys
 
-          Compress-Archive -Path "rust-switcher.exe" -DestinationPath $asset -Force
-          "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+meta = json.load(sys.stdin)
+member_id = meta["workspace_members"][0]
+pkg = next(pkg for pkg in meta["packages"] if pkg["id"] == member_id)
+print(pkg["version"])
+PY
+          )
+
+          asset="rust-switcher-$version-linux-x86_64.tar.gz"
+          chmod +x rust-switcher
+          tar -czf "$asset" rust-switcher
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-asset
+          name: linux-asset
           path: "${{ steps.package.outputs.asset }}"
           if-no-files-found: error
 
   publish_crates:
     name: "Step 2 - publish to crates.io (tag ref)"
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     needs: determine_tag
     if: "${{ inputs.do_publish_crates }}"
 
@@ -398,14 +393,14 @@ jobs:
           shared-key: "release"
 
       - name: Verify nightly toolchain
-        shell: pwsh
+        shell: bash
         run: |
-          $vv = (rustc -Vv) -join "`n"
-          Write-Host $vv
-          if ($vv -notmatch "release:\s+.*nightly") {
-            Write-Error "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly."
+          set -euo pipefail
+          rustc -Vv
+          if ! rustc -Vv | grep -q "release:.*nightly"; then
+            echo "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly." >&2
             exit 1
-          }
+          fi
 
       - name: Publish to crates.io (no verify)
         env:
@@ -415,18 +410,18 @@ jobs:
   github_release:
     name: "Step 5 - publish GitHub Release (tag ref)"
     runs-on: ubuntu-latest
-    needs: [determine_tag, build_windows_asset]
+    needs: [determine_tag, build_linux_asset]
     if: "${{ inputs.do_github_release }}"
 
     steps:
-      - name: Download Windows asset
+      - name: Download Linux asset
         uses: actions/download-artifact@v4
         with:
-          name: windows-asset
+          name: linux-asset
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "${{ needs.determine_tag.outputs.tag }}"
           name: "${{ needs.determine_tag.outputs.tag }}"
-          files: "*.zip"
+          files: "*.tar.gz"
