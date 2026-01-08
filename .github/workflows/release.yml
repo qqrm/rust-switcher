@@ -90,20 +90,12 @@ jobs:
             exit 1
           fi
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@v1.16.6
-
-      - name: Install cargo-set-version via binstall
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo binstall cargo-set-version -y
-
       - name: Bump version, update lock, compute tag
         id: version
         shell: bash
         env:
           BUMP: ${{ inputs.bump }}
+          PACKAGE_NAME: rust-switcher
         run: |
           set -euo pipefail
 
@@ -117,14 +109,12 @@ jobs:
           meta_file="$(mktemp)"
           cargo metadata --no-deps --format-version 1 > "$meta_file"
 
-          member_id="$(jq -r '.workspace_members[0]' "$meta_file")"
-          if [ -z "$member_id" ] || [ "$member_id" = "null" ]; then
-            echo "cargo metadata did not return workspace_members[0]" >&2
+          current="$(jq -r --arg name "$PACKAGE_NAME" '.packages[] | select(.name == $name) | .version' "$meta_file")"
+          if [ -z "$current" ] || [ "$current" = "null" ]; then
+            echo "Failed to find package version in cargo metadata. package=$PACKAGE_NAME" >&2
             cat "$meta_file" >&2
             exit 1
           fi
-
-          current="$(jq -r --arg id "$member_id" '.packages[] | select(.id == $id) | .version' "$meta_file")"
           if ! echo "$current" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "Current version is not semver X.Y.Z: $current" >&2
             exit 1
@@ -178,11 +168,30 @@ jobs:
             exit 1
           fi
 
-          cargo set-version "$next"
+          tmp="$(mktemp)"
+          awk -v newver="$next" '
+            BEGIN{in_pkg=0;done=0}
+            /^\[package\]$/ {in_pkg=1; print; next}
+            /^\[[^]]+\]$/ {in_pkg=0; print; next}
+            in_pkg && !done && $0 ~ /^[[:space:]]*version[[:space:]]*=/ {
+              print "version = \"" newver "\""
+              done=1
+              next
+            }
+            {print}
+            END{
+              if(!done){
+                print "version field not found in [package]" > "/dev/stderr"
+                exit 2
+              }
+            }
+          ' Cargo.toml > "$tmp"
+          mv "$tmp" Cargo.toml
+
           cargo generate-lockfile
 
           if [ -z "$(git diff --name-only -- Cargo.toml)" ]; then
-            echo "cargo set-version produced no Cargo.toml change for version=$next" >&2
+            echo "Version bump produced no Cargo.toml change for version=$next" >&2
             exit 1
           fi
 
@@ -337,6 +346,8 @@ jobs:
       - name: Package tar.gz
         id: package
         shell: bash
+        env:
+          PACKAGE_NAME: rust-switcher
         run: |
           set -euo pipefail
 
@@ -348,9 +359,12 @@ jobs:
           meta_file="$(mktemp)"
           cargo metadata --no-deps --format-version 1 > "$meta_file"
 
-          member_id="$(jq -r '.workspace_members[0]' "$meta_file")"
-          version="$(jq -r --arg id "$member_id" '.packages[] | select(.id == $id) | .version' "$meta_file")"
-
+          version="$(jq -r --arg name "$PACKAGE_NAME" '.packages[] | select(.name == $name) | .version' "$meta_file")"
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "Failed to find package version in cargo metadata. package=$PACKAGE_NAME" >&2
+            cat "$meta_file" >&2
+            exit 1
+          fi
           if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "Failed to get semver from cargo metadata: $version" >&2
             exit 1
