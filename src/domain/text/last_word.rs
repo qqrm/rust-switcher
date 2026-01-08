@@ -390,10 +390,10 @@ fn should_autoconvert_word(
         Language::English
     };
 
-    let (w_in_target, c_in_target) = match target {
-        Language::Russian => (w_ru, c_ru),
-        Language::English => (w_en, c_en),
-        _ => unreachable!("only ru/en here"),
+    let (w_in_target, c_in_target) = if matches!(target, Language::Russian) {
+        (w_ru, c_ru)
+    } else {
+        (w_en, c_en)
     };
 
     if c_best < MIN_CONVERTED_CONFIDENCE {
