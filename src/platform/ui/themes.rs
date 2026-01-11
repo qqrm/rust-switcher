@@ -19,11 +19,133 @@ use windows::{
     },
     core::{BOOL, w},
 };
+use windows::Win32::Graphics::Gdi::{
+    DT_CENTER,
+    DT_VCENTER,
+    DT_SINGLELINE,
+    DrawFocusRect,
+    FrameRect,
+    DrawTextW
+};
+use windows::Win32::UI::Controls::{
+    DRAWITEMSTRUCT,
+    ODT_BUTTON,
+    ODS_SELECTED,
+    ODS_FOCUS,
+    ODS_DEFAULT,
+    
+    // ... other imports
+};
 
+use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::platform::win::state::{get_state, with_state_mut_do};
 
 const RDW_INVALIDATE: u32 = 0x0001;
 const RDW_ALLCHILDREN: u32 = 0x0080;
+
+pub fn on_draw_item(_hwnd: HWND, _wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        let draw_item = &*(lparam.0 as *const DRAWITEMSTRUCT);
+        
+        // Check if it's a button
+        if draw_item.CtlType == ODT_BUTTON {
+            // Get the main window state (draw_item.hwndItem is the button itself)
+            // We need to get the parent window to access state
+            let parent_hwnd = match GetParent(draw_item.hwndItem) {
+                Ok(hwnd) => hwnd,
+                Err(_) => return LRESULT(0), // Can't get parent, skip drawing
+            };
+            
+            match get_state(parent_hwnd) {
+                Some(state) if state.current_theme_dark => {
+                    // DARK THEME BUTTON PAINTING
+                    let hdc = draw_item.hDC;
+                    let rect = draw_item.rcItem;
+                    
+                    // Get button text
+                    let mut text_buffer = [0u16; 256];
+                    let text_len = GetWindowTextW(draw_item.hwndItem, &mut text_buffer) as usize;
+                    //let text = &text_buffer[..text_len as usize];
+                    
+                    // Check button state
+                    let is_pressed = (draw_item.itemState.0 & ODS_SELECTED.0) != 0;
+                    let is_focused = (draw_item.itemState.0 & ODS_FOCUS.0) != 0;
+                    let is_default = (draw_item.itemState.0 & ODS_DEFAULT.0) != 0;
+                    
+                    // Dark theme colors
+                    let background_color = if is_pressed {
+                        COLORREF(0x00404040) // Dark gray when pressed
+                    } else if is_focused || is_default {
+                        COLORREF(0x00303030) // Slightly lighter gray when focused
+                    } else {
+                        COLORREF(0x00000000) // Black for normal state
+                    };
+                    
+                    let text_color = COLORREF(0x00FFFFFF); // White text
+                    
+                    // Paint button background
+                    let brush = CreateSolidBrush(background_color);
+                    FillRect(hdc, &rect, brush);
+                    let _ = DeleteObject(HGDIOBJ::from(brush));
+                    
+                    // Draw focus rectangle if needed
+                    if is_focused && !is_pressed {
+                        let focus_rect = RECT {
+                            left: rect.left + 3,
+                            top: rect.top + 3,
+                            right: rect.right - 3,
+                            bottom: rect.bottom - 3,
+                        };
+                        let _ = DrawFocusRect(hdc, &focus_rect);
+                    }
+                    
+                    // Draw button border
+                    let border_brush = if is_pressed {
+                        CreateSolidBrush(COLORREF(0x00606060)) // Light gray border when pressed
+                    } else {
+                        CreateSolidBrush(COLORREF(0x00404040)) // Gray border
+                    };
+                    
+                    FrameRect(hdc, &rect, border_brush);
+                    let _ = DeleteObject(HGDIOBJ::from(border_brush));
+                    
+                    // Draw button text
+                    SetBkMode(hdc, TRANSPARENT);
+                    SetTextColor(hdc, text_color);
+                    
+                    // Adjust text position if pressed (gives "pressed" effect)
+                    let mut text_rect = rect;
+                    if is_pressed {
+                        text_rect.left += 2;
+                        text_rect.top += 2;
+                        text_rect.right += 2;
+                        text_rect.bottom += 2;
+                    }
+                    
+                    DrawTextW(
+                        hdc,
+                        &mut text_buffer[..text_len],  // Slice with actual text
+                        &mut text_rect,
+                        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                    );
+                    
+                    return LRESULT(1); // We handled the drawing
+                }
+                Some(_) => {
+                    // LIGHT THEME - let Windows handle default painting
+                    // Return 0 to let DefWindowProc handle it
+                    return LRESULT(0);
+                }
+                None => {
+                    // No state available - use default painting
+                    return LRESULT(0);
+                }
+            }
+        }
+        
+        LRESULT(0) // Not a button or we didn't handle it
+    }
+}
 
 /// Handles `WM_CTLCOLOR*` style messages by configuring the device context and returning a brush.
 /// Expected usage:

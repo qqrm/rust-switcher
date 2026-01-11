@@ -25,7 +25,7 @@ use windows::{
             DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, IsWindowVisible, PostQuitMessage,
             SC_CLOSE, SW_HIDE, SW_SHOW, SetWindowLongPtrW, ShowWindow, WM_CLOSE, WM_COMMAND,
             WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC, WM_DESTROY, WM_HOTKEY,
-            WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+            WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME, WM_DRAWITEM
         },
     },
     core::{PCWSTR, Result, w},
@@ -340,6 +340,7 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
         WM_ERASEBKGND => on_erase_background(hwnd, wparam, lparam),
 
         //For buttons
+        WM_DRAWITEM => on_draw_item(hwnd, wparam, lparam),
         WM_CTLCOLORBTN => on_ctlcolor(wparam, lparam),
         WM_SYSCOMMAND => {
             let cmd = wparam.0 & 0xFFF0usize;

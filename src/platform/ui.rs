@@ -364,6 +364,10 @@ fn create_hotkey_row(
     create(hwnd, row.edit)
 }
 
+use windows::Win32::UI::WindowsAndMessaging::{
+    BS_OWNERDRAW,  // If available
+};
+
 fn create_buttons(hwnd: HWND, state: &mut AppState, l: &UiLayout) -> windows::core::Result<()> {
     let btn_y = l.top_y + l.group_h + 10;
     let btn_h = 28;
@@ -387,7 +391,7 @@ fn create_buttons(hwnd: HWND, state: &mut AppState, l: &UiLayout) -> windows::co
             ex_style: WINDOW_EX_STYLE(0),
             class: w!("BUTTON"),
             text: w!("Apply"),
-            style: btn_style,
+            style: btn_style | WINDOW_STYLE(BS_OWNERDRAW as u32),
             rect: RectI::new(l.right_x + 40, btn_y, 90, btn_h),
             menu: Some(ControlId::Apply.hmenu()),
         },
