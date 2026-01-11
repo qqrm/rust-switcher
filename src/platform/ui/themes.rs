@@ -1,3 +1,8 @@
+//! Theme management for Windows UI
+//!
+//! This module provides theme-aware painting functions for Windows controls
+//! and handles dark/light theme switching.
+//!
 use windows::{
     Win32::{
         Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM},
@@ -5,8 +10,9 @@ use windows::{
             Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute},
             Gdi::{
                 COLOR_WINDOW, COLOR_WINDOWTEXT, CreateSolidBrush, DeleteObject, FillRect,
-                GetSysColor, GetSysColorBrush, HBRUSH, HDC, HGDIOBJ, SetBkColor, SetBkMode,
-                SetTextColor, TRANSPARENT,
+                GetSysColor, GetSysColorBrush, HBRUSH, HDC, HGDIOBJ, InvalidateRect,
+                REDRAW_WINDOW_FLAGS, RedrawWindow, SetBkColor, SetBkMode, SetTextColor,
+                TRANSPARENT, UpdateWindow,
             },
         },
         UI::{Controls::SetWindowTheme, WindowsAndMessaging::GetClientRect},
@@ -15,25 +21,6 @@ use windows::{
 };
 
 use crate::platform::win::state::{get_state, with_state_mut_do};
-
-// RGNDATA structure (simplified - we only need a pointer to it)
-#[repr(C)]
-#[allow(clippy::upper_case_acronyms)]
-pub struct RGNDATA {
-    _private: [u8; 0], // Zero-sized type since we only pass null
-}
-
-#[link(name = "user32")]
-unsafe extern "system" {
-    pub fn InvalidateRect(hWnd: HWND, lpRect: *const RECT, bErase: BOOL) -> BOOL;
-    pub fn UpdateWindow(hWnd: HWND) -> BOOL;
-    pub fn RedrawWindow(
-        hWnd: HWND,
-        lprcUpdate: *const RECT,
-        hrgnUpdate: *const RGNDATA,
-        flags: u32,
-    ) -> BOOL;
-}
 
 const RDW_INVALIDATE: u32 = 0x0001;
 const RDW_ALLCHILDREN: u32 = 0x0080;
@@ -65,8 +52,6 @@ pub fn on_ctlcolor(wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     }
 }
 
-#[allow(clippy::unnecessary_cast)]
-#[allow(clippy::needless_return)]
 pub fn on_color_dialog(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
@@ -75,34 +60,26 @@ pub fn on_color_dialog(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
         unsafe {
             SetBkColor(hdc, COLORREF(0x002D2D30));
             SetTextColor(hdc, COLORREF(0x00FFFFFF));
-            return LRESULT(
-                CreateSolidBrush(COLORREF(0x002D2D30)).0 as *mut std::ffi::c_void as isize,
-            );
+            return LRESULT(CreateSolidBrush(COLORREF(0x002D2D30)).0 as isize);
         }
     }
-    return on_ctlcolor(wparam, _lparam);
+    on_ctlcolor(wparam, _lparam)
 }
 
-#[allow(clippy::unnecessary_cast)]
-#[allow(clippy::needless_return)]
 pub fn on_color_static(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
     {
         let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
         unsafe {
-            SetBkColor(hdc, COLORREF(0x002D2D30)); // 0x00BBGGRR
+            SetBkColor(hdc, COLORREF(0x002D2D30)); 
             SetTextColor(hdc, COLORREF(0x00FFFFFF));
-            return LRESULT(
-                CreateSolidBrush(COLORREF(0x002D2D30)).0 as *mut std::ffi::c_void as isize,
-            );
+            return LRESULT(CreateSolidBrush(COLORREF(0x002D2D30)).0 as isize);
         }
     }
-    return on_ctlcolor(wparam, _lparam);
+    return on_ctlcolor(wparam, _lparam)
 }
 
-#[allow(clippy::needless_return)]
-#[allow(clippy::unnecessary_cast)]
 pub fn on_color_edit(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
@@ -111,15 +88,12 @@ pub fn on_color_edit(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
         unsafe {
             SetBkColor(hdc, COLORREF(0x001E1E1E)); // Dark gray for dark theme
             SetTextColor(hdc, COLORREF(0x00FFFFFF)); // White text for dark theme
-            return LRESULT(
-                CreateSolidBrush(COLORREF(0x002D2D30)).0 as *mut std::ffi::c_void as isize,
-            );
+            return LRESULT(CreateSolidBrush(COLORREF(0x002D2D30)).0 as isize);
         }
     }
-    return on_ctlcolor(wparam, _lparam);
+    on_ctlcolor(wparam, _lparam)
 }
 
-#[allow(clippy::needless_return)]
 pub fn on_erase_background(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
@@ -133,7 +107,7 @@ pub fn on_erase_background(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESU
             FillRect(hdc, &rect, brush);
             let _ = DeleteObject(HGDIOBJ::from(brush));
         }
-        return LRESULT(1);
+        LRESULT(1)
     } else {
         // Explicit light theme background (white)
         let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
@@ -145,7 +119,7 @@ pub fn on_erase_background(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESU
             FillRect(hdc, &rect, brush);
             let _ = DeleteObject(HGDIOBJ::from(brush));
         }
-        return LRESULT(1);
+        LRESULT(1)
     }
 }
 
@@ -185,15 +159,11 @@ pub fn set_window_theme(hwnd_main: HWND, current_theme_dark: bool) {
         }
 
         // Force window repaint to apply the theme changes
-        let _ = InvalidateRect(hwnd_main, std::ptr::null(), BOOL(1));
+        let _ = InvalidateRect(Some(hwnd_main), None, true);
         let _ = UpdateWindow(hwnd_main);
 
         // Also redraw child controls
-        let _ = RedrawWindow(
-            hwnd_main,
-            std::ptr::null(),
-            std::ptr::null(),
-            RDW_INVALIDATE | RDW_ALLCHILDREN,
-        );
+        let flags = REDRAW_WINDOW_FLAGS(RDW_INVALIDATE | RDW_ALLCHILDREN);
+        let _ = RedrawWindow(Some(hwnd_main), None, None, flags);
     }
 }
