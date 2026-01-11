@@ -35,21 +35,42 @@ fn seq_ctrl_a() -> HotkeySequence {
     }
 }
 
-fn restore_appdata(old: Option<std::ffi::OsString>) {
-    match old {
-        Some(v) => unsafe { std::env::set_var("APPDATA", v) },
-        None => unsafe { std::env::remove_var("APPDATA") },
+struct AppDataOverride {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    old: Option<std::ffi::OsString>,
+    dir: PathBuf,
+}
+
+impl AppDataOverride {
+    fn new(prefix: &str) -> Self {
+        let guard = lock_env();
+
+        let old = std::env::var_os("APPDATA");
+        let dir = unique_temp_dir(prefix);
+        fs::create_dir_all(&dir).unwrap();
+        unsafe { std::env::set_var("APPDATA", &dir) };
+
+        Self {
+            _guard: guard,
+            old,
+            dir,
+        }
+    }
+}
+
+impl Drop for AppDataOverride {
+    fn drop(&mut self) {
+        match self.old.take() {
+            Some(v) => unsafe { std::env::set_var("APPDATA", v) },
+            None => unsafe { std::env::remove_var("APPDATA") },
+        }
+        let _ = fs::remove_dir_all(&self.dir);
     }
 }
 
 #[test]
 fn config_save_and_load_roundtrip_via_appdata() {
-    let _g = lock_env();
-
-    let old = std::env::var_os("APPDATA");
-    let dir = unique_temp_dir("appdata");
-    fs::create_dir_all(&dir).unwrap();
-    unsafe { std::env::set_var("APPDATA", &dir) };
+    let _env = AppDataOverride::new("appdata");
 
     let cfg = Config {
         hotkey_pause_sequence: Some(seq_ctrl_a()),
@@ -60,19 +81,11 @@ fn config_save_and_load_roundtrip_via_appdata() {
     let loaded = config::load().unwrap();
 
     assert_eq!(loaded.hotkey_pause_sequence, cfg.hotkey_pause_sequence);
-
-    restore_appdata(old);
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
 fn config_save_rejects_invalid_sequences() {
-    let _g = lock_env();
-
-    let old = std::env::var_os("APPDATA");
-    let dir = unique_temp_dir("appdata-invalid");
-    fs::create_dir_all(&dir).unwrap();
-    unsafe { std::env::set_var("APPDATA", &dir) };
+    let _env = AppDataOverride::new("appdata-invalid");
 
     let cfg = Config {
         hotkey_convert_last_word_sequence: Some(seq_ctrl_a()),
@@ -83,7 +96,4 @@ fn config_save_rejects_invalid_sequences() {
     let err = config::save(&cfg).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("unique hotkey sequence"));
-
-    restore_appdata(old);
-    let _ = fs::remove_dir_all(dir);
 }

@@ -204,6 +204,7 @@ pub fn handle_tray_message(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                     hwnd,
                     window_visible,
                     state.autoconvert_enabled,
+                    state.current_theme_dark,
                 ) {
                     Ok(action) => match action {
                         super::tray::TrayMenuAction::None => {}

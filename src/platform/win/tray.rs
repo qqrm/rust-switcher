@@ -16,7 +16,7 @@ use windows::{
             },
         },
     },
-    core::{BOOL, PCWSTR, Result},
+    core::{PCWSTR, Result},
 };
 
 pub enum TrayMenuAction {
@@ -24,20 +24,20 @@ pub enum TrayMenuAction {
     ToggleAutoConvert,
 }
 
-const ID_AUTOCONVERT_TOGGLE: u32 = 1003;
-
 pub const WM_APP_TRAY: u32 = WM_APP + 3;
 const TRAY_UID: u32 = 1;
 const ID_EXIT: u32 = 1001;
 const ID_SHOW_HIDE: u32 = 1002;
+const ID_AUTOCONVERT_TOGGLE: u32 = 1003;
+const ID_CHANGE_THEME: u32 = 1004;
 
-unsafe fn show_popup_menu_at_cursor(hwnd: HWND, hmenu: HMENU) -> BOOL {
+unsafe fn show_popup_menu_at_cursor(hwnd: HWND, hmenu: HMENU) -> u32 {
     let mut pt = POINT { x: 0, y: 0 };
     let _ = unsafe { GetCursorPos(&raw mut pt) };
 
     let _ = unsafe { SetForegroundWindow(hwnd) };
 
-    unsafe {
+    let result = unsafe {
         TrackPopupMenu(
             hmenu,
             TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_RIGHTALIGN | TPM_NOANIMATION | TPM_RIGHTBUTTON,
@@ -47,7 +47,8 @@ unsafe fn show_popup_menu_at_cursor(hwnd: HWND, hmenu: HMENU) -> BOOL {
             hwnd,
             None,
         )
-    }
+    };
+    result.0 as u32
 }
 
 unsafe fn toggle_window_visibility(hwnd: HWND, window_visible: bool) {
@@ -342,22 +343,36 @@ pub fn show_tray_context_menu(
     hwnd: HWND,
     window_visible: bool,
     autoconvert_enabled: bool,
+    current_theme_dark: bool,
 ) -> Result<TrayMenuAction> {
     unsafe {
-        let hmenu = build_tray_menu(window_visible, autoconvert_enabled)?;
+        let hmenu = build_tray_menu(window_visible, autoconvert_enabled, current_theme_dark)?;
         let cmd = show_popup_menu_at_cursor(hwnd, hmenu);
         let _ = DestroyMenu(hmenu);
-        handle_tray_menu_cmd(hwnd, window_visible, autoconvert_enabled, cmd)
+        handle_tray_menu_cmd(
+            hwnd,
+            window_visible,
+            autoconvert_enabled,
+            current_theme_dark,
+            cmd,
+        )
     }
 }
 
-fn build_tray_menu(window_visible: bool, autoconvert_enabled: bool) -> Result<HMENU> {
+fn build_tray_menu(
+    window_visible: bool,
+    autoconvert_enabled: bool,
+    current_theme_dark: bool,
+) -> Result<HMENU> {
     let hmenu = unsafe { CreatePopupMenu() }?;
 
     unsafe { append_autoconvert_toggle_item(hmenu, autoconvert_enabled) }?;
     unsafe { AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null()) }?;
 
     unsafe { append_show_hide_item(hmenu, window_visible) }?;
+    unsafe { AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null()) }?;
+
+    unsafe { append_change_theme_item(hmenu, current_theme_dark) }?;
     unsafe { AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null()) }?;
 
     unsafe { append_exit_item(hmenu) }?;
@@ -384,6 +399,28 @@ unsafe fn append_autoconvert_toggle_item(hmenu: HMENU, autoconvert_enabled: bool
             hmenu,
             MF_STRING | check,
             ID_AUTOCONVERT_TOGGLE as usize,
+            PCWSTR(wide.as_ptr()),
+        )
+    })?;
+
+    Ok(())
+}
+
+unsafe fn append_change_theme_item(hmenu: HMENU, current_theme_dark: bool) -> Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{AppendMenuW, MF_STRING};
+
+    let text = if current_theme_dark {
+        "Light\0"
+    } else {
+        "Dark\0"
+    };
+    let wide: Vec<u16> = text.encode_utf16().collect();
+
+    (unsafe {
+        AppendMenuW(
+            hmenu,
+            MF_STRING,
+            ID_CHANGE_THEME as usize,
             PCWSTR(wide.as_ptr()),
         )
     })?;
@@ -424,13 +461,19 @@ unsafe fn handle_tray_menu_cmd(
     hwnd: HWND,
     window_visible: bool,
     _autoconvert_enabled: bool,
-    cmd: BOOL,
+    current_theme_dark: bool,
+    cmd: u32,
 ) -> Result<TrayMenuAction> {
-    match cmd.0.cast_unsigned() {
+    match cmd {
         ID_AUTOCONVERT_TOGGLE => Ok(TrayMenuAction::ToggleAutoConvert),
 
         ID_SHOW_HIDE => {
             unsafe { toggle_window_visibility(hwnd, window_visible) };
+            Ok(TrayMenuAction::None)
+        }
+
+        ID_CHANGE_THEME => {
+            crate::platform::ui::themes::set_window_theme(hwnd, current_theme_dark);
             Ok(TrayMenuAction::None)
         }
 

@@ -10,7 +10,7 @@ mod commands;
 pub(crate) mod hotkey_format;
 pub(crate) mod keyboard;
 pub(crate) mod mouse;
-mod state;
+pub mod state;
 pub(crate) mod tray;
 mod tray_dispatch;
 mod visuals;
@@ -39,6 +39,8 @@ use self::{
     },
 };
 pub(crate) const AUTOSTART_ARG: &str = "--autostart";
+use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLOREDIT, WM_ERASEBKGND};
+
 use crate::{
     app::AppState,
     config,
@@ -47,9 +49,9 @@ use crate::{
     platform::{
         ui::{
             self,
-            colors::on_ctlcolor,
             error_notifier::{T_CONFIG, T_UI, drain_one_and_present},
             notify::on_wm_app_notify,
+            themes::*,
         },
         win::{
             tray::{WM_APP_TRAY, remove_icon},
@@ -321,7 +323,24 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
         WM_HOTKEY => on_hotkey(hwnd, wparam),
         WM_TIMER => on_timer(hwnd, wparam, lparam),
 
-        WM_CTLCOLORDLG | WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => on_ctlcolor(wparam, lparam),
+        //Purpose: Customize the background color of a dialog box itself.
+        //When sent: When the dialog box background is about to be painted.
+        WM_CTLCOLORDLG => on_color_dialog(hwnd, wparam, lparam),
+
+        //Purpose: Customize colors of static controls (labels, group boxes, icons, text fields).
+        //When sent: Before a static control is drawn.
+        WM_CTLCOLORSTATIC => on_color_static(hwnd, wparam, lparam),
+
+        //Purpose: Customize colors of edit controls (text boxes).
+        //When sent: Before an edit control is drawn.
+        WM_CTLCOLOREDIT => on_color_edit(hwnd, wparam, lparam),
+
+        //Allows the application to customize the window background instead of using the default system color
+        //Sent by Windows when a window's background needs to be cleared/repainted
+        WM_ERASEBKGND => on_erase_background(hwnd, wparam, lparam),
+
+        //For buttons
+        WM_CTLCOLORBTN => on_ctlcolor(wparam, lparam),
         WM_SYSCOMMAND => {
             let cmd = wparam.0 & 0xFFF0usize;
             if cmd == SC_CLOSE as usize {
