@@ -9,9 +9,9 @@ use windows::{
         Foundation::{HWND, RECT},
         System::SystemServices::SS_RIGHT,
         UI::WindowsAndMessaging::{
-            BS_AUTOCHECKBOX, BS_GROUPBOX, CreateWindowExW, ES_NUMBER, ES_READONLY, GetClientRect,
-            SetWindowTextW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP,
-            WS_VISIBLE,
+            BS_AUTOCHECKBOX, BS_GROUPBOX, BS_OWNERDRAW, CreateWindowExW, ES_NUMBER, ES_READONLY,
+            GetClientRect, SetWindowTextW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD,
+            WS_EX_CLIENTEDGE, WS_TABSTOP, WS_VISIBLE,
         },
     },
     core::{PCWSTR, w},
@@ -364,14 +364,10 @@ fn create_hotkey_row(
     create(hwnd, row.edit)
 }
 
-use windows::Win32::UI::WindowsAndMessaging::{
-    BS_OWNERDRAW,  // If available
-};
-
 fn create_buttons(hwnd: HWND, state: &mut AppState, l: &UiLayout) -> windows::core::Result<()> {
     let btn_y = l.top_y + l.group_h + 10;
     let btn_h = 28;
-    let btn_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
+    let btn_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32);
 
     state.buttons.exit = create(
         hwnd,
@@ -391,7 +387,7 @@ fn create_buttons(hwnd: HWND, state: &mut AppState, l: &UiLayout) -> windows::co
             ex_style: WINDOW_EX_STYLE(0),
             class: w!("BUTTON"),
             text: w!("Apply"),
-            style: btn_style | WINDOW_STYLE(BS_OWNERDRAW as u32),
+            style: btn_style,
             rect: RectI::new(l.right_x + 40, btn_y, 90, btn_h),
             menu: Some(ControlId::Apply.hmenu()),
         },
