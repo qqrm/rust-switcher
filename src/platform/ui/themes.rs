@@ -303,27 +303,6 @@ pub fn on_ctlcolor(wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     }
 }
 
-#[allow(dead_code)]
-pub fn on_ctlcolor_btn(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
-    if let Some(state) = get_state(hwnd) {
-        if state.current_theme_dark {
-            let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
-            unsafe {
-                // Set button background to black
-                SetBkColor(hdc, COLORREF(0x00000000));
-                // Set button text to white
-                SetTextColor(hdc, COLORREF(0x00FFFFFF));
-                // Return a black brush for background
-                return LRESULT(
-                    CreateSolidBrush(COLORREF(0x00000000)).0 as *mut std::ffi::c_void as isize,
-                );
-            }
-        }
-    }
-    // Light theme - use default
-    return on_ctlcolor(wparam, _lparam);
-}
-
 pub fn on_color_dialog(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
@@ -349,7 +328,7 @@ pub fn on_color_static(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
             return LRESULT(CreateSolidBrush(COLORREF(0x002D2D30)).0 as isize);
         }
     }
-    return on_ctlcolor(wparam, _lparam);
+    on_ctlcolor(wparam, _lparam)
 }
 
 pub fn on_color_edit(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
