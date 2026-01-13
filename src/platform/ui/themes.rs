@@ -26,12 +26,17 @@ use windows::{
     },
     core::{BOOL, w},
 };
-
+use windows::Win32::Graphics::Gdi::{RDW_INVALIDATE, RDW_ALLCHILDREN};
 use crate::platform::win::state::{get_state, with_state_mut_do};
 
-const RDW_INVALIDATE: u32 = 0x0001;
-const RDW_ALLCHILDREN: u32 = 0x0080;
 
+/// Handles `WM_DRAWITEM` messages for owner-drawn buttons.
+/// Expected usage: called from a window procedure when processing `WM_DRAWITEM`
+//// What it does:
+/// - checks if the control being drawn is a button
+/// - retrieves the application state to determine the current theme
+/// - paints the button according to the current theme (dark or light)
+/// - handles button states like pressed, focused, default, and disabled
 pub fn on_draw_item(_hwnd: HWND, _wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         let draw_item = &*(lparam.0 as *const DRAWITEMSTRUCT);
@@ -297,6 +302,7 @@ pub fn on_ctlcolor(wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     }
 }
 
+/// Handles `WM_CTLCOLORSTATIC` messages for static controls.
 pub fn on_color_dialog(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
@@ -311,6 +317,9 @@ pub fn on_color_dialog(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     on_ctlcolor(wparam, _lparam)
 }
 
+/// Handles `WM_CTLCOLORSTATIC` messages for static controls.
+/// Expected usage: called from a window procedure when processing `WM_CTLCOLORSTATIC`
+/// messages.
 pub fn on_color_static(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
@@ -325,6 +334,7 @@ pub fn on_color_static(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     on_ctlcolor(wparam, _lparam)
 }
 
+/// Handles `WM_CTLCOLOREDIT` messages for edit controls.
 pub fn on_color_edit(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
@@ -339,6 +349,7 @@ pub fn on_color_edit(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     on_ctlcolor(wparam, _lparam)
 }
 
+/// Handles `WM_ERASEBKGND` messages for window background erasing.
 pub fn on_erase_background(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
@@ -368,6 +379,8 @@ pub fn on_erase_background(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESU
     }
 }
 
+/// Sets the window theme to dark or light mode based on `current_theme_dark`.
+/// Also forces a repaint of the window and its child controls to apply the theme changes.
 pub fn set_window_theme(hwnd_main: HWND, current_theme_dark: bool) {
     unsafe {
         if !current_theme_dark {
@@ -407,8 +420,8 @@ pub fn set_window_theme(hwnd_main: HWND, current_theme_dark: bool) {
         let _ = InvalidateRect(Some(hwnd_main), None, true);
         let _ = UpdateWindow(hwnd_main);
 
-        // Also redraw child controls
-        let flags = REDRAW_WINDOW_FLAGS(RDW_INVALIDATE | RDW_ALLCHILDREN);
+        // Also redraw child controls (combine the typed flag values)
+        let flags = REDRAW_WINDOW_FLAGS(RDW_INVALIDATE.0 | RDW_ALLCHILDREN.0);
         let _ = RedrawWindow(Some(hwnd_main), None, None, flags);
     }
 }

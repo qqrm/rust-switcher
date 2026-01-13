@@ -27,3 +27,4 @@ target
 /*.zip
 /logs/
 /*json.gz
+.github/copilot-instructions.md
