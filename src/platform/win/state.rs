@@ -28,3 +28,10 @@ pub(crate) fn with_state_mut_do(hwnd: HWND, f: impl FnOnce(&mut AppState)) {
         }
     }
 }
+
+pub(crate) fn get_state(hwnd: HWND) -> Option<&'static AppState> {
+    unsafe {
+        let p = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
+        if !p.is_null() { Some(&*p) } else { None }
+    }
+}

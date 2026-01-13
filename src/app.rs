@@ -174,6 +174,8 @@ pub struct AppState {
     pub active_switch_layout_sequence: Option<config::HotkeySequence>,
     pub switch_layout_waiting_second: bool,
     pub switch_layout_first_tick_ms: u64,
+
+    pub current_theme_dark: bool,
 }
 
 #[derive(Debug, Default)]
