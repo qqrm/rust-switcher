@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 
 const APP_DIR: &str = "RustSwitcher";
 const CONFIG_FILE: &str = "config.json";
@@ -43,7 +43,7 @@ pub struct HotkeySequence {
     pub max_gap_ms: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Config {
     pub delay_ms: u32,
 
@@ -60,6 +60,55 @@ pub struct Config {
     pub hotkey_convert_selection_sequence: Option<HotkeySequence>,
     #[serde(default)]
     pub hotkey_switch_layout_sequence: Option<HotkeySequence>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ConfigWire {
+    pub delay_ms: u32,
+
+    pub hotkey_convert_last_word: Option<Hotkey>,
+    pub hotkey_convert_selection: Option<Hotkey>,
+    pub hotkey_switch_layout: Option<Hotkey>,
+    pub hotkey_pause: Option<Hotkey>,
+
+    #[serde(default)]
+    pub hotkey_convert_last_word_sequence: Option<HotkeySequence>,
+    #[serde(default)]
+    pub hotkey_pause_sequence: Option<HotkeySequence>,
+    #[serde(default)]
+    pub hotkey_convert_selection_sequence: Option<HotkeySequence>,
+    #[serde(default)]
+    pub hotkey_switch_layout_sequence: Option<HotkeySequence>,
+}
+
+impl TryFrom<ConfigWire> for Config {
+    type Error = String;
+
+    fn try_from(wire: ConfigWire) -> Result<Self, Self::Error> {
+        let cfg = Self {
+            delay_ms: wire.delay_ms,
+            hotkey_convert_last_word: wire.hotkey_convert_last_word,
+            hotkey_convert_selection: wire.hotkey_convert_selection,
+            hotkey_switch_layout: wire.hotkey_switch_layout,
+            hotkey_pause: wire.hotkey_pause,
+            hotkey_convert_last_word_sequence: wire.hotkey_convert_last_word_sequence,
+            hotkey_pause_sequence: wire.hotkey_pause_sequence,
+            hotkey_convert_selection_sequence: wire.hotkey_convert_selection_sequence,
+            hotkey_switch_layout_sequence: wire.hotkey_switch_layout_sequence,
+        };
+
+        cfg.validate_hotkey_sequences().map(|()| cfg)
+    }
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = ConfigWire::deserialize(deserializer)?;
+        Self::try_from(wire).map_err(serde::de::Error::custom)
+    }
 }
 impl Default for Config {
     fn default() -> Self {

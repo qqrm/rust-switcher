@@ -230,17 +230,6 @@ fn load_config_or_default(hwnd: HWND, state: &mut AppState) -> config::Config {
             );
         })
         .ok()
-        .and_then(|cfg| match cfg.validate_hotkey_sequences() {
-            Ok(()) => Some(cfg),
-            Err(msg) => {
-                let user_text = msg.clone();
-                let source = io_to_win(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg));
-                crate::platform::ui::error_notifier::push(
-                    hwnd, state, T_CONFIG, &user_text, &source,
-                );
-                None
-            }
-        })
         .unwrap_or_default()
 }
 
