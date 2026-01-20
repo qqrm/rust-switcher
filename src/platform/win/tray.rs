@@ -10,7 +10,7 @@ use windows::{
             WindowsAndMessaging::{
                 AppendMenuW, CreatePopupMenu, DestroyMenu, GWLP_HINSTANCE, GetCursorPos,
                 GetWindowLongPtrW, HICON, HMENU, IMAGE_ICON, LR_SHARED, LoadImageW, MF_SEPARATOR,
-                SW_HIDE, SW_SHOW, SetForegroundWindow, ShowWindow, TPM_BOTTOMALIGN,
+                SW_HIDE, SW_RESTORE, SetForegroundWindow, ShowWindow, TPM_BOTTOMALIGN,
                 TPM_NOANIMATION, TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TrackPopupMenu,
                 WM_APP,
             },
@@ -55,7 +55,8 @@ unsafe fn toggle_window_visibility(hwnd: HWND, window_visible: bool) {
     if window_visible {
         let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
     } else {
-        let _ = unsafe { ShowWindow(hwnd, SW_SHOW) };
+        // Restore is important if the window was minimized internally
+        let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
         let _ = unsafe { SetForegroundWindow(hwnd) };
     }
 }

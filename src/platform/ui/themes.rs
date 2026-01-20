@@ -12,8 +12,8 @@ use windows::{
                 COLOR_WINDOW, COLOR_WINDOWTEXT, CreateSolidBrush, DT_CENTER, DT_SINGLELINE,
                 DT_VCENTER, DeleteObject, DrawFocusRect, DrawTextW, FillRect, FrameRect,
                 GetSysColor, GetSysColorBrush, HBRUSH, HDC, HGDIOBJ, InvalidateRect,
-                RDW_ALLCHILDREN, RDW_INVALIDATE, REDRAW_WINDOW_FLAGS, RedrawWindow, SetBkColor,
-                SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
+                RDW_ALLCHILDREN, RDW_INVALIDATE, RedrawWindow, SetBkColor, SetBkMode, SetTextColor,
+                TRANSPARENT, UpdateWindow,
             },
         },
         UI::{
@@ -29,248 +29,239 @@ use windows::{
 
 use crate::platform::win::state::{get_state, with_state_mut_do};
 
+const DARK_WINDOW_BG: COLORREF = COLORREF(0x002D2D30);
+const DARK_CONTROL_BG: COLORREF = COLORREF(0x002D2D30);
+const DARK_EDIT_BG: COLORREF = COLORREF(0x001E1E1E);
+
+fn ensure_dark_brushes(hwnd: HWND) {
+    with_state_mut_do(hwnd, |state| unsafe {
+        if state.dark_brush_window_bg.0.is_null() {
+            state.dark_brush_window_bg = CreateSolidBrush(DARK_WINDOW_BG);
+        }
+        if state.dark_brush_control_bg.0.is_null() {
+            state.dark_brush_control_bg = CreateSolidBrush(DARK_CONTROL_BG);
+        }
+        if state.dark_brush_edit_bg.0.is_null() {
+            state.dark_brush_edit_bg = CreateSolidBrush(DARK_EDIT_BG);
+        }
+    });
+}
+
+struct ButtonState {
+    pressed: bool,
+    focused: bool,
+    defaulted: bool,
+    disabled: bool,
+}
+
+struct ButtonPalette {
+    bg_normal: COLORREF,
+    bg_pressed: COLORREF,
+    bg_focused: COLORREF,
+    bg_disabled: COLORREF,
+
+    text_normal: COLORREF,
+    text_disabled: COLORREF,
+
+    border_normal: COLORREF,
+    border_pressed: COLORREF,
+    border_disabled: COLORREF,
+}
+
+fn read_button_state(draw_item: &DRAWITEMSTRUCT) -> ButtonState {
+    ButtonState {
+        pressed: (draw_item.itemState.0 & ODS_SELECTED.0) != 0,
+        focused: (draw_item.itemState.0 & ODS_FOCUS.0) != 0,
+        defaulted: (draw_item.itemState.0 & ODS_DEFAULT.0) != 0,
+        disabled: (draw_item.itemState.0 & ODS_DISABLED.0) != 0,
+    }
+}
+
+fn read_button_text(hwnd_btn: HWND) -> ([u16; 256], usize) {
+    let mut buf = [0u16; 256];
+    let len = unsafe { GetWindowTextW(hwnd_btn, &mut buf) as usize };
+    (buf, len)
+}
+
+fn choose_colors(state: &ButtonState, palette: &ButtonPalette) -> (COLORREF, COLORREF, COLORREF) {
+    let bg = if state.disabled {
+        palette.bg_disabled
+    } else if state.pressed {
+        palette.bg_pressed
+    } else if state.focused || state.defaulted {
+        palette.bg_focused
+    } else {
+        palette.bg_normal
+    };
+
+    let text = if state.disabled {
+        palette.text_disabled
+    } else {
+        palette.text_normal
+    };
+
+    let border = if state.disabled {
+        palette.border_disabled
+    } else if state.pressed {
+        palette.border_pressed
+    } else {
+        palette.border_normal
+    };
+
+    (bg, text, border)
+}
+
+fn paint_button_background(hdc: HDC, rect: &RECT, bg: COLORREF) {
+    unsafe {
+        let brush = CreateSolidBrush(bg);
+        FillRect(hdc, rect, brush);
+        let _ = DeleteObject(HGDIOBJ::from(brush));
+    }
+}
+
+fn paint_button_border(hdc: HDC, rect: &RECT, border: COLORREF) {
+    unsafe {
+        let brush = CreateSolidBrush(border);
+        FrameRect(hdc, rect, brush);
+        let _ = DeleteObject(HGDIOBJ::from(brush));
+    }
+}
+
+fn paint_button_focus(hdc: HDC, rect: &RECT) {
+    unsafe {
+        let focus_rect = RECT {
+            left: rect.left + 3,
+            top: rect.top + 3,
+            right: rect.right - 3,
+            bottom: rect.bottom - 3,
+        };
+        let _ = DrawFocusRect(hdc, &focus_rect);
+    }
+}
+
+fn paint_button_text(
+    hdc: HDC,
+    rect: &RECT,
+    text: &mut [u16],
+    text_len: usize,
+    text_color: COLORREF,
+    pressed: bool,
+) {
+    unsafe {
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, text_color);
+
+        let mut text_rect = *rect;
+        if pressed {
+            text_rect.left += 2;
+            text_rect.top += 2;
+            text_rect.right += 2;
+            text_rect.bottom += 2;
+        }
+
+        DrawTextW(
+            hdc,
+            &mut text[..text_len],
+            &mut text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+        );
+    }
+}
+
+fn paint_button(
+    hdc: HDC,
+    rect: &RECT,
+    hwnd_btn: HWND,
+    state: &ButtonState,
+    palette: &ButtonPalette,
+) {
+    let (mut text_buf, text_len) = read_button_text(hwnd_btn);
+    let (bg, text, border) = choose_colors(state, palette);
+
+    paint_button_background(hdc, rect, bg);
+
+    if state.focused && !state.pressed && !state.disabled {
+        paint_button_focus(hdc, rect);
+    }
+
+    paint_button_border(hdc, rect, border);
+    paint_button_text(
+        hdc,
+        rect,
+        &mut text_buf,
+        text_len,
+        text,
+        state.pressed && !state.disabled,
+    );
+}
+
+fn palette_dark() -> ButtonPalette {
+    ButtonPalette {
+        bg_normal: COLORREF(0x00262626),
+        bg_pressed: COLORREF(0x003C3C3C),
+        bg_focused: COLORREF(0x00323232),
+        bg_disabled: COLORREF(0x00333333),
+
+        text_normal: COLORREF(0x00FFFFFF),
+        text_disabled: COLORREF(0x00888888),
+
+        border_normal: COLORREF(0x00404040),
+        border_pressed: COLORREF(0x00505050),
+        border_disabled: COLORREF(0x00404040),
+    }
+}
+
+fn palette_light() -> ButtonPalette {
+    ButtonPalette {
+        bg_normal: COLORREF(0x00F0F0F0),
+        bg_pressed: COLORREF(0x00C0C0C0),
+        bg_focused: COLORREF(0x00E0E0E0),
+        bg_disabled: COLORREF(0x00C0C0C0),
+
+        text_normal: COLORREF(0x00000000),
+        text_disabled: COLORREF(0x00808080),
+
+        border_normal: COLORREF(0x00808080),
+        border_pressed: COLORREF(0x00808080),
+        border_disabled: COLORREF(0x00808080),
+    }
+}
+
 /// Handles `WM_DRAWITEM` messages for owner-drawn buttons.
-/// Expected usage: called from a window procedure when processing `WM_DRAWITEM`
-/// What it does:
-/// - checks if the control being drawn is a button
-/// - retrieves the application state to determine the current theme
-/// - paints the button according to the current theme (dark or light)
-/// - handles button states like pressed, focused, default, and disabled
 pub fn on_draw_item(_hwnd: HWND, _wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         let draw_item = &*(lparam.0 as *const DRAWITEMSTRUCT);
 
-        // Check if it's a button
-        if draw_item.CtlType == ODT_BUTTON {
-            // Get the main window state (draw_item.hwndItem is the button itself)
-            // We need to get the parent window to access state
-            let parent_hwnd = match GetParent(draw_item.hwndItem) {
-                Ok(hwnd) => hwnd,
-                Err(_) => return LRESULT(0), // Can't get parent, skip drawing
-            };
-
-            match get_state(parent_hwnd) {
-                Some(state) if state.current_theme_dark => {
-                    // DARK THEME BUTTON PAINTING
-                    let hdc = draw_item.hDC;
-                    let rect = draw_item.rcItem;
-
-                    // Get button text
-                    let mut text_buffer = [0u16; 256];
-                    let text_len = GetWindowTextW(draw_item.hwndItem, &mut text_buffer) as usize;
-                    //let text = &text_buffer[..text_len as usize];
-
-                    // Check button state
-                    let is_pressed = (draw_item.itemState.0 & ODS_SELECTED.0) != 0;
-                    let is_focused = (draw_item.itemState.0 & ODS_FOCUS.0) != 0;
-                    let is_default = (draw_item.itemState.0 & ODS_DEFAULT.0) != 0;
-
-                    // Dark theme colors
-                    let background_color = if is_pressed {
-                        COLORREF(0x00404040) // Dark gray when pressed
-                    } else if is_focused || is_default {
-                        COLORREF(0x00303030) // Slightly lighter gray when focused
-                    } else {
-                        COLORREF(0x00000000) // Black for normal state
-                    };
-
-                    let text_color = COLORREF(0x00FFFFFF); // White text
-
-                    // Paint button background
-                    let brush = CreateSolidBrush(background_color);
-                    FillRect(hdc, &rect, brush);
-                    let _ = DeleteObject(HGDIOBJ::from(brush));
-
-                    // Draw focus rectangle if needed
-                    if is_focused && !is_pressed {
-                        let focus_rect = RECT {
-                            left: rect.left + 3,
-                            top: rect.top + 3,
-                            right: rect.right - 3,
-                            bottom: rect.bottom - 3,
-                        };
-                        let _ = DrawFocusRect(hdc, &focus_rect);
-                    }
-
-                    // Draw button border
-                    let border_brush = if is_pressed {
-                        CreateSolidBrush(COLORREF(0x00606060)) // Light gray border when pressed
-                    } else {
-                        CreateSolidBrush(COLORREF(0x00404040)) // Gray border
-                    };
-
-                    FrameRect(hdc, &rect, border_brush);
-                    let _ = DeleteObject(HGDIOBJ::from(border_brush));
-
-                    // Draw button text
-                    SetBkMode(hdc, TRANSPARENT);
-                    SetTextColor(hdc, text_color);
-
-                    // Adjust text position if pressed (gives "pressed" effect)
-                    let mut text_rect = rect;
-                    if is_pressed {
-                        text_rect.left += 2;
-                        text_rect.top += 2;
-                        text_rect.right += 2;
-                        text_rect.bottom += 2;
-                    }
-
-                    DrawTextW(
-                        hdc,
-                        &mut text_buffer[..text_len], // Slice with actual text
-                        &mut text_rect,
-                        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                    );
-
-                    return LRESULT(1); // We handled the drawing
-                }
-                Some(_) => {
-                    // LIGHT THEME - Draw light theme button
-                    let hdc = draw_item.hDC;
-                    let rect = draw_item.rcItem;
-
-                    // Get button text
-                    let mut text_buffer = [0u16; 256];
-                    let text_len = GetWindowTextW(draw_item.hwndItem, &mut text_buffer) as usize;
-
-                    // Check button state
-                    let is_pressed = (draw_item.itemState.0 & ODS_SELECTED.0) != 0;
-                    let is_focused = (draw_item.itemState.0 & ODS_FOCUS.0) != 0;
-                    let is_default = (draw_item.itemState.0 & ODS_DEFAULT.0) != 0;
-                    let is_disabled = (draw_item.itemState.0 & ODS_DISABLED.0) != 0;
-
-                    if is_disabled {
-                        // Draw disabled button appearance (light theme)
-                        let brush = CreateSolidBrush(COLORREF(0x00C0C0C0)); // Light gray
-                        FillRect(hdc, &rect, brush);
-                        let _ = DeleteObject(HGDIOBJ::from(brush));
-
-                        let border_brush = CreateSolidBrush(COLORREF(0x00808080));
-                        FrameRect(hdc, &rect, border_brush);
-                        let _ = DeleteObject(HGDIOBJ::from(border_brush));
-
-                        SetBkMode(hdc, TRANSPARENT);
-                        SetTextColor(hdc, COLORREF(0x00808080)); // Gray text
-                    } else {
-                        // Normal light theme button
-                        let background_color = if is_pressed {
-                            COLORREF(0x00C0C0C0) // Light gray when pressed
-                        } else if is_focused || is_default {
-                            COLORREF(0x00E0E0E0) // Lighter gray when focused
-                        } else {
-                            COLORREF(0x00F0F0F0) // Very light gray
-                        };
-
-                        // Paint button background
-                        let brush = CreateSolidBrush(background_color);
-                        FillRect(hdc, &rect, brush);
-                        let _ = DeleteObject(HGDIOBJ::from(brush));
-
-                        // Draw button border
-                        let border_brush = CreateSolidBrush(COLORREF(0x00808080));
-                        FrameRect(hdc, &rect, border_brush);
-                        let _ = DeleteObject(HGDIOBJ::from(border_brush));
-
-                        SetBkMode(hdc, TRANSPARENT);
-                        SetTextColor(hdc, COLORREF(0x00000000)); // Black text
-                    }
-
-                    // Draw text
-                    let mut text_rect = rect;
-                    if is_pressed && !is_disabled {
-                        text_rect.left += 2;
-                        text_rect.top += 2;
-                        text_rect.right += 2;
-                        text_rect.bottom += 2;
-                    }
-
-                    DrawTextW(
-                        hdc,
-                        &mut text_buffer[..text_len],
-                        &mut text_rect,
-                        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                    );
-
-                    return LRESULT(1); // We handled the drawing
-                }
-                None => {
-                    // Handle button when no state available
-                    let hdc = draw_item.hDC;
-                    let rect = draw_item.rcItem;
-
-                    // Get button text
-                    let mut text_buffer = [0u16; 256];
-                    let text_len = GetWindowTextW(draw_item.hwndItem, &mut text_buffer) as usize;
-
-                    // Check button state
-                    let is_pressed = (draw_item.itemState.0 & ODS_SELECTED.0) != 0;
-                    let is_focused = (draw_item.itemState.0 & ODS_FOCUS.0) != 0;
-                    let is_default = (draw_item.itemState.0 & ODS_DEFAULT.0) != 0;
-                    let is_disabled = (draw_item.itemState.0 & ODS_DISABLED.0) != 0;
-
-                    if is_disabled {
-                        // Draw disabled button appearance
-                        let brush = CreateSolidBrush(COLORREF(0x00C0C0C0)); // Light gray background
-                        FillRect(hdc, &rect, brush);
-                        let _ = DeleteObject(HGDIOBJ::from(brush));
-
-                        // Draw button border
-                        let border_brush = CreateSolidBrush(COLORREF(0x00808080)); // Gray border
-                        FrameRect(hdc, &rect, border_brush);
-                        let _ = DeleteObject(HGDIOBJ::from(border_brush));
-
-                        // Gray text for disabled
-                        SetBkMode(hdc, TRANSPARENT);
-                        SetTextColor(hdc, COLORREF(0x00808080));
-                    } else {
-                        // Normal light theme button
-                        let background_color = if is_pressed {
-                            COLORREF(0x00C0C0C0) // Light gray when pressed
-                        } else if is_focused || is_default {
-                            COLORREF(0x00E0E0E0) // Lighter gray when focused
-                        } else {
-                            COLORREF(0x00F0F0F0) // Very light gray for normal
-                        };
-
-                        let text_color = COLORREF(0x00000000); // Black text
-
-                        // Paint button background
-                        let brush = CreateSolidBrush(background_color);
-                        FillRect(hdc, &rect, brush);
-                        let _ = DeleteObject(HGDIOBJ::from(brush));
-
-                        // Draw button border
-                        let border_brush = CreateSolidBrush(COLORREF(0x00808080)); // Gray border
-                        FrameRect(hdc, &rect, border_brush);
-                        let _ = DeleteObject(HGDIOBJ::from(border_brush));
-
-                        // Draw button text
-                        SetBkMode(hdc, TRANSPARENT);
-                        SetTextColor(hdc, text_color);
-                    }
-
-                    // Draw text (common for both disabled and enabled)
-                    let mut text_rect = rect;
-                    if is_pressed && !is_disabled {
-                        text_rect.left += 2;
-                        text_rect.top += 2;
-                        text_rect.right += 2;
-                        text_rect.bottom += 2;
-                    }
-
-                    DrawTextW(
-                        hdc,
-                        &mut text_buffer[..text_len],
-                        &mut text_rect,
-                        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                    );
-
-                    return LRESULT(1); // We handled the drawing
-                }
-            }
+        if draw_item.CtlType != ODT_BUTTON {
+            return LRESULT(0);
         }
 
-        LRESULT(0) // Not a button or we didn't handle it
+        let parent_hwnd = match GetParent(draw_item.hwndItem) {
+            Ok(hwnd) => hwnd,
+            Err(_) => return LRESULT(0),
+        };
+
+        let theme_dark = get_state(parent_hwnd)
+            .map(|s| s.current_theme_dark)
+            .unwrap_or(false);
+
+        let palette = if theme_dark {
+            palette_dark()
+        } else {
+            palette_light()
+        };
+
+        let state = read_button_state(draw_item);
+
+        paint_button(
+            draw_item.hDC,
+            &draw_item.rcItem,
+            draw_item.hwndItem,
+            &state,
+            &palette,
+        );
+
+        LRESULT(1)
     }
 }
 
@@ -290,9 +281,27 @@ pub fn on_draw_item(_hwnd: HWND, _wparam: WPARAM, lparam: LPARAM) -> LRESULT {
 /// Safety:
 /// - this function performs raw handle casts (`WPARAM` to `HDC`) and calls Win32 APIs
 ///   that assume a valid device context.
-pub fn on_ctlcolor(wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+pub fn on_ctlcolor(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     unsafe {
         let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
+
+        if let Some(state) = get_state(hwnd)
+            && state.current_theme_dark
+        {
+            ensure_dark_brushes(hwnd);
+
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, COLORREF(0x00FFFFFF));
+            SetBkColor(hdc, DARK_CONTROL_BG);
+
+            if let Some(state) = get_state(hwnd) {
+                let brush = state.dark_brush_edit_bg;
+                return LRESULT(brush.0 as isize);
+            }
+
+            return on_ctlcolor(hwnd, wparam, _lparam);
+        }
+
         SetTextColor(hdc, COLORREF(GetSysColor(COLOR_WINDOWTEXT)));
         SetBkMode(hdc, TRANSPARENT);
 
@@ -302,125 +311,147 @@ pub fn on_ctlcolor(wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
 }
 
 /// Handles `WM_CTLCOLORSTATIC` messages for static controls.
-pub fn on_color_dialog(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+pub fn on_color_dialog(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
     {
+        ensure_dark_brushes(hwnd);
+
         let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
         unsafe {
-            SetBkColor(hdc, COLORREF(0x002D2D30));
+            SetBkMode(hdc, TRANSPARENT);
+            SetBkColor(hdc, DARK_WINDOW_BG);
             SetTextColor(hdc, COLORREF(0x00FFFFFF));
-            return LRESULT(CreateSolidBrush(COLORREF(0x002D2D30)).0 as isize);
         }
+
+        if let Some(state) = get_state(hwnd) {
+            let brush = state.dark_brush_window_bg;
+            return LRESULT(brush.0 as isize);
+        }
+
+        return on_ctlcolor(hwnd, wparam, lparam);
     }
-    on_ctlcolor(wparam, _lparam)
+
+    on_ctlcolor(hwnd, wparam, lparam)
 }
 
 /// Handles `WM_CTLCOLORSTATIC` messages for static controls.
 /// Expected usage: called from a window procedure when processing `WM_CTLCOLORSTATIC`
 /// messages.
-pub fn on_color_static(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+pub fn on_color_static(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
     {
+        ensure_dark_brushes(hwnd);
+
         let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
         unsafe {
-            SetBkColor(hdc, COLORREF(0x002D2D30));
+            SetBkMode(hdc, TRANSPARENT);
+            SetBkColor(hdc, DARK_CONTROL_BG);
             SetTextColor(hdc, COLORREF(0x00FFFFFF));
-            return LRESULT(CreateSolidBrush(COLORREF(0x002D2D30)).0 as isize);
         }
+
+        if let Some(state) = get_state(hwnd) {
+            let brush = state.dark_brush_control_bg;
+            return LRESULT(brush.0 as isize);
+        }
+
+        return on_ctlcolor(hwnd, wparam, lparam);
     }
-    on_ctlcolor(wparam, _lparam)
+
+    on_ctlcolor(hwnd, wparam, lparam)
 }
 
 /// Handles `WM_CTLCOLOREDIT` messages for edit controls.
-pub fn on_color_edit(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+pub fn on_color_edit(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if let Some(state) = get_state(hwnd)
         && state.current_theme_dark
     {
+        ensure_dark_brushes(hwnd);
+
         let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
         unsafe {
-            SetBkColor(hdc, COLORREF(0x001E1E1E)); // Dark gray for dark theme
-            SetTextColor(hdc, COLORREF(0x00FFFFFF)); // White text for dark theme
-            return LRESULT(CreateSolidBrush(COLORREF(0x002D2D30)).0 as isize);
+            SetBkMode(hdc, TRANSPARENT);
+            SetBkColor(hdc, DARK_EDIT_BG);
+            SetTextColor(hdc, COLORREF(0x00FFFFFF));
         }
+
+        let brush = state.dark_brush_edit_bg;
+        return LRESULT(brush.0 as isize);
     }
-    on_ctlcolor(wparam, _lparam)
+
+    on_ctlcolor(hwnd, wparam, lparam)
 }
 
 /// Handles `WM_ERASEBKGND` messages for window background erasing.
 pub fn on_erase_background(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
-    if let Some(state) = get_state(hwnd)
-        && state.current_theme_dark
-    {
-        // Paint main window background
-        let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
-        let mut rect = RECT::default();
-        unsafe {
-            let _ = GetClientRect(hwnd, &mut rect);
-            let brush = CreateSolidBrush(COLORREF(0x002D2D30));
-            FillRect(hdc, &rect, brush);
-            let _ = DeleteObject(HGDIOBJ::from(brush));
+    let Some(state) = get_state(hwnd) else {
+        return LRESULT(0);
+    };
+
+    let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
+    let mut rect = RECT::default();
+
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut rect);
+
+        if state.current_theme_dark {
+            ensure_dark_brushes(hwnd);
+
+            if let Some(state) = get_state(hwnd) {
+                let brush = state.dark_brush_window_bg;
+                FillRect(hdc, &rect, brush);
+                return LRESULT(1);
+            }
+
+            return LRESULT(0);
         }
-        LRESULT(1)
-    } else {
-        // Explicit light theme background (white)
-        let hdc = HDC(wparam.0 as *mut std::ffi::c_void);
-        let mut rect = RECT::default();
-        unsafe {
-            let _ = GetClientRect(hwnd, &mut rect);
-            let brush = CreateSolidBrush(COLORREF(0x00FFFFFF)); // White
-            // Or use system color: let brush = GetSysColorBrush(COLOR_WINDOW as i32);
-            FillRect(hdc, &rect, brush);
-            let _ = DeleteObject(HGDIOBJ::from(brush));
-        }
+
+        let brush = CreateSolidBrush(COLORREF(0x00FFFFFF));
+        FillRect(hdc, &rect, brush);
+        let _ = DeleteObject(HGDIOBJ::from(brush));
+
         LRESULT(1)
     }
 }
 
-/// Sets the window theme to dark or light mode based on `current_theme_dark`.
+/// Sets the window theme to dark or light mode based on `dark`.
 /// Also forces a repaint of the window and its child controls to apply the theme changes.
-pub fn set_window_theme(hwnd_main: HWND, current_theme_dark: bool) {
+pub fn set_window_theme(hwnd_main: HWND, dark: bool) {
     unsafe {
-        if !current_theme_dark {
-            let mut dark_mode: BOOL = BOOL(1);
+        let immersive = if dark { BOOL(1) } else { BOOL(0) };
 
-            let _ = DwmSetWindowAttribute(
-                hwnd_main,
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                &mut dark_mode as *mut _ as *const _,
-                std::mem::size_of::<BOOL>() as u32,
-            );
+        let _ = DwmSetWindowAttribute(
+            hwnd_main,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &immersive as *const _ as *const _,
+            std::mem::size_of::<BOOL>() as u32,
+        );
 
-            let _ = SetWindowTheme(
-                hwnd_main,
-                w!("DarkMode_Explorer"),
-                windows::core::PCWSTR::null(),
-            );
-            with_state_mut_do(hwnd_main, |state| {
-                state.current_theme_dark = true;
-            });
+        let class = if dark {
+            w!("DarkMode_Explorer")
         } else {
-            // Revert to light mode
-            let mut light_mode: BOOL = BOOL(0);
-            let _ = DwmSetWindowAttribute(
-                hwnd_main,
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                &mut light_mode as *mut _ as *const _,
-                std::mem::size_of::<BOOL>() as u32,
-            );
-            let _ = SetWindowTheme(hwnd_main, w!("Explorer"), windows::core::PCWSTR::null());
-            with_state_mut_do(hwnd_main, |state| {
-                state.current_theme_dark = false;
-            });
+            w!("Explorer")
+        };
+
+        let _ = SetWindowTheme(hwnd_main, class, windows::core::PCWSTR::null());
+
+        // Apply the same theme to child controls, without EnumChildWindows callback
+        let mut child = GetWindow(hwnd_main, GW_CHILD).unwrap_or_default();
+
+        while !child.0.is_null() {
+            let _ = SetWindowTheme(child, class, windows::core::PCWSTR::null());
+            child = GetWindow(child, GW_HWNDNEXT).unwrap_or_default();
         }
 
-        // Force window repaint to apply the theme changes
+        with_state_mut_do(hwnd_main, |state| {
+            state.current_theme_dark = dark;
+        });
+
         let _ = InvalidateRect(Some(hwnd_main), None, true);
         let _ = UpdateWindow(hwnd_main);
 
-        // Also redraw child controls (combine the typed flag values)
-        let flags = REDRAW_WINDOW_FLAGS(RDW_INVALIDATE.0 | RDW_ALLCHILDREN.0);
+        let flags = RDW_INVALIDATE | RDW_ALLCHILDREN;
         let _ = RedrawWindow(Some(hwnd_main), None, None, flags);
     }
 }

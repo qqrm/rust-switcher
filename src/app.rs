@@ -7,7 +7,11 @@
 
 use std::collections::VecDeque;
 
-use windows::Win32::{Foundation::HWND, Graphics::Gdi::HFONT, UI::WindowsAndMessaging::HMENU};
+use windows::Win32::{
+    Foundation::HWND,
+    Graphics::Gdi::{HBRUSH, HFONT},
+    UI::WindowsAndMessaging::HMENU,
+};
 
 use crate::config;
 
@@ -176,6 +180,10 @@ pub struct AppState {
     pub switch_layout_first_tick_ms: u64,
 
     pub current_theme_dark: bool,
+    // Cached theme brushes (must be deleted on window destroy)
+    pub dark_brush_window_bg: HBRUSH,
+    pub dark_brush_control_bg: HBRUSH,
+    pub dark_brush_edit_bg: HBRUSH,
 }
 
 #[derive(Debug, Default)]

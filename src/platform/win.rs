@@ -23,9 +23,10 @@ use windows::{
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
             DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, IsWindowVisible, PostQuitMessage,
-            SC_CLOSE, SW_HIDE, SW_SHOW, SetWindowLongPtrW, ShowWindow, WM_CLOSE, WM_COMMAND,
-            WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
-            WM_HOTKEY, WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+            SC_CLOSE, SC_MINIMIZE, SIZE_MINIMIZED, SW_HIDE, SW_SHOW, SetWindowLongPtrW, ShowWindow,
+            WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC,
+            WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX,
+            WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
         },
     },
     core::{PCWSTR, Result, w},
@@ -341,13 +342,22 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
 
         //For buttons
         WM_DRAWITEM => on_draw_item(hwnd, wparam, lparam),
-        WM_CTLCOLORBTN => on_ctlcolor(wparam, lparam),
-        WM_SYSCOMMAND => {
-            let cmd = wparam.0 & 0xFFF0usize;
-            if cmd == SC_CLOSE as usize {
+        WM_CTLCOLORBTN => on_ctlcolor(hwnd, wparam, lparam),
+        WM_SIZE => {
+            if wparam.0 == SIZE_MINIMIZED as usize {
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
                 return LRESULT(0);
             }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+        WM_SYSCOMMAND => {
+            let cmd = wparam.0 & 0xFFF0usize;
+
+            if cmd == SC_CLOSE as usize || cmd == SC_MINIMIZE as usize {
+                let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
+                return LRESULT(0);
+            }
+
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
         WM_CLOSE => {
@@ -512,6 +522,20 @@ unsafe fn on_ncdestroy(hwnd: HWND) -> LRESULT {
 
     if !state.font.0.is_null() {
         let _ = unsafe { DeleteObject(HGDIOBJ(state.font.0)) };
+    }
+
+    // Delete cached dark theme brushes
+    if !state.dark_brush_window_bg.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ::from(state.dark_brush_window_bg)) };
+        state.dark_brush_window_bg = Default::default();
+    }
+    if !state.dark_brush_control_bg.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ::from(state.dark_brush_control_bg)) };
+        state.dark_brush_control_bg = Default::default();
+    }
+    if !state.dark_brush_edit_bg.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ::from(state.dark_brush_edit_bg)) };
+        state.dark_brush_edit_bg = Default::default();
     }
 
     drop(unsafe { Box::from_raw(p) });
