@@ -15,6 +15,8 @@ pub(crate) mod tray;
 mod tray_dispatch;
 mod visuals;
 mod window;
+use std::sync::OnceLock;
+
 pub(crate) use hotkey_format::{format_hotkey, format_hotkey_sequence};
 use windows::{
     Win32::{
@@ -22,11 +24,12 @@ use windows::{
         Graphics::Gdi::{DeleteObject, HFONT, HGDIOBJ},
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
-            DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, IsWindowVisible, PostQuitMessage,
-            SC_CLOSE, SC_MINIMIZE, SIZE_MINIMIZED, SW_HIDE, SW_SHOW, SetWindowLongPtrW, ShowWindow,
-            WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC,
-            WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX,
-            WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+            DefWindowProcW, FindWindowW, GWLP_USERDATA, GetWindowLongPtrW, IsWindowVisible,
+            PostMessageW, PostQuitMessage, RegisterWindowMessageW, SC_CLOSE, SC_MINIMIZE,
+            SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow, SetWindowLongPtrW,
+            ShowWindow, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+            WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_SIZE, WM_SYSCOMMAND,
+            WM_TIMER, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
         },
     },
     core::{PCWSTR, Result, w},
@@ -318,6 +321,11 @@ pub fn run(start_hidden: bool) -> Result<()> {
 pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     const WM_NCDESTROY: u32 = 0x0082;
 
+    if msg == show_window_message_id() {
+        show_main_window(hwnd);
+        return LRESULT(0);
+    }
+
     match msg {
         WM_CREATE => on_create(hwnd),
         WM_COMMAND => commands::on_command(hwnd, wparam),
@@ -508,6 +516,31 @@ fn handle_cancel(hwnd: HWND, state: &mut AppState) {
         "Failed to update UI from config",
         apply_config_to_ui(state, &cfg)
     );
+}
+
+fn show_window_message_id() -> u32 {
+    static ID: OnceLock<u32> = OnceLock::new();
+    *ID.get_or_init(|| unsafe { RegisterWindowMessageW(w!("RustSwitcher.ShowMainWindow")) })
+}
+
+pub fn activate_running_instance() -> windows::core::Result<bool> {
+    unsafe {
+        let hwnd = FindWindowW(w!("RustSwitcherMainWindow"), PCWSTR::null()).unwrap_or_default();
+        if hwnd.0.is_null() {
+            return Ok(false);
+        }
+
+        let msg = show_window_message_id();
+        let _ = PostMessageW(Some(hwnd), msg, WPARAM(0), LPARAM(0));
+        Ok(true)
+    }
+}
+
+fn show_main_window(hwnd: HWND) {
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = SetForegroundWindow(hwnd);
+    }
 }
 
 unsafe fn on_ncdestroy(hwnd: HWND) -> LRESULT {

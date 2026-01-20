@@ -16,6 +16,7 @@ fn main() -> windows::core::Result<()> {
     utils::helpers::init_app_user_model_id()?;
 
     let Some(_guard) = utils::helpers::single_instance_guard()? else {
+        let _ = platform::win::activate_running_instance();
         return Ok(());
     };
 
