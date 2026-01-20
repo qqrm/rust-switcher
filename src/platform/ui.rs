@@ -203,6 +203,18 @@ fn create_settings_group(
         },
     )?;
 
+    state.checkboxes.theme_dark = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Dark theme"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
+            rect: RectI::new(left_x + 12, top_y + 76, l.group_w_left - 24, 20),
+            menu: Some(ControlId::DarkTheme.hmenu()),
+        },
+    )?;
+
     let _lbl_delay = create(
         hwnd,
         ControlSpec {
@@ -210,7 +222,7 @@ fn create_settings_group(
             class: w!("STATIC"),
             text: w!("Delay before switching:"),
             style: WS_CHILD | WS_VISIBLE,
-            rect: RectI::new(left_x + 12, top_y + 106, l.group_w_left - 24, 18),
+            rect: RectI::new(left_x + 12, top_y + 130, l.group_w_left - 24, 18),
             menu: None,
         },
     )?;
@@ -222,7 +234,7 @@ fn create_settings_group(
             class: w!("EDIT"),
             text: w!("100"),
             style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, ES_NUMBER),
-            rect: RectI::new(left_x + 12, top_y + 128, 60, 22),
+            rect: RectI::new(left_x + 12, top_y + 152, 60, 22),
             menu: Some(ControlId::DelayMs.hmenu()),
         },
     )?;
@@ -234,7 +246,7 @@ fn create_settings_group(
             class: w!("STATIC"),
             text: w!("ms"),
             style: WS_CHILD | WS_VISIBLE,
-            rect: RectI::new(left_x + 78, top_y + 131, 24, 18),
+            rect: RectI::new(left_x + 78, top_y + 155, 24, 18),
             menu: None,
         },
     )?;

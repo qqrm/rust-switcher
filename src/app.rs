@@ -190,6 +190,7 @@ pub struct AppState {
 pub struct Checkboxes {
     pub autostart: HWND,
     pub start_minimized: HWND,
+    pub theme_dark: HWND,
 }
 
 #[derive(Debug, Default)]
@@ -220,6 +221,7 @@ pub enum ControlId {
     Tray = 1002,
     DelayMs = 1003,
     StartMinimized = 1004,
+    DarkTheme = 1005,
 
     HotkeyLastWord = 1201,
     HotkeyPause = 1202,
@@ -239,6 +241,7 @@ impl ControlId {
             1002 => Some(Self::Tray),
             1003 => Some(Self::DelayMs),
             1004 => Some(Self::StartMinimized),
+            1005 => Some(Self::DarkTheme),
 
             1201 => Some(Self::HotkeyLastWord),
             1202 => Some(Self::HotkeyPause),

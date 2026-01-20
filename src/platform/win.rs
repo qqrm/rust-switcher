@@ -83,8 +83,9 @@ pub fn refresh_autostart_checkbox(state: &mut AppState) -> windows::core::Result
 fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::core::Result<()> {
     helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms)?;
 
-    helpers::set_checkbox(state.checkboxes.start_minimized, cfg.start_minimized);
     refresh_autostart_checkbox(state)?;
+    helpers::set_checkbox(state.checkboxes.start_minimized, cfg.start_minimized);
+    helpers::set_checkbox(state.checkboxes.theme_dark, cfg.theme_dark);
 
     state.hotkey_values = crate::app::HotkeyValues::from_config(cfg);
     state.hotkey_sequence_values = crate::app::HotkeySequenceValues::from_config(cfg);
@@ -124,6 +125,7 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
     cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
 
     cfg.start_minimized = helpers::get_checkbox(state.checkboxes.start_minimized);
+    cfg.theme_dark = helpers::get_checkbox(state.checkboxes.theme_dark);
 
     cfg.hotkey_convert_last_word_sequence = state.hotkey_sequence_values.last_word;
     cfg.hotkey_pause_sequence = state.hotkey_sequence_values.pause;
@@ -163,6 +165,8 @@ fn apply_config_runtime(
     cfg: &config::Config,
 ) -> windows::core::Result<()> {
     state.autoconvert_enabled = false;
+
+    crate::platform::ui::themes::set_window_theme(hwnd, cfg.theme_dark);
 
     state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(cfg);
 
@@ -262,6 +266,16 @@ fn on_create(hwnd: HWND) -> LRESULT {
     startup_or_return0!(hwnd, &mut state, "Failed to create UI controls", ui::create_controls(hwnd, &mut state));
     let cfg = load_config_or_default(hwnd, state.as_mut());
 
+    // ВАЖНО: state должен быть доступен через get_state/with_state_mut_do
+    // до применения темы и любых WM_CTLCOLOR* обработчиков.
+    unsafe {
+        SetWindowLongPtrW(
+            hwnd,
+            GWLP_USERDATA,
+            state.as_mut() as *mut AppState as isize,
+        );
+    }
+
     state.hotkey_values = crate::app::HotkeyValues::from_config(&cfg);
     state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(&cfg);
 
@@ -276,10 +290,6 @@ fn on_create(hwnd: HWND) -> LRESULT {
 
     init_font_and_visuals(hwnd, &mut state);
 
-    unsafe {
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
-    }
-
     if let Err(e) = crate::platform::win::tray::ensure_icon(hwnd) {
         tracing::warn!(error = ?e, "tray ensure_icon failed");
     }
@@ -288,6 +298,9 @@ fn on_create(hwnd: HWND) -> LRESULT {
     with_state_mut_do(hwnd, |state| {
         helpers::debug_startup_notification(hwnd, state);
     });
+
+    // Протекаем Box, чтобы AppState жил столько же, сколько окно.
+    let _ = Box::into_raw(state);
 
     LRESULT(0)
 }

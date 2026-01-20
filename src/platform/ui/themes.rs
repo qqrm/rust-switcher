@@ -11,9 +11,9 @@ use windows::{
             Gdi::{
                 COLOR_WINDOW, COLOR_WINDOWTEXT, CreateSolidBrush, DT_CENTER, DT_SINGLELINE,
                 DT_VCENTER, DeleteObject, DrawFocusRect, DrawTextW, FillRect, FrameRect,
-                GetSysColor, GetSysColorBrush, HBRUSH, HDC, HGDIOBJ, InvalidateRect,
-                RDW_ALLCHILDREN, RDW_INVALIDATE, RedrawWindow, SetBkColor, SetBkMode, SetTextColor,
-                TRANSPARENT, UpdateWindow,
+                GetStockObject, GetSysColor, GetSysColorBrush, HBRUSH, HDC, HGDIOBJ,
+                InvalidateRect, NULL_BRUSH, RDW_ALLCHILDREN, RDW_INVALIDATE, RedrawWindow,
+                SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
             },
         },
         UI::{
@@ -281,7 +281,7 @@ pub fn on_draw_item(_hwnd: HWND, _wparam: WPARAM, lparam: LPARAM) -> LRESULT {
 /// Safety:
 /// - this function performs raw handle casts (`WPARAM` to `HDC`) and calls Win32 APIs
 ///   that assume a valid device context.
-pub fn on_ctlcolor(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+pub fn on_ctlcolor(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
 
@@ -290,16 +290,25 @@ pub fn on_ctlcolor(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
         {
             ensure_dark_brushes(hwnd);
 
+            let hwnd_ctl = HWND(lparam.0 as *mut core::ffi::c_void);
+
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, COLORREF(0x00FFFFFF));
+
+            let style = GetWindowLongPtrW(hwnd_ctl, GWL_STYLE) as u32;
+            if (style & (BS_GROUPBOX as u32)) != 0 {
+                let null_brush = GetStockObject(NULL_BRUSH);
+                return LRESULT(null_brush.0 as isize);
+            }
+
             SetBkColor(hdc, DARK_CONTROL_BG);
 
             if let Some(state) = get_state(hwnd) {
-                let brush = state.dark_brush_edit_bg;
+                let brush = state.dark_brush_control_bg;
                 return LRESULT(brush.0 as isize);
             }
 
-            return on_ctlcolor(hwnd, wparam, _lparam);
+            return LRESULT(0);
         }
 
         SetTextColor(hdc, COLORREF(GetSysColor(COLOR_WINDOWTEXT)));

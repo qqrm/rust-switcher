@@ -474,7 +474,7 @@ unsafe fn handle_tray_menu_cmd(
         }
 
         ID_CHANGE_THEME => {
-            crate::platform::ui::themes::set_window_theme(hwnd, current_theme_dark);
+            crate::platform::ui::themes::set_window_theme(hwnd, !current_theme_dark);
             Ok(TrayMenuAction::None)
         }
 
