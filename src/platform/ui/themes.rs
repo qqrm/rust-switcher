@@ -14,12 +14,13 @@ use windows::{
         Graphics::{
             Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute},
             Gdi::{
-                BeginPaint, COLOR_WINDOW, COLOR_WINDOWTEXT, CreateSolidBrush, DEFAULT_GUI_FONT,
-                DT_CALCRECT, DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-                DrawFocusRect, DrawTextW, EndPaint, FillRect, FrameRect, GetStockObject,
-                GetSysColor, GetSysColorBrush, HBRUSH, HDC, HGDIOBJ, InvalidateRect, PAINTSTRUCT,
-                RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, SelectObject, SetBkColor,
-                SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
+                BeginPaint, COLOR_WINDOW, COLOR_WINDOWTEXT, CreatePen, CreateSolidBrush,
+                DEFAULT_GUI_FONT, DT_CALCRECT, DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER,
+                DeleteObject, DrawFocusRect, DrawTextW, EndPaint, FillRect, FrameRect,
+                GetStockObject, GetSysColor, GetSysColorBrush, HBRUSH, HDC, HGDIOBJ,
+                InvalidateRect, LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, RDW_ALLCHILDREN,
+                RDW_ERASE, RDW_INVALIDATE, RedrawWindow, SelectObject, SetBkColor, SetBkMode,
+                SetTextColor, TRANSPARENT, UpdateWindow,
             },
         },
         UI::{
@@ -373,15 +374,6 @@ fn is_groupbox(hwnd_ctl: HWND) -> bool {
     }
 }
 
-fn recti_to_rect(r: RectI) -> RECT {
-    RECT {
-        left: r.x,
-        top: r.y,
-        right: r.x + r.w,
-        bottom: r.y + r.h,
-    }
-}
-
 fn paint_group_frame(
     hdc: HDC,
     r: RectI,
@@ -390,19 +382,11 @@ fn paint_group_frame(
     border_color: COLORREF,
     background_color: COLORREF,
 ) {
-    let outer = recti_to_rect(r);
-
-    let border_brush = OwnedBrush::new(border_color);
-    let bg_brush = OwnedBrush::new(background_color);
-
     unsafe {
-        FrameRect(hdc, &outer, border_brush.as_hbrush());
+        // Шрифт как у системы
+        let old_font = SelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
 
-        let old_font: HGDIOBJ = SelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
-
-        SetTextColor(hdc, text_color);
-        SetBkMode(hdc, TRANSPARENT);
-
+        // Меряем текст ТОЛЬКО ширину и высоту, без VCENTER
         let mut title_buf: Vec<u16> = title.encode_utf16().collect();
 
         let mut measure = RECT::default();
@@ -413,25 +397,81 @@ fn paint_group_frame(
             DT_LEFT | DT_SINGLELINE | DT_CALCRECT,
         );
 
-        // Затираем кусок рамки под заголовком фоном окна
         let text_w = measure.right - measure.left;
         let text_h = measure.bottom - measure.top;
 
-        let pad_left = 12;
-        let pad_right = 6;
+        // Верхняя линия рамки через середину высоты текста
+        let line_y = r.y + (text_h / 2);
 
-        let mut cap = RECT {
-            left: r.x + pad_left,
+        // Координаты рамки
+        let left = r.x;
+        let right = r.x + r.w;
+        let top = line_y;
+        let bottom = r.y + r.h;
+
+        // Рисуем рамку как линии
+        let pen = CreatePen(PS_SOLID, 1, border_color);
+        let old_pen = SelectObject(hdc, pen.into());
+
+        // Left
+        let _ = MoveToEx(hdc, left, top, None);
+        let _ = LineTo(hdc, left, bottom);
+
+        // Bottom
+        let _ = MoveToEx(hdc, left, bottom, None);
+        let _ = LineTo(hdc, right, bottom);
+
+        // Right
+        let _ = MoveToEx(hdc, right, top, None);
+        let _ = LineTo(hdc, right, bottom);
+
+        // Top: два сегмента, дырка под заголовок
+        let pad_left = 12;
+        let pad_right = 8;
+
+        let text_left = left + pad_left;
+        let text_right = text_left + text_w + pad_right;
+
+        // Top left segment
+        let _ = MoveToEx(hdc, left, top, None);
+        let _ = LineTo(hdc, text_left - 4, top);
+
+        // Top right segment
+        let _ = MoveToEx(hdc, text_right, top, None);
+        let _ = LineTo(hdc, right, top);
+
+        // Подложка под текстом, чтобы стереть линию
+        let bg_brush = OwnedBrush::new(background_color);
+
+        // Даем запас по высоте, чтобы не клипало сверху и снизу
+        let pad_y_top = 2;
+        let pad_y_bottom = 2;
+
+        let cap_bg = RECT {
+            left: text_left - 2,
             top: r.y,
-            right: r.x + pad_left + text_w + pad_right,
-            bottom: r.y + text_h,
+            right: text_right + 1,
+            bottom: r.y + text_h + pad_y_top + pad_y_bottom,
         };
 
-        FillRect(hdc, &cap, bg_brush.as_hbrush());
+        FillRect(hdc, &cap_bg, bg_brush.as_hbrush());
 
-        // Рисуем заголовок
-        DrawTextW(hdc, &mut title_buf, &mut cap, DT_LEFT | DT_SINGLELINE);
+        // Текст рисуем без VCENTER, в более высоком прямоугольнике
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, text_color);
 
+        let mut cap_text = RECT {
+            left: text_left,
+            top: r.y + pad_y_top,
+            right: text_right,
+            bottom: r.y + pad_y_top + text_h + pad_y_bottom,
+        };
+
+        DrawTextW(hdc, &mut title_buf, &mut cap_text, DT_LEFT | DT_SINGLELINE);
+
+        // Cleanup
+        let _ = SelectObject(hdc, old_pen);
+        let _ = DeleteObject(HGDIOBJ::from(pen));
         let _ = SelectObject(hdc, old_font);
     }
 }
