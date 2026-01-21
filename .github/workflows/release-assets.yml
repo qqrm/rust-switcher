@@ -1,0 +1,70 @@
+name: Release assets
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  group: release-assets-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  PACKAGE_NAME: rust-switcher
+
+jobs:
+  windows-gnu:
+    name: Build Windows GNU zip
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c
+        with:
+          cache: false
+
+      - name: Install Windows GNU toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 zip
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Build (Windows GNU)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p "${PACKAGE_NAME}" --release --locked --target x86_64-pc-windows-gnu
+
+      - name: Package zip
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          asset="${PACKAGE_NAME}-${version}-windows-x86_64-gnu.zip"
+
+          install -m 0755 "target/x86_64-pc-windows-gnu/release/${PACKAGE_NAME}.exe" "./${PACKAGE_NAME}.exe"
+          zip -9 "${asset}" "${PACKAGE_NAME}.exe"
+
+          echo "asset=${asset}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload asset to GitHub Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: ${{ steps.package.outputs.asset }}
+          fail_on_unmatched_files: true

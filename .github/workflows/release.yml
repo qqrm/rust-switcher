@@ -1,505 +1,72 @@
 name: Release
-run-name: "Release full flow from dev bump=${{ inputs.bump }}"
 
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: "Version bump type"
-        type: choice
-        required: true
-        default: patch
-        options:
-          - patch
-          - minor
-          - major
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  PACKAGE_NAME: rust-switcher
 
 jobs:
-  prepare_release:
-    name: "Step 1 - bump via PR to dev, squash merge to main, tag main"
+  release-pr:
+    name: Create or update Release PR
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
       pull-requests: write
 
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
-      version: ${{ steps.version.outputs.version }}
-
     steps:
-      - name: Verify dev branch
-        if: ${{ github.ref != 'refs/heads/dev' }}
-        shell: bash
-        run: |
-          echo "Release workflow must be run on dev branch. Current ref: $GITHUB_REF" >&2
-          exit 1
-
-      - name: Checkout dev
+      - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          persist-credentials: false
-          ref: dev
           fetch-depth: 0
-          fetch-tags: true
-
-      - name: Setup Rust toolchain (rust-toolchain.toml)
-        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c
-
-      - name: Cache Rust build (cargo, target)
-        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db
-        with:
-          shared-key: release
-
-      - name: Verify nightly toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustc -Vv
-          if ! rustc -Vv | grep -q "release:.*nightly"; then
-            echo "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly." >&2
-            exit 1
-          fi
-
-      - name: Compute next version and tag
-        id: version
-        shell: bash
-        env:
-          BUMP: ${{ inputs.bump }}
-        run: |
-          set -euo pipefail
-
-          if ! command -v jq >/dev/null 2>&1; then
-            echo "jq is required on runner to parse cargo metadata" >&2
-            exit 1
-          fi
-
-          git fetch --tags --force
-
-          meta_file="$(mktemp)"
-          cargo metadata --no-deps --format-version 1 > "$meta_file"
-
-          current="$(jq -r --arg name "$PACKAGE_NAME" '.packages[] | select(.name == $name) | .version' "$meta_file")"
-          if [ -z "$current" ] || [ "$current" = "null" ]; then
-            echo "Failed to find package version in cargo metadata. package=$PACKAGE_NAME" >&2
-            cat "$meta_file" >&2
-            exit 1
-          fi
-          if ! echo "$current" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Current version is not semver X.Y.Z: $current" >&2
-            exit 1
-          fi
-
-          latest_tag="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
-          if [ -n "$latest_tag" ]; then
-            latest="${latest_tag#v}"
-          else
-            latest="0.0.0"
-          fi
-
-          parse_semver() {
-            local v="$1"
-            IFS='.' read -r a b c <<<"$v"
-            echo "${a:-0} ${b:-0} ${c:-0}"
-          }
-
-          semver_gt() {
-            local ax ay az bx by bz
-            read -r ax ay az <<<"$(parse_semver "$1")"
-            read -r bx by bz <<<"$(parse_semver "$2")"
-            if [ "$ax" -ne "$bx" ]; then [ "$ax" -gt "$bx" ]; return; fi
-            if [ "$ay" -ne "$by" ]; then [ "$ay" -gt "$by" ]; return; fi
-            [ "$az" -gt "$bz" ]
-          }
-
-          bump_semver() {
-            local v="$1" kind="$2"
-            local x y z
-            read -r x y z <<<"$(parse_semver "$v")"
-            case "$kind" in
-              major) x=$((x+1)); y=0; z=0 ;;
-              minor) y=$((y+1)); z=0 ;;
-              patch) z=$((z+1)) ;;
-              *) echo "Unexpected bump kind: $kind" >&2; exit 1 ;;
-            esac
-            echo "$x.$y.$z"
-          }
-
-          base="$latest"
-          if semver_gt "$current" "$latest"; then
-            base="$current"
-          fi
-
-          next="$(bump_semver "$base" "$BUMP")"
-          tag="v$next"
-
-          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "Tag already exists locally after fetch: $tag" >&2
-            exit 1
-          fi
-
-          echo "version=$next" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Configure git identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Create bump branch and apply changes
-        id: bump_branch
-        shell: bash
-        env:
-          NEXT_VERSION: ${{ steps.version.outputs.version }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          branch="release/bump-${TAG}"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-
-          git checkout -B "$branch" "origin/dev"
-
-          tmp="$(mktemp)"
-          awk -v newver="$NEXT_VERSION" '
-            BEGIN{in_pkg=0;done=0}
-            /^\[package\]$/ {in_pkg=1; print; next}
-            /^\[[^]]+\]$/ {in_pkg=0; print; next}
-            in_pkg && !done && $0 ~ /^[[:space:]]*version[[:space:]]*=/ {
-              print "version = \"" newver "\""
-              done=1
-              next
-            }
-            {print}
-            END{
-              if(!done){
-                print "version field not found in [package]" > "/dev/stderr"
-                exit 2
-              }
-            }
-          ' Cargo.toml > "$tmp"
-          mv "$tmp" Cargo.toml
-
-          cargo generate-lockfile
-
-          git add Cargo.toml Cargo.lock
-          if git diff --cached --quiet; then
-            echo "No changes to commit after version bump." >&2
-            exit 1
-          fi
-
-          git commit -m "release: ${TAG}"
-
-      - name: Push bump branch
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
-          git push -u origin "${{ steps.bump_branch.outputs.branch }}"
-
-      - name: Create PR to dev and enable auto merge
-        id: pr_dev
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          BRANCH: ${{ steps.bump_branch.outputs.branch }}
-        run: |
-          set -euo pipefail
-
-          pr_number="$(gh pr list --base dev --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
-          if [ -z "$pr_number" ]; then
-            pr_url="$(gh pr create --base dev --head "$BRANCH" --title "release: ${TAG}" --body "")"
-            pr_number="$(echo "$pr_url" | sed -n 's#.*/pull/##p')"
-          fi
-
-          gh pr merge "$pr_number" --squash --auto --subject "release: ${TAG}" --body ""
-
-          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for PR merge into dev
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ steps.pr_dev.outputs.pr_number }}
-        run: |
-          set -euo pipefail
-
-          tries=240
-          while [ "$tries" -gt 0 ]; do
-            state="$(gh pr view "$PR_NUMBER" --json state --jq '.state')"
-            merged="$(gh pr view "$PR_NUMBER" --json merged --jq '.merged')"
-
-            if [ "$merged" = "true" ]; then
-              exit 0
-            fi
-
-            if [ "$state" != "OPEN" ]; then
-              echo "PR is not open and not merged. state=$state" >&2
-              exit 1
-            fi
-
-            sleep 10
-            tries=$((tries-1))
-          done
-
-          echo "Timed out waiting for PR to merge into dev." >&2
-          exit 1
-
-      - name: Create PR dev -> main and enable auto merge
-        id: pr_main
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          git fetch origin dev --force
-          git fetch origin main --force
-
-          pr_number="$(gh pr list --base main --head dev --state open --json number --jq '.[0].number // empty')"
-          if [ -z "$pr_number" ]; then
-            pr_url="$(gh pr create --base main --head dev --title "release: ${TAG}" --body "")"
-            pr_number="$(echo "$pr_url" | sed -n 's#.*/pull/##p')"
-          fi
-
-          gh pr merge "$pr_number" --squash --auto --subject "release: ${TAG}" --body ""
-
-          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for PR merge into main
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ steps.pr_main.outputs.pr_number }}
-        run: |
-          set -euo pipefail
-
-          tries=240
-          while [ "$tries" -gt 0 ]; do
-            state="$(gh pr view "$PR_NUMBER" --json state --jq '.state')"
-            merged="$(gh pr view "$PR_NUMBER" --json merged --jq '.merged')"
-
-            if [ "$merged" = "true" ]; then
-              exit 0
-            fi
-
-            if [ "$state" != "OPEN" ]; then
-              echo "PR is not open and not merged. state=$state" >&2
-              exit 1
-            fi
-
-            sleep 10
-            tries=$((tries-1))
-          done
-
-          echo "Timed out waiting for PR to merge into main." >&2
-          exit 1
-
-      - name: Tag main at merged commit and push tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="${STEPS_VERSION_OUTPUTS_TAG}"
-
-          git fetch origin main --force
-          git fetch --tags --force
-          git checkout -B main origin/main
-
-          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "Tag already exists after merge: $tag" >&2
-            exit 1
-          fi
-
-          git tag "$tag"
-          git push origin "$tag"
-        env:
-          STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
-
-  build_windows_gnu_asset:
-    name: "Step 2 - build and package Windows (GNU) archive on Linux (tag ref)"
-    runs-on: ubuntu-latest
-    needs: prepare_release
-
-    outputs:
-      asset: ${{ steps.package.outputs.asset }}
-
-    steps:
-      - name: Checkout at tag
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
           persist-credentials: false
-          ref: ${{ needs.prepare_release.outputs.tag }}
 
-      - name: Setup Rust toolchain (rust-toolchain.toml)
+      - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c
-
-      - name: Cache Rust build (cargo, target)
-        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db
         with:
-          shared-key: release
+          cache: false
 
-      - name: Verify nightly toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustc -Vv
-          if ! rustc -Vv | grep -q "release:.*nightly"; then
-            echo "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly." >&2
-            exit 1
-          fi
-
-      - name: Install Windows GNU toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64 zip
-          rustup target add x86_64-pc-windows-gnu
-
-      - name: Build (locked, Windows GNU target)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo build -p rust-switcher --release --locked --target x86_64-pc-windows-gnu
-
-      - name: Package zip
-        id: package
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if ! command -v jq >/dev/null 2>&1; then
-            echo "jq is required on runner to parse cargo metadata" >&2
-            exit 1
-          fi
-
-          meta_file="$(mktemp)"
-          cargo metadata --no-deps --format-version 1 > "$meta_file"
-
-          version="$(jq -r --arg name "$PACKAGE_NAME" '.packages[] | select(.name == $name) | .version' "$meta_file")"
-          if [ -z "$version" ] || [ "$version" = "null" ]; then
-            echo "Failed to find package version in cargo metadata. package=$PACKAGE_NAME" >&2
-            cat "$meta_file" >&2
-            exit 1
-          fi
-          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Failed to get semver from cargo metadata: $version" >&2
-            exit 1
-          fi
-
-          asset="rust-switcher-$version-windows-x86_64-gnu.zip"
-          install -m 0755 target/x86_64-pc-windows-gnu/release/rust-switcher.exe ./rust-switcher.exe
-          zip -9 "$asset" rust-switcher.exe
-          echo "asset=$asset" >> "$GITHUB_OUTPUT"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Run release-plz (release-pr)
+        uses: release-plz/action@63ab0c2746bedc448370bad4b0b3d536458398b0
         with:
-          name: windows-gnu-asset
-          path: ${{ steps.package.outputs.asset }}
-          if-no-files-found: error
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
-  github_release:
-    name: "Step 3 - publish GitHub Release (tag ref)"
+  release:
+    name: Publish release (tag, GitHub Release, crates.io)
     runs-on: ubuntu-latest
-    needs: [prepare_release, build_windows_gnu_asset]
-
-    steps:
-      - name: Download Windows GNU asset
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: windows-gnu-asset
-          path: .
-          merge-multiple: true
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
-        with:
-          tag_name: ${{ needs.prepare_release.outputs.tag }}
-          name: ${{ needs.prepare_release.outputs.tag }}
-          files: |
-            *.zip
-          fail_on_unmatched_files: true
-
-  publish_crates:
-    name: "Step 4 - publish to crates.io (tag ref), rollback on failure"
-    runs-on: ubuntu-latest
-    needs: [prepare_release, github_release]
-
+    needs: release-pr
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
-      - name: Checkout at tag
+      - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          persist-credentials: false
-          ref: ${{ needs.prepare_release.outputs.tag }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Setup Rust toolchain (rust-toolchain.toml)
+      - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c
-
-      - name: Cache Rust build (cargo, target)
-        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db
         with:
-          shared-key: release
+          cache: false
 
-      - name: Verify nightly toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustc -Vv
-          if ! rustc -Vv | grep -q "release:.*nightly"; then
-            echo "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly." >&2
-            exit 1
-          fi
-
-      - name: Authenticate to crates.io via OIDC (Trusted Publishing)
-        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec
-
-      - name: Publish to crates.io
-        id: publish
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo publish --locked
-
-      - name: Rollback GitHub Release and tag if crates.io publish failed
-        if: ${{ steps.publish.outcome != 'success' }}
+      - name: Run release-plz (release)
+        uses: release-plz/action@63ab0c2746bedc448370bad4b0b3d536458398b0
+        with:
+          command: release
         env:
-          GH_TOKEN: ${{ github.token }}
-          NEEDS_PREPARE_RELEASE_OUTPUTS_TAG: ${{ needs.prepare_release.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="${NEEDS_PREPARE_RELEASE_OUTPUTS_TAG}"
-
-          gh release delete "$tag" -y || true
-
-          git init -q tmp && cd tmp
-          git remote add origin "https://github.com/${{ github.repository }}.git"
-          git push origin ":refs/tags/$tag" || true
-
-          echo "cargo publish failed, rolled back GitHub Release and tag: $tag" >&2
-          exit 1
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
