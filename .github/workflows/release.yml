@@ -1,4 +1,4 @@
-name: Release (release-plz)
+﻿name: Release (release-plz)
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -38,7 +38,7 @@ jobs:
           cache: false
 
       - name: Run release-plz (release-pr)
-        uses: release-plz/action@5ab144c9d67d5c3580276637bcd39bd42a73b768
+        uses: release-plz/action@5ab144c9d67d4346240190d0f95ed08668677928
         with:
           command: release-pr
           version: "0.3.151"
@@ -55,7 +55,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -67,10 +67,10 @@ jobs:
 
       - name: Authenticate to crates.io via OIDC (Trusted Publishing)
         id: crates_auth
-        uses: rust-lang/crates-io-auth-action@b7e9a28e99e74a60c1031eae54f9473db39db0aa
+        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec
 
       - name: Run release-plz (release)
-        uses: release-plz/action@5ab144c9d67d5c3580276637bcd39bd42a73b768
+        uses: release-plz/action@5ab144c9d67d4346240190d0f95ed08668677928
         with:
           command: release
           version: "0.3.151"

@@ -1,4 +1,4 @@
-name: Release assets
+﻿name: Release assets
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout at tag
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -63,7 +63,7 @@ jobs:
           echo "asset=${asset}" >> "$GITHUB_OUTPUT"
 
       - name: Upload asset to GitHub Release
-        uses: softprops/action-gh-release@a06a81a0da3faecc7f2e9b200a41a26a6b6c64ad
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
         with:
           tag_name: ${{ github.ref_name }}
           files: ${{ steps.package.outputs.asset }}
