@@ -9,6 +9,7 @@ mod autostart;
 mod commands;
 pub(crate) mod hotkey_format;
 pub(crate) mod keyboard;
+pub(crate) mod menu_theme;
 pub(crate) mod mouse;
 pub mod state;
 pub(crate) mod tray;

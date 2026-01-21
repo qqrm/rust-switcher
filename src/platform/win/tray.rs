@@ -347,7 +347,12 @@ pub fn show_tray_context_menu(
     current_theme_dark: bool,
 ) -> Result<TrayMenuAction> {
     unsafe {
+        crate::platform::win::menu_theme::set_tray_menu_preferred_theme(current_theme_dark);
+
         let hmenu = build_tray_menu(window_visible, autoconvert_enabled, current_theme_dark)?;
+
+        crate::platform::win::menu_theme::flush_tray_menu_theme();
+
         let cmd = show_popup_menu_at_cursor(hwnd, hmenu);
         let _ = DestroyMenu(hmenu);
         handle_tray_menu_cmd(
