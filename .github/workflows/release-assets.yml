@@ -63,7 +63,7 @@ jobs:
           echo "asset=${asset}" >> "$GITHUB_OUTPUT"
 
       - name: Upload asset to GitHub Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
+        uses: softprops/action-gh-release@a06a81a0da3faecc7f2e9b200a41a26a6b6c64ad
         with:
           tag_name: ${{ github.ref_name }}
           files: ${{ steps.package.outputs.asset }}
