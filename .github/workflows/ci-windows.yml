@@ -25,13 +25,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
         with:
           key: ${{ runner.os }}-${{ env.TARGET }}
 
@@ -47,13 +48,14 @@ jobs:
     needs: lint
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
         with:
           key: ${{ runner.os }}-${{ env.TARGET }}
 
@@ -66,13 +68,14 @@ jobs:
     needs: test
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
         with:
           key: ${{ runner.os }}-${{ env.TARGET }}
 
@@ -80,7 +83,7 @@ jobs:
         run: cargo build --release --target ${{ env.TARGET }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-binary
           if-no-files-found: error
