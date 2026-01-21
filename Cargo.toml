@@ -4,7 +4,7 @@ version = "1.0.2"
 edition = "2024"
 
 description = "Windows keyboard layout switcher and text conversion utility"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/qqrm/rust-switcher"
 homepage = "https://github.com/qqrm/rust-switcher"
 readme = "README.md"
