@@ -222,7 +222,7 @@ fn create_settings_group(
             class: w!("STATIC"),
             text: w!("Delay before switching:"),
             style: WS_CHILD | WS_VISIBLE,
-            rect: RectI::new(left_x + 12, top_y + 130, l.group_w_left - 24, 18),
+            rect: RectI::new(left_x + 12, top_y + 104, l.group_w_left - 24, 18),
             menu: None,
         },
     )?;
@@ -234,7 +234,7 @@ fn create_settings_group(
             class: w!("EDIT"),
             text: w!("100"),
             style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, ES_NUMBER),
-            rect: RectI::new(left_x + 12, top_y + 152, 60, 22),
+            rect: RectI::new(left_x + 12, top_y + 126, 60, 22),
             menu: Some(ControlId::DelayMs.hmenu()),
         },
     )?;
@@ -246,7 +246,7 @@ fn create_settings_group(
             class: w!("STATIC"),
             text: w!("ms"),
             style: WS_CHILD | WS_VISIBLE,
-            rect: RectI::new(left_x + 78, top_y + 155, 24, 18),
+            rect: RectI::new(left_x + 78, top_y + 129, 24, 18),
             menu: None,
         },
     )?;
