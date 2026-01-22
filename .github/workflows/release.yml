@@ -47,6 +47,7 @@ jobs:
           ref: dev
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
+          persist-credentials: false
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
@@ -179,7 +180,9 @@ jobs:
             echo "No changes to commit after version bump." >&2
             exit 1
           fi
-          git commit -m "release: ${{ steps.version.outputs.tag }}"
+          git commit -m "release: ${STEPS_VERSION_OUTPUTS_TAG}"
+        env:
+          STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
 
       - name: Push dev
         shell: bash
@@ -191,9 +194,10 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ steps.version.outputs.tag }}"
+          tag="${STEPS_VERSION_OUTPUTS_TAG}"
 
           pr_number="$(gh pr list --base main --head dev --state open --json number --jq '.[0].number // empty')"
           if [ -z "$pr_number" ]; then
@@ -207,7 +211,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${{ steps.version.outputs.tag }}"
+          tag="${STEPS_VERSION_OUTPUTS_TAG}"
 
           git fetch origin main --force
           git fetch --tags --force
@@ -220,6 +224,8 @@ jobs:
 
           git tag "$tag"
           git push origin "$tag"
+        env:
+          STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
 
   build_windows_gnu_asset:
     name: "Step 2 - build and package Windows (GNU) archive on Linux (tag ref)"
@@ -234,6 +240,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
         with:
           ref: ${{ needs.prepare_release.outputs.tag }}
+          persist-credentials: false
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
@@ -327,6 +334,7 @@ jobs:
         with:
           ref: ${{ needs.prepare_release.outputs.tag }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
@@ -350,10 +358,11 @@ jobs:
         if: ${{ steps.publish.outcome != 'success' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          NEEDS_PREPARE_RELEASE_OUTPUTS_TAG: ${{ needs.prepare_release.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="${{ needs.prepare_release.outputs.tag }}"
+          tag="${NEEDS_PREPARE_RELEASE_OUTPUTS_TAG}"
 
           gh release delete "$tag" -y || true
 
