@@ -1,0 +1,38 @@
+name: Package Windows zip
+description: Package built rust-switcher.exe into zip asset
+inputs:
+  version:
+    description: Version X.Y.Z
+    required: true
+  binary_path:
+    description: Path to rust-switcher.exe
+    required: false
+    default: target/x86_64-pc-windows-gnu/release/rust-switcher.exe
+outputs:
+  asset:
+    description: Output zip file name
+    value: ${{ steps.pkg.outputs.asset }}
+runs:
+  using: composite
+  steps:
+    - name: Create zip asset
+      id: pkg
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        BIN: ${{ inputs.binary_path }}
+      run: |
+        set -euo pipefail
+
+        asset="rust-switcher-${VERSION}-windows-x86_64-gnu.zip"
+
+        if [ ! -f "$BIN" ]; then
+          echo "Binary not found: $BIN" >&2
+          ls -la "$(dirname "$BIN")" >&2 || true
+          exit 1
+        fi
+
+        install -m 0755 "$BIN" ./rust-switcher.exe
+        zip -9 "$asset" rust-switcher.exe
+
+        echo "asset=$asset" >> "$GITHUB_OUTPUT"

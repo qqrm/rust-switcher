@@ -1,0 +1,21 @@
+name: Push branch
+description: Push current HEAD to origin branch using token
+inputs:
+  token:
+    description: GitHub token (PAT)
+    required: true
+  branch:
+    description: Destination branch
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Push
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.branch }}
+      run: |
+        set -euo pipefail
+        git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        git push origin "HEAD:${BRANCH}"

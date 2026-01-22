@@ -1,0 +1,48 @@
+name: gh pr create
+description: Create a pull request via GitHub CLI and output PR number
+inputs:
+  token:
+    description: GitHub token for gh
+    required: true
+  base:
+    description: Base branch
+    required: true
+  head:
+    description: Head branch
+    required: true
+  title:
+    description: PR title
+    required: true
+  body:
+    description: PR body
+    required: false
+    default: ""
+outputs:
+  number:
+    description: Pull request number
+    value: ${{ steps.create.outputs.number }}
+  url:
+    description: Pull request URL
+    value: ${{ steps.create.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - name: Create PR
+      id: create
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+        TITLE: ${{ inputs.title }}
+        BODY: ${{ inputs.body }}
+      run: |
+        set -euo pipefail
+        url="$(gh pr create --base "$BASE" --head "$HEAD" --title "$TITLE" --body "$BODY")"
+        number="$(echo "$url" | sed -n 's#.*/pull/##p')"
+        if [ -z "${number:-}" ]; then
+          echo "Failed to parse PR number from url: $url" >&2
+          exit 1
+        fi
+        echo "url=$url" >> "$GITHUB_OUTPUT"
+        echo "number=$number" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,32 @@
+name: Tag main and push tag
+description: Fetch main, checkout, create tag, push tag using PAT
+inputs:
+  token:
+    description: GitHub token (PAT)
+    required: true
+  tag:
+    description: Tag name (vX.Y.Z)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Tag main and push
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        TAG: ${{ inputs.tag }}
+      run: |
+        set -euo pipefail
+
+        git fetch origin main --force
+        git fetch --tags --force
+        git checkout -B main origin/main
+
+        if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+          echo "Tag already exists after merge: $TAG" >&2
+          exit 1
+        fi
+
+        git tag "$TAG"
+        git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        git push origin "$TAG"

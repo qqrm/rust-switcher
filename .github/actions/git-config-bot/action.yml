@@ -1,0 +1,20 @@
+name: Configure git identity (bot)
+description: Configure git user.name and user.email for CI commits
+inputs:
+  user_name:
+    description: git user.name
+    required: false
+    default: github-actions[bot]
+  user_email:
+    description: git user.email
+    required: false
+    default: 41898282+github-actions[bot]@users.noreply.github.com
+runs:
+  using: composite
+  steps:
+    - name: Set git identity
+      shell: bash
+      run: |
+        set -euo pipefail
+        git config user.name "${{ inputs.user_name }}"
+        git config user.email "${{ inputs.user_email }}"
