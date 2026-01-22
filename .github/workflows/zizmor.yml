@@ -1,11 +1,11 @@
-﻿name: GitHub Actions security (zizmor)
+name: GitHub Actions security (zizmor)
 
 on:
   pull_request:
     paths:
       - ".github/workflows/**"
   push:
-    branches: [ main, dev ]
+    branches: [main, dev]
     paths:
       - ".github/workflows/**"
   workflow_dispatch: {}
@@ -14,10 +14,10 @@ permissions: {}
 
 jobs:
   zizmor:
+    name: zizmor
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
       actions: read
 
     steps:

@@ -1,79 +1,365 @@
-﻿name: Release (release-plz)
+name: Release
+run-name: "Release full flow from dev bump=${{ inputs.bump }}"
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch: {}
-
-concurrency:
-  group: release-plz-${{ github.ref }}
-  cancel-in-progress: false
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        type: choice
+        required: true
+        default: patch
+        options: [patch, minor, major]
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  PACKAGE_NAME: rust-switcher
 
 jobs:
-  release-pr:
-    name: Create or update Release PR
+  prepare_release:
+    name: "Step 1 - bump on dev, squash merge to main, tag main"
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
+
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Verify dev branch
+        if: ${{ github.ref != 'refs/heads/dev' }}
+        shell: bash
+        run: |
+          echo "Release workflow must be run on dev branch. Current ref: $GITHUB_REF" >&2
+          exit 1
+
+      - name: Checkout dev
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
         with:
+          ref: dev
           fetch-depth: 0
-          persist-credentials: false
+          token: ${{ secrets.RELEASE_TOKEN }}
 
-      - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c
-        with:
-          cache: false
+      - name: Setup Rust toolchain (rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
 
-      - name: Run release-plz (release-pr)
-        uses: release-plz/action@5ab144c9d67d4346240190d0f95ed08668677928
+      - name: Cache Rust build (cargo, target)
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
-          command: release-pr
-          version: "0.3.151"
+          shared-key: release
+
+      - name: Bump version, update lock, compute tag
+        id: version
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
 
-  release:
-    name: Publish release (tag, GitHub Release, crates.io)
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq is required on runner to parse cargo metadata" >&2
+            exit 1
+          fi
+
+          git fetch --tags --force
+
+          meta_file="$(mktemp)"
+          cargo metadata --no-deps --format-version 1 > "$meta_file"
+
+          current="$(jq -r --arg name "$PACKAGE_NAME" '.packages[] | select(.name == $name) | .version' "$meta_file")"
+          if [ -z "$current" ] || [ "$current" = "null" ]; then
+            echo "Failed to find package version in cargo metadata. package=$PACKAGE_NAME" >&2
+            cat "$meta_file" >&2
+            exit 1
+          fi
+          if ! echo "$current" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Current version is not semver X.Y.Z: $current" >&2
+            exit 1
+          fi
+
+          latest_tag="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
+          if [ -n "$latest_tag" ]; then
+            latest="${latest_tag#v}"
+          else
+            latest="0.0.0"
+          fi
+
+          parse_semver() {
+            local v="$1"
+            IFS='.' read -r a b c <<<"$v"
+            echo "${a:-0} ${b:-0} ${c:-0}"
+          }
+
+          semver_gt() {
+            local ax ay az bx by bz
+            read -r ax ay az <<<"$(parse_semver "$1")"
+            read -r bx by bz <<<"$(parse_semver "$2")"
+            if [ "$ax" -ne "$bx" ]; then [ "$ax" -gt "$bx" ]; return; fi
+            if [ "$ay" -ne "$by" ]; then [ "$ay" -gt "$by" ]; return; fi
+            [ "$az" -gt "$bz" ]
+          }
+
+          bump_semver() {
+            local v="$1" kind="$2"
+            local x y z
+            read -r x y z <<<"$(parse_semver "$v")"
+            case "$kind" in
+              major) x=$((x+1)); y=0; z=0 ;;
+              minor) y=$((y+1)); z=0 ;;
+              patch) z=$((z+1)) ;;
+              *) echo "Unexpected bump kind: $kind" >&2; exit 1 ;;
+            esac
+            echo "$x.$y.$z"
+          }
+
+          base="$latest"
+          if semver_gt "$current" "$latest"; then
+            base="$current"
+          fi
+
+          next="$(bump_semver "$base" "$BUMP")"
+          tag="v$next"
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "Tag already exists locally after fetch: $tag" >&2
+            exit 1
+          fi
+
+          tmp="$(mktemp)"
+          awk -v newver="$next" '
+            BEGIN{in_pkg=0;done=0}
+            /^\[package\]$/ {in_pkg=1; print; next}
+            /^\[[^]]+\]$/ {in_pkg=0; print; next}
+            in_pkg && !done && $0 ~ /^[[:space:]]*version[[:space:]]*=/ {
+              print "version = \"" newver "\""
+              done=1
+              next
+            }
+            {print}
+            END{
+              if(!done){
+                print "version field not found in [package]" > "/dev/stderr"
+                exit 2
+              }
+            }
+          ' Cargo.toml > "$tmp"
+          mv "$tmp" Cargo.toml
+
+          cargo generate-lockfile
+
+          if [ -z "$(git diff --name-only -- Cargo.toml)" ]; then
+            echo "Version bump produced no Cargo.toml change for version=$next" >&2
+            exit 1
+          fi
+
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit release changes on dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add Cargo.toml Cargo.lock
+          if git diff --cached --quiet; then
+            echo "No changes to commit after version bump." >&2
+            exit 1
+          fi
+          git commit -m "release: ${{ steps.version.outputs.tag }}"
+
+      - name: Push dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:dev
+
+      - name: Create PR dev -> main and squash merge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+
+          pr_number="$(gh pr list --base main --head dev --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create --base main --head dev --title "release: $tag" --body "")"
+            pr_number="$(echo "$pr_url" | sed -n 's#.*/pull/##p')"
+          fi
+
+          gh pr merge "$pr_number" --squash --subject "release: $tag" --body ""
+
+      - name: Tag main at merged commit and push tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+
+          git fetch origin main --force
+          git fetch --tags --force
+          git checkout -B main origin/main
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "Tag already exists after merge: $tag" >&2
+            exit 1
+          fi
+
+          git tag "$tag"
+          git push origin "$tag"
+
+  build_windows_gnu_asset:
+    name: "Step 2 - build and package Windows (GNU) archive on Linux (tag ref)"
     runs-on: ubuntu-latest
-    needs: release-pr
-    permissions:
-      contents: write
-      id-token: write
+    needs: prepare_release
+
+    outputs:
+      asset: ${{ steps.package.outputs.asset }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Checkout at tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
         with:
+          ref: ${{ needs.prepare_release.outputs.tag }}
+
+      - name: Setup Rust toolchain (rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+
+      - name: Cache Rust build (cargo, target)
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: release
+
+      - name: Install Windows GNU toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 zip
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Build (locked, Windows GNU target)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p rust-switcher --release --locked --target x86_64-pc-windows-gnu
+
+      - name: Package zip
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq is required on runner to parse cargo metadata" >&2
+            exit 1
+          fi
+
+          meta_file="$(mktemp)"
+          cargo metadata --no-deps --format-version 1 > "$meta_file"
+
+          version="$(jq -r --arg name "$PACKAGE_NAME" '.packages[] | select(.name == $name) | .version' "$meta_file")"
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "Failed to find package version in cargo metadata. package=$PACKAGE_NAME" >&2
+            cat "$meta_file" >&2
+            exit 1
+          fi
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Failed to get semver from cargo metadata: $version" >&2
+            exit 1
+          fi
+
+          asset="rust-switcher-$version-windows-x86_64-gnu.zip"
+          install -m 0755 target/x86_64-pc-windows-gnu/release/rust-switcher.exe ./rust-switcher.exe
+          zip -9 "$asset" rust-switcher.exe
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: windows-gnu-asset
+          path: ${{ steps.package.outputs.asset }}
+          if-no-files-found: error
+
+  github_release:
+    name: "Step 3 - publish GitHub Release (tag ref)"
+    runs-on: ubuntu-latest
+    needs: [prepare_release, build_windows_gnu_asset]
+
+    steps:
+      - name: Download Windows GNU asset
+        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110 # v4.1.0
+        with:
+          name: windows-gnu-asset
+          path: .
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        with:
+          tag_name: ${{ needs.prepare_release.outputs.tag }}
+          name: ${{ needs.prepare_release.outputs.tag }}
+          files: |
+            *.zip
+          fail_on_unmatched_files: true
+
+  publish_crates:
+    name: "Step 4 - publish to crates.io (tag ref), rollback on failure"
+    runs-on: ubuntu-latest
+    needs: [prepare_release, github_release]
+
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        with:
+          ref: ${{ needs.prepare_release.outputs.tag }}
           fetch-depth: 0
-          persist-credentials: false
 
-      - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c
+      - name: Setup Rust toolchain (rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+
+      - name: Cache Rust build (cargo, target)
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
-          cache: false
+          shared-key: release
 
-      - name: Authenticate to crates.io via OIDC (Trusted Publishing)
-        id: crates_auth
-        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec
-
-      - name: Run release-plz (release)
-        uses: release-plz/action@5ab144c9d67d4346240190d0f95ed08668677928
-        with:
-          command: release
-          version: "0.3.151"
+      - name: Publish to crates.io (no verify)
+        id: publish
+        continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates_auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo publish --locked --no-verify
+
+      - name: Rollback GitHub Release and tag if crates.io publish failed
+        if: ${{ steps.publish.outcome != 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare_release.outputs.tag }}"
+
+          gh release delete "$tag" -y || true
+
+          git init -q tmp && cd tmp
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git push "https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }}.git" ":refs/tags/$tag" || true
+
+          echo "cargo publish failed, rolled back GitHub Release and tag: $tag" >&2
+          exit 1
