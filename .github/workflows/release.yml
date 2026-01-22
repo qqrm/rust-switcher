@@ -1,19 +1,17 @@
-name: Release
+name: release YAML
 run-name: "Release full flow from dev bump=${{ inputs.bump }}"
 
 on:
   workflow_dispatch:
     inputs:
       bump:
-        description: "Version bump type"
+        description: Version bump type
         type: choice
         required: true
         default: patch
         options: [patch, minor, major]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: release
@@ -26,8 +24,10 @@ env:
 
 jobs:
   prepare_release:
-    name: "Step 1 - bump on dev, squash merge to main, tag main"
+    name: Step 1 - bump via PR to dev, merge dev -> main, tag main
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -171,26 +171,82 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit release changes on dev
+      - name: Create bump branch and commit
+        id: bump_commit
         shell: bash
         run: |
           set -euo pipefail
+          tag="${STEPS_VERSION_OUTPUTS_TAG}"
+          branch="release/bump-${tag}"
+
+          git switch -c "$branch"
           git add Cargo.toml Cargo.lock
+
           if git diff --cached --quiet; then
             echo "No changes to commit after version bump." >&2
             exit 1
           fi
-          git commit -m "release: ${STEPS_VERSION_OUTPUTS_TAG}"
+
+          git commit -m "release: $tag"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
         env:
           STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
 
-      - name: Push dev
+      - name: Push bump branch
         shell: bash
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          STEPS_BUMP_COMMIT_OUTPUTS_BRANCH: ${{ steps.bump_commit.outputs.branch }}
         run: |
           set -euo pipefail
-          git push origin HEAD:dev
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "HEAD:${STEPS_BUMP_COMMIT_OUTPUTS_BRANCH}"
 
-      - name: Create PR dev -> main and squash merge
+      - name: Create PR bump branch -> dev
+        id: pr_bump
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
+          STEPS_BUMP_COMMIT_OUTPUTS_BRANCH: ${{ steps.bump_commit.outputs.branch }}
+        run: |
+          set -euo pipefail
+          tag="${STEPS_VERSION_OUTPUTS_TAG}"
+          branch="${STEPS_BUMP_COMMIT_OUTPUTS_BRANCH}"
+
+          pr_url="$(gh pr create --base dev --head "$branch" --title "release: $tag" --body "")"
+          pr_number="$(echo "$pr_url" | sed -n 's#.*/pull/##p')"
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for required checks on bump PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          STEPS_PR_BUMP_OUTPUTS_NUMBER: ${{ steps.pr_bump.outputs.number }}
+        run: |
+          set -euo pipefail
+          gh pr checks "${STEPS_PR_BUMP_OUTPUTS_NUMBER}" --watch --fail-fast
+
+      - name: Approve bump PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          STEPS_PR_BUMP_OUTPUTS_NUMBER: ${{ steps.pr_bump.outputs.number }}
+        run: |
+          set -euo pipefail
+          gh pr review "${STEPS_PR_BUMP_OUTPUTS_NUMBER}" --approve
+
+      - name: Merge bump PR into dev (squash)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          STEPS_PR_BUMP_OUTPUTS_NUMBER: ${{ steps.pr_bump.outputs.number }}
+          STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh pr merge "${STEPS_PR_BUMP_OUTPUTS_NUMBER}" --squash --delete-branch --subject "release: ${STEPS_VERSION_OUTPUTS_TAG}" --body ""
+
+      - name: Create PR dev -> main and merge
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
@@ -205,10 +261,13 @@ jobs:
             pr_number="$(echo "$pr_url" | sed -n 's#.*/pull/##p')"
           fi
 
-          gh pr merge "$pr_number" --squash --subject "release: $tag" --body ""
+          gh pr merge "$pr_number" --squash --admin --subject "release: $tag" --body ""
 
       - name: Tag main at merged commit and push tag
         shell: bash
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
           tag="${STEPS_VERSION_OUTPUTS_TAG}"
@@ -223,14 +282,16 @@ jobs:
           fi
 
           git tag "$tag"
+
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin "$tag"
-        env:
-          STEPS_VERSION_OUTPUTS_TAG: ${{ steps.version.outputs.tag }}
 
   build_windows_gnu_asset:
-    name: "Step 2 - build and package Windows (GNU) archive on Linux (tag ref)"
+    name: Step 2 - build and package Windows (GNU) archive on Linux (tag ref)
     runs-on: ubuntu-latest
     needs: prepare_release
+    permissions:
+      contents: read
 
     outputs:
       asset: ${{ steps.package.outputs.asset }}
@@ -302,9 +363,11 @@ jobs:
           if-no-files-found: error
 
   github_release:
-    name: "Step 3 - publish GitHub Release (tag ref)"
+    name: Step 3 - publish GitHub Release (tag ref)
     runs-on: ubuntu-latest
     needs: [prepare_release, build_windows_gnu_asset]
+    permissions:
+      contents: read
 
     steps:
       - name: Download Windows GNU asset
@@ -317,6 +380,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
+          token: ${{ secrets.RELEASE_TOKEN }}
           tag_name: ${{ needs.prepare_release.outputs.tag }}
           name: ${{ needs.prepare_release.outputs.tag }}
           files: |
@@ -324,9 +388,12 @@ jobs:
           fail_on_unmatched_files: true
 
   publish_crates:
-    name: "Step 4 - publish to crates.io (tag ref), rollback on failure"
+    name: Step 4 - publish to crates.io (trusted publishing)
     runs-on: ubuntu-latest
     needs: [prepare_release, github_release]
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout at tag
@@ -344,20 +411,25 @@ jobs:
         with:
           shared-key: release
 
-      - name: Publish to crates.io (no verify)
+      - name: Authenticate to crates.io via OIDC (trusted publishing)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1
+
+      - name: Publish to crates.io
         id: publish
         continue-on-error: true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         shell: bash
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
           cargo publish --locked --no-verify
 
-      - name: Rollback GitHub Release and tag if crates.io publish failed
+      - name: Rollback GitHub Release and tag if publish failed
         if: ${{ steps.publish.outcome != 'success' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           NEEDS_PREPARE_RELEASE_OUTPUTS_TAG: ${{ needs.prepare_release.outputs.tag }}
         shell: bash
         run: |
@@ -367,8 +439,8 @@ jobs:
           gh release delete "$tag" -y || true
 
           git init -q tmp && cd tmp
-          git remote add origin "https://github.com/${{ github.repository }}.git"
-          git push "https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }}.git" ":refs/tags/$tag" || true
+          git remote add origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin ":refs/tags/$tag" || true
 
-          echo "cargo publish failed, rolled back GitHub Release and tag: $tag" >&2
+          echo "crates.io publish failed, rolled back GitHub Release and tag: $tag" >&2
           exit 1

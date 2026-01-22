@@ -1,13 +1,10 @@
 name: GitHub Actions security (zizmor)
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/**"
   push:
-    branches: [main, dev]
-    paths:
-      - ".github/workflows/**"
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
   workflow_dispatch: {}
 
 permissions: {}
@@ -16,9 +13,8 @@ jobs:
   zizmor:
     name: zizmor
     runs-on: ubuntu-latest
-
     permissions:
-      actions: read
+      contents: read
 
     steps:
       - name: Checkout
@@ -26,9 +22,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run zizmor
-        uses: zizmorcore/zizmor-action@135698455da5c3b3e55f73f4419e481ab68cdd95 # v0.4.1
-        with:
-          advanced-security: false
-          inputs: |
-            .github/workflows
+      - name: Install zizmor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install zizmor==1.22.0
+
+      - name: Audit workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          zizmor .github/workflows
