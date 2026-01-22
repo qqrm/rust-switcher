@@ -28,3 +28,4 @@ target
 /logs/
 /*json.gz
 .github/copilot-instructions.md
+.act-event.json
