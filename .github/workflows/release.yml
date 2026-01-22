@@ -30,7 +30,7 @@ jobs:
       contents: read
 
     outputs:
-      tag: ${{ steps.bump.outputs.tag }}"
+      tag: ${{ steps.bump.outputs.tag }}
       version: ${{ steps.bump.outputs.version }}
 
     steps:
@@ -76,7 +76,7 @@ jobs:
         id: bump_commit
         uses: ./.github/actions/commit-version-bump
         with:
-          tag: ${{ steps.bump.outputs.tag }}"
+          tag: ${{ steps.bump.outputs.tag }}
 
       - name: Push bump branch
         uses: ./.github/actions/push-branch
@@ -137,7 +137,7 @@ jobs:
         uses: ./.github/actions/tag-main-and-push
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
-          tag: ${{ steps.bump.outputs.tag }}"
+          tag: ${{ steps.bump.outputs.tag }}
 
   release_build_publish:
     name: Step 2 - build Windows zip, publish GitHub Release, publish crates.io (tag ref)
@@ -153,6 +153,7 @@ jobs:
         with:
           ref: ${{ needs.prepare_release.outputs.tag }}
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
           persist-credentials: false
 
       - name: Install system deps (zip, mingw)

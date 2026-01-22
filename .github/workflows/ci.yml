@@ -14,8 +14,8 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  lint:
-    name: Lint (fmt, clippy)
+  fmt:
+    name: Format (rustfmt)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -28,9 +28,8 @@ jobs:
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
-
-      - name: Cache Rust build (cargo, target)
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          components: rustfmt
 
       - name: rustfmt
         shell: bash
@@ -38,15 +37,36 @@ jobs:
           set -euo pipefail
           cargo fmt --all -- --check
 
+  lint:
+    name: Lint (clippy)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust toolchain (rust-toolchain.toml)
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+        with:
+          rustflags: "-D warnings"
+          components: clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: ci-windows
+
       - name: clippy
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo clippy --all-targets --all-features -- -D warnings
+        shell: pwsh
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     permissions:
       contents: read
 
@@ -58,19 +78,21 @@ jobs:
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+        with:
+          rustflags: "-D warnings"
 
-      - name: Cache Rust build (cargo, target)
+      - name: Cache Rust build
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: ci-windows
 
       - name: cargo test
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo test --locked
+        shell: pwsh
+        run: cargo test --locked
 
   build:
     name: Build (release)
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     permissions:
       contents: read
 
@@ -82,12 +104,14 @@ jobs:
 
       - name: Setup Rust toolchain (rust-toolchain.toml)
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+        with:
+          rustflags: "-D warnings"
 
-      - name: Cache Rust build (cargo, target)
+      - name: Cache Rust build
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: ci-windows
 
       - name: cargo build --release
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo build --release --locked
+        shell: pwsh
+        run: cargo build --release --locked
