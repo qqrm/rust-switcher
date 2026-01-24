@@ -2,25 +2,11 @@
 # See: https://embarkstudios.github.io/cargo-deny/
 
 [advisories]
-# CVSS threshold for crates with vulnerabilities
-# None = CVSS Score 0.0
-# Low = CVSS Score 0.1 - 3.9
-# Medium = CVSS Score 4.0 - 6.9
-# High = CVSS Score 7.0 - 8.9
-# Critical = CVSS Score 9.0 - 10.0
-vulnerability = "deny"
-unmaintained = "warn"
-notice = "warn"
+version = 2
 ignore = []
 
 [licenses]
-unlicensed = "deny"
-# List of spdx license requirements for crates
-copyleft = "warn"
-allow-osi-fsf-free = true
-default = "allow"
-# Some crates don't have a detectable license
-confidence-threshold = 0.8
+version = 2
 allow = [
   "MIT",
   "Apache-2.0",
@@ -28,32 +14,20 @@ allow = [
   "BSD-2-Clause",
   "BSD-3-Clause",
   "ISC",
-  "Unicode-DFS-2016",
+  "CC0-1.0",
+  "Unicode-3.0",
 ]
-deny = []
+confidence-threshold = 0.8
 
 [bans]
-# Lint level for when multiple versions of the same crate are detected
 multiple-versions = "warn"
-# Lint level for when an explicitly forbidden crate is detected
-forbidden = "deny"
-# Lint level for when a crate marked as 'deprecated' is detected
-deprecated = "warn"
-# Lint level for when a crate marked as 'unmaintained' is detected
-unmaintained = "warn"
-# The graph highlighting used when creating dotgraphs
 highlight = "all"
-# List of explicitly disallowed/forbidden crates
 allow = []
-# Certain crates/versions that will be allowed even if they would normally be disallowed by the above params
 skip = []
-# Similarly named crates that are allowed to coexist
 skip-tree = []
 
 [sources]
-# Lint level for what to happen when a crate from a crate registry that is not in the whitelist is detected
 unknown-registry = "warn"
-# Lint level for what to happen when a crate from a git repository that is not in the whitelist is detected
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []

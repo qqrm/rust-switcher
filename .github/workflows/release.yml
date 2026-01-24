@@ -115,12 +115,6 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           pr_number: ${{ steps.pr_bump.outputs.number }}
 
-      - name: Approve bump PR
-        uses: ./.github/actions/gh-pr-approve
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
-          pr_number: ${{ steps.pr_bump.outputs.number }}
-
       - name: Merge bump PR into dev
         uses: ./.github/actions/gh-pr-merge
         with:
