@@ -10,12 +10,18 @@ inputs:
     description: Extra components to install (space-separated), for example "rustfmt clippy"
     required: false
     default: ""
+  profile:
+    description: Rustup profile to install
+    required: false
+    default: minimal
 
 runs:
   using: composite
   steps:
     - name: Install rustup (retry-safe)
       shell: bash
+      env:
+        PROFILE: ${{ inputs.profile }}
       run: |
         set -euo pipefail
 
@@ -27,7 +33,7 @@ runs:
           --max-time 600 \
           https://sh.rustup.rs -o /tmp/rustup.sh
 
-        sh /tmp/rustup.sh -y --profile minimal --default-toolchain none --no-modify-path
+        sh /tmp/rustup.sh -y --profile "${PROFILE}" --default-toolchain none --no-modify-path
         rm -f /tmp/rustup.sh
 
         echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -41,6 +47,7 @@ runs:
       env:
         TOOLCHAIN_FILE: ${{ inputs.toolchain-file }}
         EXTRA_COMPONENTS: ${{ inputs.extra-components }}
+        PROFILE: ${{ inputs.profile }}
       run: |
         set -euo pipefail
 
@@ -54,7 +61,7 @@ runs:
           toolchain="nightly"
         fi
 
-        rustup toolchain install "$toolchain" --profile minimal
+        rustup toolchain install "$toolchain" --profile "${PROFILE}"
         rustup default "$toolchain"
 
         if [ -n "${EXTRA_COMPONENTS:-}" ]; then

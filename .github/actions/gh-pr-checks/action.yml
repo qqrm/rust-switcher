@@ -7,6 +7,10 @@ inputs:
   pr_number:
     description: Pull request number
     required: true
+  max_wait_seconds:
+    description: Max seconds to wait for checks to appear
+    required: false
+    default: "240"
 runs:
   using: composite
   steps:
@@ -15,6 +19,26 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         PR: ${{ inputs.pr_number }}
+        MAX_WAIT_SECONDS: ${{ inputs.max_wait_seconds }}
       run: |
         set -euo pipefail
+        start_time="$(date +%s)"
+        while true; do
+          checks_output="$(gh pr checks "$PR" 2>&1 || true)"
+          if ! echo "$checks_output" | grep -qi "no checks reported"; then
+            echo "[INFO] Checks detected for PR #$PR"
+            break
+          fi
+
+          now_time="$(date +%s)"
+          elapsed="$((now_time - start_time))"
+          echo "[INFO] No checks yet (elapsed=${elapsed}s), waiting..."
+          if [ "$elapsed" -ge "$MAX_WAIT_SECONDS" ]; then
+            echo "Timed out after ${MAX_WAIT_SECONDS}s waiting for checks to appear." >&2
+            exit 1
+          fi
+
+          sleep 4
+        done
+
         gh pr checks "$PR" --watch --fail-fast
