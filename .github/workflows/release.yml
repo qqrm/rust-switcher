@@ -79,10 +79,12 @@ jobs:
           tag: ${{ steps.bump.outputs.tag }}
 
       - name: Push bump branch
+        id: push_bump
         uses: ./.github/actions/push-branch
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
           branch: ${{ steps.bump_commit.outputs.branch }}
+          delete-existing: 'true'
 
       - name: Create PR bump branch -> dev
         id: pr_bump
@@ -93,6 +95,19 @@ jobs:
           head: ${{ steps.bump_commit.outputs.branch }}
           title: "release: ${{ steps.bump.outputs.tag }}"
           body: ""
+
+      - name: Cleanup on PR creation failure
+        if: ${{ failure() && steps.push_bump.outcome == 'success' }}
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          BRANCH: ${{ steps.bump_commit.outputs.branch }}
+        run: |
+          set -euo pipefail
+          echo "[ERROR] PR creation failed, cleaning up branch: $BRANCH" >&2
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin --delete "$BRANCH" || true
+          echo "[INFO] Cleaned up remote branch"
 
       - name: Wait for required checks on bump PR
         uses: ./.github/actions/gh-pr-checks
