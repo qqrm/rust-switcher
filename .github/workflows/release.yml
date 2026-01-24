@@ -1,5 +1,5 @@
 name: Release
-run-name: "Release v${{ needs.prepare_release.outputs.version }} (bump=${{ inputs.bump }})"
+run-name: "Release (bump=${{ inputs.bump }})"
 
 on:
   workflow_dispatch:

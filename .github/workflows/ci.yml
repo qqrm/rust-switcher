@@ -12,6 +12,23 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  validate-workflows:
+    name: Validate Workflows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate GitHub Workflows with actionlint
+        uses: docker://rhysd/actionlint:latest
+        with:
+          args: -format 'github-annotation' .github/workflows/
+
   fmt:
     name: Format (rustfmt)
     runs-on: ubuntu-latest
