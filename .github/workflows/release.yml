@@ -176,11 +176,6 @@ jobs:
           toolchain-file: rust-toolchain.toml
           profile: minimal
 
-      - name: Cache Rust build (cargo, target)
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
-        with:
-          shared-key: release
-
       - name: Install Windows GNU target
         shell: bash
         run: |
