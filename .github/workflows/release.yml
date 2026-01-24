@@ -1,5 +1,5 @@
-name: release YAML
-run-name: "Release full flow from dev bump=${{ inputs.bump }}"
+name: Release
+run-name: "Release v${{ needs.prepare_release.outputs.version }} (bump=${{ inputs.bump }})"
 
 on:
   workflow_dispatch:

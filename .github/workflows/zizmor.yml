@@ -1,4 +1,4 @@
-name: GitHub Actions security (zizmor)
+name: Security Audit
 
 on:
   pull_request:
