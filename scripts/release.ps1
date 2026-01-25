@@ -1,6 +1,5 @@
 param(
   [Parameter(Mandatory = $false)]
-  [ValidateSet('patch', 'minor', 'major')]
   [string]$Bump = 'patch',
 
   [Parameter(Mandatory = $false)]
@@ -28,6 +27,23 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Normalize-Bump {
+  param([string]$Value)
+
+  $v = ($Value ?? '').Trim().ToLowerInvariant()
+
+  # Support weird passing like "bump=patch"
+  if ($v -match '^(?:bump=)(.+)$') {
+    $v = $Matches[1].Trim().ToLowerInvariant()
+  }
+
+  if ($v -notin @('patch', 'minor', 'major')) {
+    throw "Invalid bump type: '$Value'. Expected: patch | minor | major"
+  }
+
+  return $v
+}
+
 function Invoke-Cmd {
   param(
     [Parameter(Mandatory = $true)][string]$Cmd,
@@ -35,6 +51,7 @@ function Invoke-Cmd {
   )
 
   Write-Host "`n>> $Cmd"
+
   if ($AllowFail) {
     & pwsh -NoLogo -NoProfile -Command $Cmd
     return $LASTEXITCODE
@@ -42,8 +59,9 @@ function Invoke-Cmd {
 
   & pwsh -NoLogo -NoProfile -Command $Cmd
   if ($LASTEXITCODE -ne 0) {
-    throw "Command failed with exit code $LASTEXITCODE: $Cmd"
+    throw ("Command failed with exit code {0}: {1}" -f $LASTEXITCODE, $Cmd)
   }
+
   return 0
 }
 
@@ -67,12 +85,14 @@ function Get-CargoVersion {
   $metaRaw = cargo metadata --no-deps --format-version 1
   $meta = $metaRaw | ConvertFrom-Json
   $pkgObj = $meta.packages | Where-Object { $_.name -eq $Pkg } | Select-Object -First 1
+
   if (-not $pkgObj) {
     throw "Package '$Pkg' not found in cargo metadata"
   }
   if (-not ($pkgObj.version -match '^\d+\.\d+\.\d+$')) {
     throw "Package version is not strict semver X.Y.Z: $($pkgObj.version)"
   }
+
   return [string]$pkgObj.version
 }
 
@@ -86,6 +106,7 @@ function Bump-Semver {
   if ($parts.Count -ne 3) {
     throw "Invalid semver: $Version"
   }
+
   $maj = [int]$parts[0]
   $min = [int]$parts[1]
   $pat = [int]$parts[2]
@@ -100,9 +121,7 @@ function Bump-Semver {
 }
 
 function Set-CargoTomlVersion {
-  param(
-    [Parameter(Mandatory = $true)][string]$NewVersion
-  )
+  param([Parameter(Mandatory = $true)][string]$NewVersion)
 
   if (-not (Test-Path 'Cargo.toml')) {
     throw "Cargo.toml not found in current directory"
@@ -110,6 +129,7 @@ function Set-CargoTomlVersion {
 
   $lines = Get-Content 'Cargo.toml' -Encoding UTF8
   $out = New-Object System.Collections.Generic.List[string]
+
   $inPackage = $false
   $done = $false
 
@@ -146,12 +166,8 @@ function Ensure-GitIdentity {
   $name = (git config user.name)
   $email = (git config user.email)
 
-  if (-not $name) {
-    git config user.name "qqrm"
-  }
-  if (-not $email) {
-    git config user.email "qqrm@users.noreply.github.com"
-  }
+  if (-not $name) { git config user.name "qqrm" }
+  if (-not $email) { git config user.email "qqrm@users.noreply.github.com" }
 }
 
 function Ensure-OnBranch {
@@ -185,16 +201,15 @@ function Open-OrCreatePr {
   }
 
   $url = gh pr create --base $Base --head $Head --title $Title --body ""
-  $num = gh pr view $url --json number,url --jq '{number:.number,url:.url}' | ConvertFrom-Json
-  Write-Host "Created PR: $($num.url)"
-  return $num
+  $obj = gh pr view $url --json number,url --jq '{number:.number,url:.url}' | ConvertFrom-Json
+  Write-Host "Created PR: $($obj.url)"
+  return $obj
 }
 
 function Merge-Pr {
   param([int]$Number, [string]$Title)
-  Assert-Tool 'gh'
 
-  # Will fail if branch protection forbids it.
+  Assert-Tool 'gh'
   Invoke-Cmd "gh pr merge $Number --squash --subject `"$Title`" --body `"`"" | Out-Null
 }
 
@@ -218,6 +233,7 @@ function Rollback-Tag {
     [string]$TagName,
     [string]$RemoteName
   )
+
   Write-Host "Rolling back tag: $TagName"
   Invoke-Cmd "git tag -d $TagName" -AllowFail | Out-Null
   Invoke-Cmd "git push $RemoteName :refs/tags/$TagName" -AllowFail | Out-Null
@@ -230,6 +246,8 @@ function Rollback-Tag {
 Assert-Tool 'git'
 Assert-Tool 'cargo'
 
+$BumpNorm = Normalize-Bump $Bump
+
 $tagCreated = $false
 $tagName = $null
 $success = $false
@@ -241,10 +259,11 @@ try {
   Git-FetchPull -RemoteName $Remote -BranchName $Branch
 
   $current = Get-CargoVersion -Pkg $Package
-  $next = Bump-Semver -Version $current -Kind $Bump
+  $next = Bump-Semver -Version $current -Kind $BumpNorm
 
   Write-Host "Current version: $current"
   Write-Host "Next version:    $next"
+  Write-Host "Bump kind:       $BumpNorm"
 
   if ($DryRun) {
     $success = $true

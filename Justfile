@@ -1,6 +1,4 @@
 set dotenv-load := true
-
-# Use PowerShell for consistent behavior on Windows.
 set shell := ["pwsh", "-NoLogo", "-NoProfile", "-Command"]
 
 default:
@@ -22,27 +20,37 @@ test:
 check: fmt clippy test
 
 # -----------------------------
-# Version bump / release helpers
+# Release helpers
 # -----------------------------
 
-# Dry-run shows the next version without changing files.
+# Dry-run: shows next version only.
 next bump="patch":
-  pwsh -File ./scripts/release.ps1 -Bump {{bump}} -DryRun
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump {{bump}} -DryRun
 
-# Bump version, run checks, commit, push dev, and open PR dev -> main.
+# Main entry: bump + checks + commit + push + PR
 release bump="patch":
-  pwsh -File ./scripts/release.ps1 -Bump {{bump}} -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump {{bump}} -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
 
+# Aliases (no nesting, always explicit bump)
 release-patch:
-  just release bump=patch
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump patch -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
 
 release-minor:
-  just release bump=minor
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump minor -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
 
 release-major:
-  just release bump=major
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump major -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
 
-# Same as `release`, but also tries to merge the PR and create/push a tag on main.
-# This only works if your repo/branch protection rules allow it.
+# Full auto: also tries merge + tag (may fail due to branch protection)
 release-full bump="patch":
-  pwsh -File ./scripts/release.ps1 -Bump {{bump}} -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump {{bump}} -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
+
+# Full auto aliases (recommended)
+release-full-patch:
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump patch -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
+
+release-full-minor:
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump minor -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
+
+release-full-major:
+  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump major -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
