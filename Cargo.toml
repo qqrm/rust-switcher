@@ -1,6 +1,6 @@
 [package]
 name = "rust-switcher"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2024"
 
 description = "Windows keyboard layout switcher and text conversion utility"
