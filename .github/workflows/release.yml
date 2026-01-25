@@ -1,43 +1,154 @@
 name: Release
 
 on:
-  # Build a release when a semantic version tag is pushed.  Tags should
-  # follow the format `vX.Y.Z`.  You are responsible for creating and
-  # pushing the tag (for example via cargo‑release or manually).  The CI
-  # will not bump versions or create commits on your behalf.
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag (e.g. v1.2.3) to build release from when manually triggered.'
+        description: "Existing tag (e.g. v1.2.3) to build release from when manually triggered."
         required: true
         type: string
 
-# This workflow requires write permissions to publish a GitHub release and
-# optionally publish to crates.io.  Limit the scope to the minimum necessary.
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+  APP_NAME: rust-switcher
+  TARGET_WINDOWS: x86_64-pc-windows-msvc
+
 jobs:
-  # Build the project for Windows and produce a zip archive.  You may add
-  # additional build jobs here for other targets (e.g. Linux, macOS) as
-  # needed.
   build-windows:
+    name: Build (Windows)
     runs-on: windows-latest
+    permissions:
+      contents: read
     env:
-      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout code (tag)
+        uses: actions/checkout@v4.3.1
         with:
           fetch-depth: 1
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          targets: ${{ env.TARGET_WINDOWS }}
+
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2.8.2
+
+      - name: Verify version matches tag
+        shell: powershell
+        run: |
+          $tag = $env.RELEASE_TAG
+          if (-not $tag.StartsWith('v')) { throw "Release tag must start with 'v' (got: $tag)" }
+          $tagVersion = $tag.Substring(1)
+
+          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $pkg = $meta.packages | Where-Object { $_.name -eq $env.APP_NAME } | Select-Object -First 1
+          if (-not $pkg) { throw "Package '$env.APP_NAME' not found in cargo metadata" }
+
+          if ($pkg.version -ne $tagVersion) {
+            throw "Version mismatch: tag=$tagVersion, Cargo.toml=$($pkg.version). Fix Cargo.toml version before tagging."
+          }
+
+      - name: cargo fmt (check)
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --all-features --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ env.TARGET_WINDOWS }} --bin ${{ env.APP_NAME }}
+
+      - name: Package release (zip)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $outDir = Join-Path $PWD "dist"
+          if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
+          New-Item -ItemType Directory -Path $outDir | Out-Null
+
+          $exe = Join-Path $PWD "target/${{ env.TARGET_WINDOWS }}/release/${{ env.APP_NAME }}.exe"
+          if (-not (Test-Path $exe)) { throw "Expected binary not found: $exe" }
+
+          Copy-Item $exe (Join-Path $outDir "${{ env.APP_NAME }}.exe")
+          if (Test-Path "README.md") { Copy-Item "README.md" $outDir }
+          if (Test-Path "LICENSE") { Copy-Item "LICENSE" $outDir }
+
+          $zipName = "${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-${{ env.TARGET_WINDOWS }}.zip"
+          if (Test-Path $zipName) { Remove-Item -Force $zipName }
+          Compress-Archive -Path (Join-Path $outDir '*') -DestinationPath $zipName
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: windows-${{ env.TARGET_WINDOWS }}
+          path: "${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-${{ env.TARGET_WINDOWS }}.zip"
+          if-no-files-found: error
+
+  github-release:
+    name: Create GitHub Release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.3.0
+        with:
+          path: ./artifacts
+
+      - name: Generate checksums (SHA256SUMS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          find . -type f -maxdepth 2 -name "*.zip" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+
+      - name: Create / Update GitHub Release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/**/${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-*.zip
+            artifacts/SHA256SUMS
+
+  publish-crates-io:
+    name: Publish to crates.io (Trusted Publishing)
+    needs: github-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout code (tag)
+        uses: actions/checkout@v4.3.1
+        with:
+          fetch-depth: 1
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@v1
@@ -45,74 +156,65 @@ jobs:
           toolchain: stable
 
       - name: Cache cargo builds
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.8.2
 
-      - name: Add Windows target
-        run: rustup target add x86_64-pc-windows-msvc
-
-      - name: Build release binary
-        run: cargo build --release --target x86_64-pc-windows-msvc --locked
-
-      - name: Package executable
-        shell: powershell
+      - name: Verify version matches tag
+        shell: bash
         run: |
-          $artifactName = "${{ env.CARGO_PKG_NAME }}-${{ env.RELEASE_TAG }}-windows"
-          $exePath = "target/x86_64-pc-windows-msvc/release"
-          $exe = Get-ChildItem -Path $exePath -Filter '*.exe' | Select-Object -First 1
-          if (-not $exe) { throw "No executable found in $exePath" }
-          Compress-Archive -Path $exe.FullName -DestinationPath "$artifactName.zip"
-      - name: Upload artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: windows-artifact
-          path: '*.zip'
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
 
-  # Create a GitHub release and attach the built artifacts.  This job runs on
-  # Linux because the release action is not required to run on Windows.
-  github-release:
-    needs: build-windows
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: windows-artifact
-          path: ./artifacts
+          app = os.environ["APP_NAME"]
+          tag = os.environ["RELEASE_TAG"]
+          if not tag.startswith("v"):
+              print(f"Release tag must start with 'v' (got: {tag})", file=sys.stderr)
+              sys.exit(1)
+          tag_version = tag[1:]
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ./artifacts/*.zip
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          body: |
-            Automated release for version ${{ github.ref_name }}.
+          meta_raw = subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"], text=True)
+          meta = json.loads(meta_raw)
+          pkgs = [p for p in meta.get("packages", []) if p.get("name") == app]
+          if not pkgs:
+              print(f"Package '{app}' not found in cargo metadata", file=sys.stderr)
+              sys.exit(1)
+          cargo_version = pkgs[0].get("version")
 
-  # Optionally publish the crate to crates.io.  Requires CRATES_IO_TOKEN in
-  # repository secrets.  Remove or comment out this job if your project is
-  # not published on crates.io.
-  publish-crates-io:
-    needs: github-release
-    runs-on: ubuntu-latest
-    if: secrets.CRATES_IO_TOKEN != ''
-    environment:
-      name: crates-io
-      url: https://crates.io
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+          if cargo_version != tag_version:
+              print(f"Version mismatch: tag={tag_version}, Cargo.toml={cargo_version}", file=sys.stderr)
+              sys.exit(1)
+          PY
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
+      - name: Authenticate to crates.io (OIDC)
+        id: cratesio
+        uses: rust-lang/crates-io-auth-action@v1.0.3
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Publish crate
+      - name: cargo publish (idempotent)
+        shell: bash
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish --locked --no-verify
+          CARGO_REGISTRY_TOKEN: ${{ steps.cratesio.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          # This crate is Windows-only, so we publish without local verification.
+          # Make re-runs idempotent: if the version is already published, treat it as success.
+          set +e
+          output=$(cargo publish --locked --no-verify 2>&1)
+          status=$?
+          set -e
+
+          echo "$output"
+
+          if [[ $status -eq 0 ]]; then
+            exit 0
+          fi
+
+          if echo "$output" | grep -qiE "already\s+uploaded|already\s+exists|previously\s+published"; then
+            echo "Crate version already published; skipping."
+            exit 0
+          fi
+
+          exit $status
