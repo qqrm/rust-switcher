@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: Tag main and push tag
 description: Fetch main, checkout, create tag, push tag with retry and validation
 inputs:

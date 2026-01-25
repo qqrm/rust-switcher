@@ -148,32 +148,6 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           tag: ${{ steps.bump.outputs.tag }}
 
-
-      - name: Cleanup release PRs on failure/cancel
-        if: ${{ always() && (failure() || cancelled()) }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          TAG: ${{ steps.bump.outputs.tag }}
-          BUMP_BRANCH: ${{ steps.bump_commit.outputs.branch }}
-          PR_BUMP: ${{ steps.pr_bump.outputs.number }}
-        run: |
-          set -euo pipefail
-
-          echo "[cleanup] closing bump PR (bump branch -> dev) if still open"
-          pr_bump="${PR_BUMP:-}"
-          if [ -z "$pr_bump" ] && [ -n "${BUMP_BRANCH:-}" ]; then
-            pr_bump="$(gh pr list --base dev --head "$BUMP_BRANCH" --state open --json number --jq '.[0].number // empty')"
-          fi
-          if [ -n "$pr_bump" ]; then
-            gh pr close "$pr_bump" --delete-branch --comment "Auto-closed: Release workflow failed/cancelled." || true
-          fi
-
-          echo "[cleanup] closing dev -> main PR for this tag if still open"
-          pr_main="$(gh pr list --base main --head dev --state open --search "release: ${TAG}" --json number --jq '.[0].number // empty')"
-          if [ -n "$pr_main" ]; then
-            gh pr close "$pr_main" --comment "Auto-closed: Release workflow failed/cancelled." || true
-          fi
   release_build_publish:
     name: Step 2 - build Windows zip, publish GitHub Release, publish crates.io (tag ref)
     runs-on: ubuntu-latest

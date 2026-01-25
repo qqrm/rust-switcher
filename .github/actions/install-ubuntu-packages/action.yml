@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: Install Ubuntu packages
 description: Install packages via apt-get on Ubuntu runners
 inputs:

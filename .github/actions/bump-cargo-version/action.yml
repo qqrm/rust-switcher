@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: Bump Cargo version
 description: Bump Cargo.toml version, regenerate lockfile, compute tag
 inputs:
