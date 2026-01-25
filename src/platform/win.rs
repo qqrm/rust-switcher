@@ -9,23 +9,28 @@ mod autostart;
 mod commands;
 pub(crate) mod hotkey_format;
 pub(crate) mod keyboard;
+pub(crate) mod menu_theme;
 pub(crate) mod mouse;
-mod state;
+pub mod state;
 pub(crate) mod tray;
 mod tray_dispatch;
 mod visuals;
 mod window;
+use std::sync::OnceLock;
+
 pub(crate) use hotkey_format::{format_hotkey, format_hotkey_sequence};
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, LRESULT, WPARAM},
-        Graphics::Gdi::{DeleteObject, HFONT, HGDIOBJ},
+        Graphics::Gdi::{DeleteObject, HFONT, HGDIOBJ, UpdateWindow},
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
-            DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, IsWindowVisible, PostQuitMessage,
-            SC_CLOSE, SW_HIDE, SW_SHOW, SetWindowLongPtrW, ShowWindow, WM_CLOSE, WM_COMMAND,
-            WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC, WM_DESTROY, WM_HOTKEY,
-            WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+            DefWindowProcW, FindWindowW, GWLP_USERDATA, GetWindowLongPtrW, IsWindowVisible,
+            PostMessageW, PostQuitMessage, RegisterWindowMessageW, SC_CLOSE, SC_MINIMIZE,
+            SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SetForegroundWindow,
+            SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
+            WM_CTLCOLORDLG, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_PAINT,
+            WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
         },
     },
     core::{PCWSTR, Result, w},
@@ -39,6 +44,8 @@ use self::{
     },
 };
 pub(crate) const AUTOSTART_ARG: &str = "--autostart";
+use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLOREDIT, WM_ERASEBKGND};
+
 use crate::{
     app::AppState,
     config,
@@ -47,9 +54,9 @@ use crate::{
     platform::{
         ui::{
             self,
-            colors::on_ctlcolor,
             error_notifier::{T_CONFIG, T_UI, drain_one_and_present},
             notify::on_wm_app_notify,
+            themes::*,
         },
         win::{
             tray::{WM_APP_TRAY, remove_icon},
@@ -60,12 +67,40 @@ use crate::{
     utils::helpers,
 };
 
+const WM_APP_APPLY_THEME: u32 = WM_APP + 1;
+
 #[rustfmt::skip]
 #[cfg(debug_assertions)]
 use crate::platform::win::keyboard::debug_timers::handle_timer;
 
 fn set_hwnd_text(hwnd: HWND, s: &str) -> windows::core::Result<()> {
     helpers::set_edit_text(hwnd, s)
+}
+
+pub(crate) fn apply_theme_from_tray(hwnd: HWND, dark: bool) {
+    // Apply visuals immediately.
+    crate::platform::ui::themes::set_window_theme(hwnd, dark);
+
+    // Keep the main window checkbox state in sync, so Apply does not revert it.
+    with_state_mut_do(hwnd, |state| {
+        helpers::set_checkbox(state.checkboxes.theme_dark, dark);
+    });
+
+    // Persist only this setting, do not overwrite other pending UI edits.
+    let mut cfg = config::load().unwrap_or_default();
+    cfg.theme_dark = dark;
+
+    if let Err(e) = config::save(&cfg) {
+        with_state_mut_do(hwnd, |state| {
+            crate::platform::ui::error_notifier::push(
+                hwnd,
+                state,
+                T_CONFIG,
+                "Failed to save config",
+                &io_to_win(e),
+            );
+        });
+    }
 }
 
 pub fn refresh_autostart_checkbox(state: &mut AppState) -> windows::core::Result<()> {
@@ -76,6 +111,10 @@ pub fn refresh_autostart_checkbox(state: &mut AppState) -> windows::core::Result
 
 fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::core::Result<()> {
     helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms)?;
+
+    refresh_autostart_checkbox(state)?;
+    helpers::set_checkbox(state.checkboxes.start_minimized, cfg.start_minimized);
+    helpers::set_checkbox(state.checkboxes.theme_dark, cfg.theme_dark);
 
     state.hotkey_values = crate::app::HotkeyValues::from_config(cfg);
     state.hotkey_sequence_values = crate::app::HotkeySequenceValues::from_config(cfg);
@@ -113,6 +152,9 @@ fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::co
 
 fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Config {
     cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
+
+    cfg.start_minimized = helpers::get_checkbox(state.checkboxes.start_minimized);
+    cfg.theme_dark = helpers::get_checkbox(state.checkboxes.theme_dark);
 
     cfg.hotkey_convert_last_word_sequence = state.hotkey_sequence_values.last_word;
     cfg.hotkey_pause_sequence = state.hotkey_sequence_values.pause;
@@ -169,6 +211,25 @@ fn apply_config_runtime(
         "Failed to register hotkeys",
         crate::input::hotkeys::register_from_config(hwnd, cfg)
     );
+
+    // ВАЖНО: зафиксировать тему в state до любых WM_CTLCOLOR*.
+    // А само применение Visual Styles для чекбоксов делать отложенно на старте.
+    let dark = cfg.theme_dark;
+
+    state.current_theme_dark = dark;
+
+    if unsafe { IsWindowVisible(hwnd).as_bool() } {
+        set_window_theme(hwnd, dark);
+    } else {
+        unsafe {
+            let _ = PostMessageW(
+                Some(hwnd),
+                WM_APP_APPLY_THEME,
+                WPARAM(if dark { 1 } else { 0 }),
+                LPARAM(0),
+            );
+        }
+    }
 
     Ok(())
 }
@@ -247,6 +308,16 @@ fn load_config_or_default(hwnd: HWND, state: &mut AppState) -> config::Config {
 fn on_create(hwnd: HWND) -> LRESULT {
     let mut state = Box::new(AppState::default());
 
+    // ВАЖНО: state должен быть доступен через get_state/with_state_mut_do
+    // уже во время создания контролов и их первого paint.
+    unsafe {
+        SetWindowLongPtrW(
+            hwnd,
+            GWLP_USERDATA,
+            state.as_mut() as *mut AppState as isize,
+        );
+    }
+
     #[rustfmt::skip]
     startup_or_return0!(hwnd, &mut state, "Failed to create UI controls", ui::create_controls(hwnd, &mut state));
     let cfg = load_config_or_default(hwnd, state.as_mut());
@@ -265,10 +336,6 @@ fn on_create(hwnd: HWND) -> LRESULT {
 
     init_font_and_visuals(hwnd, &mut state);
 
-    unsafe {
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
-    }
-
     if let Err(e) = crate::platform::win::tray::ensure_icon(hwnd) {
         tracing::warn!(error = ?e, "tray ensure_icon failed");
     }
@@ -278,13 +345,16 @@ fn on_create(hwnd: HWND) -> LRESULT {
         helpers::debug_startup_notification(hwnd, state);
     });
 
+    // Протекаем Box, чтобы AppState жил столько же, сколько окно.
+    let _ = Box::into_raw(state);
+
     LRESULT(0)
 }
 
 /// Start the main window and enter the message loop.
 ///
 /// This function is called from `main` after the single instance
-/// guard has been acquired.  It performs all initialization that
+/// guard has been acquired. It performs all initialization that
 /// requires unsafe code and returns any error to the caller.
 pub fn run(start_hidden: bool) -> Result<()> {
     unsafe {
@@ -301,8 +371,13 @@ pub fn run(start_hidden: bool) -> Result<()> {
 
         let hwnd = create_main_window(class_name, hinstance, style, x, y, window_w, window_h)?;
         set_window_icons(hwnd, hinstance);
-        let show_cmd = if start_hidden { SW_HIDE } else { SW_SHOW };
-        let _ = ShowWindow(hwnd, show_cmd);
+
+        if start_hidden {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        } else {
+            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+            let _ = UpdateWindow(hwnd);
+        }
 
         message_loop()?;
     }
@@ -315,19 +390,58 @@ pub fn run(start_hidden: bool) -> Result<()> {
 pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     const WM_NCDESTROY: u32 = 0x0082;
 
+    if msg == show_window_message_id() {
+        show_main_window(hwnd);
+        return LRESULT(0);
+    }
+
     match msg {
         WM_CREATE => on_create(hwnd),
         WM_COMMAND => commands::on_command(hwnd, wparam),
         WM_HOTKEY => on_hotkey(hwnd, wparam),
         WM_TIMER => on_timer(hwnd, wparam, lparam),
+        WM_PAINT => crate::platform::ui::themes::on_paint(hwnd, wparam, lparam),
 
-        WM_CTLCOLORDLG | WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => on_ctlcolor(wparam, lparam),
-        WM_SYSCOMMAND => {
-            let cmd = wparam.0 & 0xFFF0usize;
-            if cmd == SC_CLOSE as usize {
+        //Purpose: Customize the background color of a dialog box itself.
+        //When sent: When the dialog box background is about to be painted.
+        WM_CTLCOLORDLG => on_color_dialog(hwnd, wparam, lparam),
+
+        //Purpose: Customize colors of static controls (labels, group boxes, icons, text fields).
+        //When sent: Before a static control is drawn.
+        WM_CTLCOLORSTATIC => on_color_static(hwnd, wparam, lparam),
+
+        //Purpose: Customize colors of edit controls (text boxes).
+        //When sent: Before an edit control is drawn.
+        WM_CTLCOLOREDIT => on_color_edit(hwnd, wparam, lparam),
+
+        //Allows the application to customize the window background instead of using the default system color
+        //Sent by Windows when a window's background needs to be cleared/repainted
+        WM_ERASEBKGND => on_erase_background(hwnd, wparam, lparam),
+
+        //For buttons
+        WM_DRAWITEM => on_draw_item(hwnd, wparam, lparam),
+        WM_APP_APPLY_THEME => {
+            let dark = wparam.0 != 0;
+            set_window_theme(hwnd, dark);
+            LRESULT(0)
+        }
+
+        WM_CTLCOLORBTN => on_ctlcolor(hwnd, wparam, lparam),
+        WM_SIZE => {
+            if wparam.0 == SIZE_MINIMIZED as usize {
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
                 return LRESULT(0);
             }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+        WM_SYSCOMMAND => {
+            let cmd = wparam.0 & 0xFFF0usize;
+
+            if cmd == SC_CLOSE as usize || cmd == SC_MINIMIZE as usize {
+                let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
+                return LRESULT(0);
+            }
+
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
         WM_CLOSE => {
@@ -480,6 +594,31 @@ fn handle_cancel(hwnd: HWND, state: &mut AppState) {
     );
 }
 
+fn show_window_message_id() -> u32 {
+    static ID: OnceLock<u32> = OnceLock::new();
+    *ID.get_or_init(|| unsafe { RegisterWindowMessageW(w!("RustSwitcher.ShowMainWindow")) })
+}
+
+pub fn activate_running_instance() -> windows::core::Result<bool> {
+    unsafe {
+        let hwnd = FindWindowW(w!("RustSwitcherMainWindow"), PCWSTR::null()).unwrap_or_default();
+        if hwnd.0.is_null() {
+            return Ok(false);
+        }
+
+        let msg = show_window_message_id();
+        let _ = PostMessageW(Some(hwnd), msg, WPARAM(0), LPARAM(0));
+        Ok(true)
+    }
+}
+
+fn show_main_window(hwnd: HWND) {
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
 unsafe fn on_ncdestroy(hwnd: HWND) -> LRESULT {
     let p = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut AppState;
     if p.is_null() {
@@ -492,6 +631,20 @@ unsafe fn on_ncdestroy(hwnd: HWND) -> LRESULT {
 
     if !state.font.0.is_null() {
         let _ = unsafe { DeleteObject(HGDIOBJ(state.font.0)) };
+    }
+
+    // Delete cached dark theme brushes
+    if !state.dark_brush_window_bg.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ::from(state.dark_brush_window_bg)) };
+        state.dark_brush_window_bg = Default::default();
+    }
+    if !state.dark_brush_control_bg.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ::from(state.dark_brush_control_bg)) };
+        state.dark_brush_control_bg = Default::default();
+    }
+    if !state.dark_brush_edit_bg.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ::from(state.dark_brush_edit_bg)) };
+        state.dark_brush_edit_bg = Default::default();
     }
 
     drop(unsafe { Box::from_raw(p) });

@@ -2,6 +2,9 @@ name: Release
 run-name: "Release full flow from dev bump=${{ inputs.bump }}"
 
 on:
+  push:
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       bump:
@@ -19,7 +22,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: release
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -50,38 +53,111 @@ jobs:
           ref: dev
           fetch-depth: 0
 
-      - name: Setup Rust toolchain (rust-toolchain.toml)
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-
-      - name: Cache Rust build (cargo, target)
-        uses: Swatinem/rust-cache@v2
+  github-release:
+    name: Create GitHub Release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.3.0
         with:
-          shared-key: release
+          path: ./artifacts
 
-      - name: Verify nightly toolchain
+      - name: Generate checksums (SHA256SUMS)
         shell: bash
         run: |
           set -euo pipefail
-          rustc -Vv
-          if ! rustc -Vv | grep -q "release:.*nightly"; then
-            echo "Expected nightly toolchain from rust-toolchain.toml, but rustc -Vv does not show nightly." >&2
-            exit 1
-          fi
+          cd artifacts
+          find . -type f -maxdepth 2 -name "*.zip" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
 
-      - name: Bump version, update lock, compute tag
-        id: version
+      - name: Create / Update GitHub Release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/**/${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-*.zip
+            artifacts/SHA256SUMS
+
+  publish-crates-io:
+    name: Publish to crates.io (Trusted Publishing)
+    needs: github-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout code (tag)
+        uses: actions/checkout@v4.3.1
+        with:
+          fetch-depth: 1
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2.8.2
+
+      - name: Verify version matches tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          app = os.environ["APP_NAME"]
+          tag = os.environ["RELEASE_TAG"]
+          if not tag.startswith("v"):
+              print(f"Release tag must start with 'v' (got: {tag})", file=sys.stderr)
+              sys.exit(1)
+          tag_version = tag[1:]
+
+          meta_raw = subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"], text=True)
+          meta = json.loads(meta_raw)
+          pkgs = [p for p in meta.get("packages", []) if p.get("name") == app]
+          if not pkgs:
+              print(f"Package '{app}' not found in cargo metadata", file=sys.stderr)
+              sys.exit(1)
+          cargo_version = pkgs[0].get("version")
+
+          if cargo_version != tag_version:
+              print(f"Version mismatch: tag={tag_version}, Cargo.toml={cargo_version}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+      - name: Authenticate to crates.io (OIDC)
+        id: cratesio
+        uses: rust-lang/crates-io-auth-action@v1.0.3
+
+      - name: cargo publish (idempotent)
         shell: bash
         env:
           BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
 
-          if ! command -v jq >/dev/null 2>&1; then
-            echo "jq is required on runner to parse cargo metadata" >&2
-            exit 1
-          fi
+          # This crate is Windows-only, so we publish without local verification.
+          # Make re-runs idempotent: if the version is already published, treat it as success.
+          set +e
+          output=$(cargo publish --locked --no-verify 2>&1)
+          status=$?
+          set -e
 
-          git fetch --tags --force
+          echo "$output"
 
           meta_file="$(mktemp)"
           cargo metadata --no-deps --format-version 1 > "$meta_file"

@@ -46,6 +46,10 @@ pub struct HotkeySequence {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub delay_ms: u32,
+    #[serde(default)]
+    pub start_minimized: bool,
+    #[serde(default)]
+    pub theme_dark: bool,
 
     pub hotkey_convert_last_word: Option<Hotkey>,
     pub hotkey_convert_selection: Option<Hotkey>,
@@ -65,6 +69,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             delay_ms: 100,
+            start_minimized: false,
+            theme_dark: false,
 
             hotkey_switch_layout: None,
             hotkey_pause: None,

@@ -1,10 +1,10 @@
 [package]
 name = "rust-switcher"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 
 description = "Windows keyboard layout switcher and text conversion utility"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/qqrm/rust-switcher"
 homepage = "https://github.com/qqrm/rust-switcher"
 readme = "README.md"
@@ -18,12 +18,17 @@ lingua = { version = "1.7", default-features = false, features = [
     "english",
     "russian",
 ] }
-tracing = { version = "0.1", optional = true }
+tracing = { version = "0.1", features = ["release_max_level_off"] }
 tracing-subscriber = { version = "0.3", features = [
     "fmt",
     "env-filter",
 ], optional = true }
-tracing-appender = "0.2"
+tracing-appender = { version = "0.2", optional = true }
+
+[features]
+default = []
+debug-tracing = ["tracing-subscriber", "tracing-appender"]
+
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
@@ -45,11 +50,9 @@ windows = { version = "0.62", features = [
     "Win32_System_SystemInformation",
     "Win32_System_Ole",
     "Win32_Storage_FileSystem",
+    "Win32_Graphics_Dwm",
 ] }
 
-[features]
-default = ["debug-tracing"]
-debug-tracing = ["tracing", "tracing-subscriber"]
 
 [build-dependencies]
 embed-resource = "3.0"
@@ -58,10 +61,12 @@ embed-resource = "3.0"
 windows = { version = "0.62", features = ["Win32_System_SystemServices"] }
 
 [profile.release]
-lto = true
+opt-level = "z"
+lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+debug = 0
 
 [dev-dependencies]
 tracing-test = "0.2.5"

@@ -7,7 +7,11 @@
 
 use std::collections::VecDeque;
 
-use windows::Win32::{Foundation::HWND, Graphics::Gdi::HFONT, UI::WindowsAndMessaging::HMENU};
+use windows::Win32::{
+    Foundation::HWND,
+    Graphics::Gdi::{HBRUSH, HFONT},
+    UI::WindowsAndMessaging::HMENU,
+};
 
 use crate::config;
 
@@ -174,11 +178,19 @@ pub struct AppState {
     pub active_switch_layout_sequence: Option<config::HotkeySequence>,
     pub switch_layout_waiting_second: bool,
     pub switch_layout_first_tick_ms: u64,
+
+    pub current_theme_dark: bool,
+    // Cached theme brushes (must be deleted on window destroy)
+    pub dark_brush_window_bg: HBRUSH,
+    pub dark_brush_control_bg: HBRUSH,
+    pub dark_brush_edit_bg: HBRUSH,
 }
 
 #[derive(Debug, Default)]
 pub struct Checkboxes {
     pub autostart: HWND,
+    pub start_minimized: HWND,
+    pub theme_dark: HWND,
 }
 
 #[derive(Debug, Default)]
@@ -208,6 +220,8 @@ pub enum ControlId {
     Autostart = 1001,
     Tray = 1002,
     DelayMs = 1003,
+    StartMinimized = 1004,
+    DarkTheme = 1005,
 
     HotkeyLastWord = 1201,
     HotkeyPause = 1202,
@@ -226,6 +240,8 @@ impl ControlId {
             1001 => Some(Self::Autostart),
             1002 => Some(Self::Tray),
             1003 => Some(Self::DelayMs),
+            1004 => Some(Self::StartMinimized),
+            1005 => Some(Self::DarkTheme),
 
             1201 => Some(Self::HotkeyLastWord),
             1202 => Some(Self::HotkeyPause),

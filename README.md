@@ -2,56 +2,67 @@
 
 ![Screenshot](assets/screenshots/overview.png)
 
-Rust Switcher это утилита для Windows для конвертации текста между RU и EN раскладками и автоконвертации последнего слова при наборе.
+Rust Switcher is a Windows 11 utility that helps convert text between RU and EN keyboard layouts.
 
-## Возможности
+## Features
 
-- Конвертация выделенного текста RU EN
-- Конвертация последнего введенного слова по хоткею
-- Автоконвертация последнего слова при наборе (можно поставить на паузу)
-- Tray icon и настройки
+- Convert selected text (RU-EN)
+- Convert the last typed word via a hotkey
+- Auto-convert the last word while typing (can be paused)
+- Tray icon and quick actions menu
+- Light and dark UI themes
+- Settings are saved to a config file
+- Autostart
 
-## Системные требования
+## Requirements
 
 - Windows 11
-- Rust nightly (см. `rust-toolchain.toml`)
+- Rust nightly (see `rust-toolchain.toml`)
 - MSVC toolchain (Visual Studio 2022 Build Tools)
 
-## Установка и запуск
+## Install
 
-Сборка:
-- `cargo +nightly build`
+### Via cargo
 
-Запуск:
-- `cargo +nightly run`
+```powershell
+cargo install rust-switcher
+````
 
-Release сборка:
-- `cargo +nightly build --release --locked`
+### From GitHub Releases
 
-## Разработка
+Download `rust-switcher.exe` from Releases.
 
-### Быстрый цикл через Bacon
+## Configuration
 
-Проект содержит `bacon.toml` и строгий раннер `scripts/bacon_strict.ps1`.
+The config file is stored at:
 
-Установка:
-- `cargo install bacon`
+* `%APPDATA%\RustSwitcher\config.json`
 
-Запуск:
-- `bacon`
+## Development
 
-Горячие клавиши Bacon:
-- `d` dev
-- `r` release
-- `t` tests
-- `p` dushnota
+This project includes a ready-to-use `bacon.toml` for a fast development loop.
 
-### Проверки перед PR
+### Bacon hotkeys (from `bacon.toml`)
 
-- `cargo +nightly fmt --check`
-- `cargo +nightly clippy -- -D warnings`
-- `cargo +nightly test`
+* `d` dev-long
+* `r` release-long
+* `t` test-long
+* `p` dushnota
 
-## Конфигурация
+What these jobs do:
 
-Настройки меняются в GUI. Логирование контролируется feature флагом и переменной `RUST_LOG`.
+* dev-long: fmt check, clippy, build (with debug tracing), run the app
+* release-long: fmt check, clippy, release build, run the app
+* test-long: fmt check, clippy, run tests
+* dushnota: максимально strict clippy
+
+## Logging (development only)
+
+```powershell
+$env:RUST_LOG="trace"
+cargo +nightly run -F debug-tracing
+```
+
+## License
+
+MIT

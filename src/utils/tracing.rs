@@ -1,5 +1,7 @@
+#[cfg(feature = "debug-tracing")]
 use tracing_subscriber::EnvFilter;
 
+#[cfg(feature = "debug-tracing")]
 pub fn init_tracing() {
     if !cfg!(debug_assertions) {
         return;
@@ -20,3 +22,6 @@ pub fn init_tracing() {
         tracing::info!("tracing initialized");
     }
 }
+
+#[cfg(not(feature = "debug-tracing"))]
+pub fn init_tracing() {}

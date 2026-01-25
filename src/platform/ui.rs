@@ -1,15 +1,15 @@
-pub mod colors;
 pub mod error_notifier;
 pub mod geom;
 pub mod info_notifier;
 pub mod notify;
+pub mod themes;
 
 use windows::{
     Win32::{
         Foundation::{HWND, RECT},
         System::SystemServices::SS_RIGHT,
         UI::WindowsAndMessaging::{
-            BS_AUTOCHECKBOX, BS_GROUPBOX, CreateWindowExW, ES_NUMBER, ES_READONLY, GetClientRect,
+            BS_AUTOCHECKBOX, BS_OWNERDRAW, CreateWindowExW, ES_NUMBER, ES_READONLY, GetClientRect,
             SetWindowTextW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP,
             WS_VISIBLE,
         },
@@ -167,17 +167,17 @@ fn create_settings_group(
     let left_x = l.left_x;
     let top_y = l.top_y;
 
-    let _grp_settings = create(
-        hwnd,
-        ControlSpec {
-            ex_style: WINDOW_EX_STYLE(0),
-            class: w!("BUTTON"),
-            text: w!("Settings"),
-            style: ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
-            rect: RectI::new(left_x, top_y, l.group_w_left, l.group_h),
-            menu: None,
-        },
-    )?;
+    // let _grp_settings = create(
+    //     hwnd,
+    //     ControlSpec {
+    //         ex_style: WINDOW_EX_STYLE(0),
+    //         class: w!("BUTTON"),
+    //         text: w!("Settings"),
+    //         style: ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
+    //         rect: RectI::new(left_x, top_y, l.group_w_left, l.group_h),
+    //         menu: None,
+    //     },
+    // )?;
 
     state.checkboxes.autostart = create(
         hwnd,
@@ -191,6 +191,30 @@ fn create_settings_group(
         },
     )?;
 
+    state.checkboxes.start_minimized = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Start minimized"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
+            rect: RectI::new(left_x + 12, top_y + 52, l.group_w_left - 24, 20),
+            menu: Some(ControlId::StartMinimized.hmenu()),
+        },
+    )?;
+
+    state.checkboxes.theme_dark = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Dark theme"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
+            rect: RectI::new(left_x + 12, top_y + 76, l.group_w_left - 24, 20),
+            menu: Some(ControlId::DarkTheme.hmenu()),
+        },
+    )?;
+
     let _lbl_delay = create(
         hwnd,
         ControlSpec {
@@ -198,7 +222,7 @@ fn create_settings_group(
             class: w!("STATIC"),
             text: w!("Delay before switching:"),
             style: WS_CHILD | WS_VISIBLE,
-            rect: RectI::new(left_x + 12, top_y + 82, l.group_w_left - 24, 18),
+            rect: RectI::new(left_x + 12, top_y + 104, l.group_w_left - 24, 18),
             menu: None,
         },
     )?;
@@ -210,7 +234,7 @@ fn create_settings_group(
             class: w!("EDIT"),
             text: w!("100"),
             style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, ES_NUMBER),
-            rect: RectI::new(left_x + 12, top_y + 104, 60, 22),
+            rect: RectI::new(left_x + 12, top_y + 126, 60, 22),
             menu: Some(ControlId::DelayMs.hmenu()),
         },
     )?;
@@ -222,7 +246,7 @@ fn create_settings_group(
             class: w!("STATIC"),
             text: w!("ms"),
             style: WS_CHILD | WS_VISIBLE,
-            rect: RectI::new(left_x + 78, top_y + 107, 24, 18),
+            rect: RectI::new(left_x + 78, top_y + 129, 24, 18),
             menu: None,
         },
     )?;
@@ -237,7 +261,6 @@ fn create_hotkeys_group(
 ) -> windows::core::Result<()> {
     let root = HotkeysGroupLayout::new(l);
 
-    create_hotkeys_groupbox(hwnd, &root)?;
     create_hotkey_rows(hwnd, state, &root)?;
 
     Ok(())
@@ -245,10 +268,6 @@ fn create_hotkeys_group(
 
 #[derive(Clone, Copy)]
 struct HotkeysGroupLayout {
-    top_y: i32,
-    right_x: i32,
-    group_w: i32,
-    group_h: i32,
     hx: i32,
     hy0: i32,
     w_label: i32,
@@ -261,7 +280,6 @@ impl HotkeysGroupLayout {
         let top_y = l.top_y;
 
         let group_w = l.group_w_right;
-        let group_h = l.group_h;
 
         let hx = right_x + 12;
         let hy0 = top_y + 28;
@@ -270,10 +288,6 @@ impl HotkeysGroupLayout {
         let w_edit = group_w - 12 - 12 - w_label - 8;
 
         Self {
-            top_y,
-            right_x,
-            group_w,
-            group_h,
             hx,
             hy0,
             w_label,
@@ -282,20 +296,20 @@ impl HotkeysGroupLayout {
     }
 }
 
-fn create_hotkeys_groupbox(hwnd: HWND, g: &HotkeysGroupLayout) -> windows::core::Result<()> {
-    let _ = create(
-        hwnd,
-        ControlSpec {
-            ex_style: WINDOW_EX_STYLE(0),
-            class: w!("BUTTON"),
-            text: w!("Hotkeys"),
-            style: ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
-            rect: RectI::new(g.right_x, g.top_y, g.group_w, g.group_h),
-            menu: None,
-        },
-    )?;
-    Ok(())
-}
+// fn create_hotkeys_groupbox(hwnd: HWND, g: &HotkeysGroupLayout) -> windows::core::Result<()> {
+//     // let _ = create(
+//     //     hwnd,
+//     //     ControlSpec {
+//     //         ex_style: WINDOW_EX_STYLE(0),
+//     //         class: w!("BUTTON"),
+//     //         text: w!("Hotkeys"),
+//     //         style: ws_i32(WS_CHILD | WS_VISIBLE, BS_GROUPBOX),
+//     //         rect: RectI::new(g.right_x, g.top_y, g.group_w, g.group_h),
+//     //         menu: None,
+//     //     },
+//     // )?;
+//     Ok(())
+// }
 
 fn create_hotkey_rows(
     hwnd: HWND,
@@ -367,7 +381,7 @@ fn create_hotkey_row(
 fn create_buttons(hwnd: HWND, state: &mut AppState, l: &UiLayout) -> windows::core::Result<()> {
     let btn_y = l.top_y + l.group_h + 10;
     let btn_h = 28;
-    let btn_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
+    let btn_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32);
 
     state.buttons.exit = create(
         hwnd,

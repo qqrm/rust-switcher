@@ -1,7 +1,3 @@
-// This resource script file is intentionally left empty.  In the
-// original project it defines the application icon and version
-// information.  For the purpose of this refactoring exercise the
-// resource contents are omitted.
 1 24 "res/windows/app.manifest"
-1 ICON "res/windows/icon.ico"
+1 ICON "res/windows/icon_transparent.ico"
 2 ICON "res/windows/icon_green.ico"
