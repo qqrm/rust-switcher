@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: Commit version bump
 description: Create release bump branch and commit Cargo.toml and Cargo.lock
 inputs:

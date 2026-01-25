@@ -1,23 +1,12 @@
 {
-  "terminal.integrated.profiles.windows": {
-    "PowerShell 7": {
-      "path": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-      "args": [
-        "-NoLogo"
-      ]
-    },
-    "VS 2022 Dev PowerShell": {
-      "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      "args": [
-        "-NoLogo",
-        "-NoExit",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "Import-Module \"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll\"; Enter-VsDevShell -VsInstallPath \"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\" -SkipAutomaticLocation -DevCmdArguments \"-arch=x64 -host_arch=x64\""
-      ]
-    }
-  },
-  "terminal.integrated.defaultProfile.windows": "PowerShell 7",
-  "explorer.sortOrder": "mixed"
+  "yaml.schemas": {
+    "https://json.schemastore.org/github-workflow.json": [
+      ".github/workflows/*.yml",
+      ".github/workflows/*.yaml"
+    ],
+    "https://json.schemastore.org/github-action.json": [
+      ".github/actions/**/action.yml",
+      ".github/actions/**/action.yaml"
+    ]
+  }
 }

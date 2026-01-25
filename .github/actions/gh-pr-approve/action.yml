@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: gh pr review approve
 description: Approve a pull request via GitHub CLI
 inputs:

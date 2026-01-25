@@ -1,93 +1,107 @@
-name: Push branch
-description: Push current HEAD to origin branch using token with retry and cleanup
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: push-branch
+description: Create or update a remote branch with current workspace contents (retry-safe)
+
 inputs:
+  repo_url:
+    description: Repository URL (https://github.com/OWNER/REPO.git)
+    required: true
   token:
-    description: GitHub token (PAT)
+    description: GitHub token (PAT) with push permissions
     required: true
   branch:
-    description: Destination branch
+    description: Branch name to push
     required: true
-  delete-existing:
-    description: Delete existing remote branch before push (resolves conflicts)
+  commit_message:
+    description: Commit message
     required: false
-    default: 'false'
+    default: "chore: update"
+  delete_existing:
+    description: If true, delete remote branch before pushing
+    required: false
+    default: "false"
+
 runs:
   using: composite
   steps:
-    - name: Pre-check - validate branch name
+    - name: Prepare remote URL with token
       shell: bash
       env:
-        BRANCH: ${{ inputs.branch }}
-      run: |
-        set -euo pipefail
-        if ! echo "$BRANCH" | grep -Eqx '[a-zA-Z0-9._/-]+'; then
-          echo "ERROR: Invalid branch name: $BRANCH" >&2
-          exit 1
-        fi
-        echo "[INFO] Validated branch name: $BRANCH"
-
-    - name: Pre-check - verify HEAD is clean
-      shell: bash
-      run: |
-        set -euo pipefail
-        if [ "$(git status --porcelain | wc -l)" -gt 0 ]; then
-          echo "ERROR: Working directory has uncommitted changes" >&2
-          git status --porcelain
-          exit 1
-        fi
-        echo "[INFO] Working directory is clean"
-
-    - name: Clean up existing branch (if requested)
-      if: ${{ inputs.delete-existing == 'true' }}
-      shell: bash
-      env:
+        REPO_URL: ${{ inputs.repo_url }}
         TOKEN: ${{ inputs.token }}
-        BRANCH: ${{ inputs.branch }}
       run: |
         set -euo pipefail
-        git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-        echo "[INFO] Attempting to delete existing remote branch: $BRANCH"
-        if git push origin --delete "$BRANCH" 2>/dev/null; then
-          echo "[INFO] Successfully deleted remote branch"
-        else
-          echo "[INFO] Remote branch did not exist, continuing"
+        if [[ "$REPO_URL" != https://* ]]; then
+          echo "repo_url must be https URL" >&2
+          exit 1
         fi
+        # Inject token into URL for git operations
+        echo "REMOTE_URL=${REPO_URL/https:\/\//https:\/\/x-access-token:${TOKEN}@}" >> "$GITHUB_ENV"
 
     - name: Push branch with retry
       shell: bash
       env:
-        TOKEN: ${{ inputs.token }}
+        REPO_URL: ${{ env.REMOTE_URL }}
         BRANCH: ${{ inputs.branch }}
-        GIT_AUTHOR_NAME: github-actions[bot]
-        GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
-        GIT_COMMITTER_NAME: github-actions[bot]
-        GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+        COMMIT_MESSAGE: ${{ inputs.commit_message }}
+        DELETE_EXISTING: ${{ inputs.delete_existing }}
       run: |
         set -euo pipefail
 
-        MAX_RETRIES=3
-        RETRY_DELAY=2
-        attempt=0
+        # We clone into a temp dir so we always push a clean, isolated state.
+        # This avoids edge cases where the runner workspace has odd git state.
+        tmpdir="$(mktemp -d)"
+        trap 'rm -rf "$tmpdir"' EXIT
 
-        git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-        git remote -v
+        git clone --no-checkout "$REPO_URL" "$tmpdir/repo" >/dev/null 2>&1
+        cd "$tmpdir/repo"
 
-        while [ "$attempt" -lt "$MAX_RETRIES" ]; do
-          attempt=$((attempt + 1))
-          echo "[INFO] Push attempt $attempt/$MAX_RETRIES: git push origin HEAD:$BRANCH"
+        git fetch origin "$BRANCH" --depth=1 || true
+        git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -B "$BRANCH"
 
-          if git push origin "HEAD:${BRANCH}" --no-verify; then
-            echo "[INFO] Successfully pushed $BRANCH on attempt $attempt"
+        # Copy working tree from the caller workspace into this clone.
+        rsync -a --delete --exclude='.git' "$GITHUB_WORKSPACE/" "./"
+
+        git status --porcelain || true
+
+        git add -A
+        if git diff --cached --quiet; then
+          echo "[INFO] Nothing to commit."
+        else
+          git commit -m "$COMMIT_MESSAGE"
+        fi
+
+        if [ "${DELETE_EXISTING}" = "true" ]; then
+          echo "[INFO] Deleting remote branch origin/${BRANCH} (if exists)"
+          git push origin --delete "$BRANCH" || true
+        fi
+
+        attempt=1
+        max_attempts=5
+        while [ "$attempt" -le "$max_attempts" ]; do
+          echo "[INFO] Pushing branch (attempt ${attempt}/${max_attempts})..."
+
+          tmp_out="$(mktemp)"
+          set +e
+          git push origin "HEAD:${BRANCH}" 2>&1 | tee "$tmp_out"
+          push_rc="${PIPESTATUS[0]}"
+          set -e
+
+          if [ "$push_rc" -eq 0 ]; then
+            echo "[INFO] Push succeeded."
             exit 0
-          else
-            EXIT_CODE=$?
-            echo "[WARN] Push failed on attempt $attempt with exit code $EXIT_CODE"
-            if [ "$attempt" -lt "$MAX_RETRIES" ]; then
-              echo "[INFO] Waiting ${RETRY_DELAY}s before retry..."
-              sleep "$RETRY_DELAY"
-            fi
           fi
+
+          echo "[WARN] Push failed with exit code ${push_rc}. Output was:" >&2
+          sed 's/^/[PUSH] /' "$tmp_out" >&2
+
+          if [ "$attempt" -lt "$max_attempts" ]; then
+            sleep_time=$((2 ** attempt))
+            echo "[INFO] Retrying in ${sleep_time}s..."
+            sleep "$sleep_time"
+          fi
+          attempt=$((attempt + 1))
         done
 
-        echo "[ERROR] Failed to push branch after $MAX_RETRIES attempts" >&2
+        echo "[ERROR] Push failed after ${max_attempts} attempts." >&2
         exit 1
