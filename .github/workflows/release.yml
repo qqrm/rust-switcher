@@ -1,264 +1,220 @@
-# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Release
-run-name: "Release (bump=${{ inputs.bump }})"
 
 on:
+  push:
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
-      bump:
-        description: Version bump type
-        type: choice
+      tag:
+        description: "Existing tag (e.g. v1.2.3) to build release from when manually triggered."
         required: true
-        default: patch
-        options: [patch, minor, major]
+        type: string
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
-  group: release
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  PACKAGE_NAME: rust-switcher
+  APP_NAME: rust-switcher
+  TARGET_WINDOWS: x86_64-pc-windows-msvc
 
 jobs:
-  prepare_release:
-    name: Step 1 - bump via PR to dev, merge dev -> main, tag main
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout code (tag)
+        uses: actions/checkout@v4.3.1
+        with:
+          fetch-depth: 1
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          targets: ${{ env.TARGET_WINDOWS }}
+
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2.8.2
+
+      - name: Verify version matches tag
+        shell: powershell
+        run: |
+          $tag = $env.RELEASE_TAG
+          if (-not $tag.StartsWith('v')) { throw "Release tag must start with 'v' (got: $tag)" }
+          $tagVersion = $tag.Substring(1)
+
+          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $pkg = $meta.packages | Where-Object { $_.name -eq $env.APP_NAME } | Select-Object -First 1
+          if (-not $pkg) { throw "Package '$env.APP_NAME' not found in cargo metadata" }
+
+          if ($pkg.version -ne $tagVersion) {
+            throw "Version mismatch: tag=$tagVersion, Cargo.toml=$($pkg.version). Fix Cargo.toml version before tagging."
+          }
+
+      - name: cargo fmt (check)
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --all-features --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ env.TARGET_WINDOWS }} --bin ${{ env.APP_NAME }}
+
+      - name: Package release (zip)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $outDir = Join-Path $PWD "dist"
+          if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
+          New-Item -ItemType Directory -Path $outDir | Out-Null
+
+          $exe = Join-Path $PWD "target/${{ env.TARGET_WINDOWS }}/release/${{ env.APP_NAME }}.exe"
+          if (-not (Test-Path $exe)) { throw "Expected binary not found: $exe" }
+
+          Copy-Item $exe (Join-Path $outDir "${{ env.APP_NAME }}.exe")
+          if (Test-Path "README.md") { Copy-Item "README.md" $outDir }
+          if (Test-Path "LICENSE") { Copy-Item "LICENSE" $outDir }
+
+          $zipName = "${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-${{ env.TARGET_WINDOWS }}.zip"
+          if (Test-Path $zipName) { Remove-Item -Force $zipName }
+          Compress-Archive -Path (Join-Path $outDir '*') -DestinationPath $zipName
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: windows-${{ env.TARGET_WINDOWS }}
+          path: "${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-${{ env.TARGET_WINDOWS }}.zip"
+          if-no-files-found: error
+
+  github-release:
+    name: Create GitHub Release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.3.0
+        with:
+          path: ./artifacts
+
+      - name: Generate checksums (SHA256SUMS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          find . -type f -maxdepth 2 -name "*.zip" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+
+      - name: Create / Update GitHub Release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/**/${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-*.zip
+            artifacts/SHA256SUMS
+
+  publish-crates-io:
+    name: Publish to crates.io (Trusted Publishing)
+    needs: github-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
-    outputs:
-      tag: ${{ steps.bump.outputs.tag }}
-      version: ${{ steps.bump.outputs.version }}
-
-    steps:
-      - name: Verify dev branch
-        if: ${{ github.ref != 'refs/heads/dev' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Release workflow must be run on dev branch. Current ref: $GITHUB_REF" >&2
-          exit 1
-
-      - name: Checkout dev
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
-        with:
-          ref: dev
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
-          persist-credentials: false
-
-      - name: Install system deps
-        uses: ./.github/actions/install-ubuntu-packages
-        with:
-          packages: jq git curl ca-certificates gh
-
-      - name: Install Rust toolchain
-        uses: ./.github/actions/setup-rust
-        with:
-          toolchain-file: rust-toolchain.toml
-          profile: minimal
-          extra-components: rustfmt clippy
-
-      - name: Bump version, update lock, compute tag
-        id: bump
-        uses: ./.github/actions/bump-cargo-version
-        with:
-          bump: ${{ inputs.bump }}
-          package_name: ${{ env.PACKAGE_NAME }}
-
-      - name: Configure git identity
-        uses: ./.github/actions/git-config-bot
-
-      - name: Create bump branch and commit
-        id: bump_commit
-        uses: ./.github/actions/commit-version-bump
-        with:
-          tag: ${{ steps.bump.outputs.tag }}
-
-      - name: Push bump branch
-        id: push_bump
-        uses: ./.github/actions/push-branch
-        with:
-          repo_url: https://github.com/${{ github.repository }}.git
-          token: ${{ secrets.RELEASE_TOKEN }}
-          branch: ${{ steps.bump_commit.outputs.branch }}
-          delete_existing: 'true'
-
-      - name: Create PR bump branch -> dev
-        id: pr_bump
-        uses: ./.github/actions/gh-create-pr
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
-          base: dev
-          head: ${{ steps.bump_commit.outputs.branch }}
-          title: "release: ${{ steps.bump.outputs.tag }}"
-          body: ""
-
-      - name: Cleanup on PR creation failure
-        if: ${{ failure() && steps.push_bump.outcome == 'success' }}
-        shell: bash
-        env:
-          TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          BRANCH: ${{ steps.bump_commit.outputs.branch }}
-        run: |
-          set -euo pipefail
-          echo "[ERROR] PR creation failed, cleaning up branch: $BRANCH" >&2
-          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin --delete "$BRANCH" || true
-          echo "[INFO] Cleaned up remote branch"
-
-      - name: Wait for required checks on bump PR
-        uses: ./.github/actions/gh-pr-checks
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
-          pr_number: ${{ steps.pr_bump.outputs.number }}
-
-      - name: Merge bump PR into dev
-        uses: ./.github/actions/gh-pr-merge
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
-          pr_number: ${{ steps.pr_bump.outputs.number }}
-          method: squash
-          delete_branch: true
-          admin: false
-          subject: "release: ${{ steps.bump.outputs.tag }}"
-          body: ""
-
-      - name: Create PR dev -> main and merge
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          TAG: ${{ steps.bump.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          pr_number="$(gh pr list --base main --head dev --state open --json number --jq '.[0].number // empty')"
-          if [ -z "$pr_number" ]; then
-            pr_url="$(gh pr create --base main --head dev --title "release: $TAG" --body "")"
-            pr_number="$(echo "$pr_url" | sed -n 's#.*/pull/##p')"
-          fi
-
-          gh pr merge "$pr_number" --squash --admin --subject "release: $TAG" --body ""
-
-      - name: Tag main at merged commit and push tag
-        uses: ./.github/actions/tag-main-and-push
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
-          tag: ${{ steps.bump.outputs.tag }}
-
-      - name: Cleanup bump PR/branch on failure
-        if: ${{ failure() }}
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          PR_NUMBER: ${{ steps.pr_bump.outputs.number }}
-          BRANCH: ${{ steps.bump_commit.outputs.branch }}
-        run: |
-          set -euo pipefail
-
-          if [ -n "${PR_NUMBER:-}" ]; then
-            echo "[CLEANUP] Closing PR #${PR_NUMBER} (and deleting branch if possible)"
-            gh pr close "$PR_NUMBER" --delete-branch || true
-          fi
-
-          if [ -n "${BRANCH:-}" ]; then
-            echo "[CLEANUP] Deleting remote branch: ${BRANCH}"
-            git init -q tmp && cd tmp
-            git remote add origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-            git push origin --delete "$BRANCH" || true
-          fi
-
-  release_build_publish:
-    name: Step 2 - build Windows zip, publish GitHub Release, publish crates.io (tag ref)
-    runs-on: ubuntu-latest
-    needs: prepare_release
-    permissions:
-      contents: write
       id-token: write
-
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
-      - name: Checkout at tag
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+      - name: Checkout code (tag)
+        uses: actions/checkout@v4.3.1
         with:
-          ref: ${{ needs.prepare_release.outputs.tag }}
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
-          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ env.RELEASE_TAG }}
 
-      - name: Install system deps (zip, mingw)
-        uses: ./.github/actions/install-ubuntu-packages
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
         with:
-          packages: curl ca-certificates zip mingw-w64
+          toolchain: stable
 
-      - name: Install Rust toolchain
-        uses: ./.github/actions/setup-rust
-        with:
-          toolchain-file: rust-toolchain.toml
-          profile: minimal
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2.8.2
 
-      - name: Install Windows GNU target
+      - name: Verify version matches tag
         shell: bash
         run: |
           set -euo pipefail
-          rustup target add x86_64-pc-windows-gnu
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
 
-      - name: Build (locked, Windows GNU target)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo build -p rust-switcher --release --locked --target x86_64-pc-windows-gnu
+          app = os.environ["APP_NAME"]
+          tag = os.environ["RELEASE_TAG"]
+          if not tag.startswith("v"):
+              print(f"Release tag must start with 'v' (got: {tag})", file=sys.stderr)
+              sys.exit(1)
+          tag_version = tag[1:]
 
-      - name: Package Windows zip
-        id: package
-        uses: ./.github/actions/package-windows-zip
-        with:
-          version: ${{ needs.prepare_release.outputs.version }}
+          meta_raw = subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"], text=True)
+          meta = json.loads(meta_raw)
+          pkgs = [p for p in meta.get("packages", []) if p.get("name") == app]
+          if not pkgs:
+              print(f"Package '{app}' not found in cargo metadata", file=sys.stderr)
+              sys.exit(1)
+          cargo_version = pkgs[0].get("version")
 
-      - name: Publish GitHub Release (attach zip)
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
-          tag_name: ${{ needs.prepare_release.outputs.tag }}
-          name: ${{ needs.prepare_release.outputs.tag }}
-          files: |
-            ${{ steps.package.outputs.asset }}
-          fail_on_unmatched_files: true
+          if cargo_version != tag_version:
+              print(f"Version mismatch: tag={tag_version}, Cargo.toml={cargo_version}", file=sys.stderr)
+              sys.exit(1)
+          PY
 
-      - name: Authenticate to crates.io via OIDC (trusted publishing)
-        id: auth
-        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1
+      - name: Authenticate to crates.io (OIDC)
+        id: cratesio
+        uses: rust-lang/crates-io-auth-action@v1.0.3
 
-      - name: Publish to crates.io
-        id: publish
-        continue-on-error: true
+      - name: cargo publish (idempotent)
         shell: bash
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: |
-          set -euo pipefail
-          cargo publish --locked --no-verify
-
-      - name: Rollback GitHub Release and tag if publish failed
-        if: ${{ steps.publish.outcome != 'success' }}
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          TAG: ${{ needs.prepare_release.outputs.tag }}
-        shell: bash
+          CARGO_REGISTRY_TOKEN: ${{ steps.cratesio.outputs.token }}
         run: |
           set -euo pipefail
 
-          gh release delete "$TAG" -y || true
+          # This crate is Windows-only, so we publish without local verification.
+          # Make re-runs idempotent: if the version is already published, treat it as success.
+          set +e
+          output=$(cargo publish --locked --no-verify 2>&1)
+          status=$?
+          set -e
 
-          git init -q tmp && cd tmp
-          git remote add origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin ":refs/tags/$TAG" || true
+          echo "$output"
 
-          echo "crates.io publish failed, rolled back GitHub Release and tag: $TAG" >&2
-          exit 1
+          if [[ $status -eq 0 ]]; then
+            exit 0
+          fi
+
+          if echo "$output" | grep -qiE "already\s+uploaded|already\s+exists|previously\s+published"; then
+            echo "Crate version already published; skipping."
+            exit 0
+          fi
+
+          exit $status
