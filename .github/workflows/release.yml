@@ -149,6 +149,38 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           tag: ${{ steps.bump.outputs.tag }}
 
+      - name: Cleanup if Step 1 failed (close PR + delete branch/tag)
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          PR_NUMBER: ${{ steps.pr_bump.outputs.number }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          TAG: ${{ steps.bump.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Close PR and delete its branch if possible.
+          if [ -n "${PR_NUMBER:-}" ]; then
+            echo "[cleanup] closing PR #$PR_NUMBER"
+            gh pr close "$PR_NUMBER" --delete-branch || true
+          fi
+
+          # Best-effort remote cleanup (branch/tag), in case PR deletion didn't run.
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${REPO}"
+          git remote set-url origin "$remote" || true
+
+          if [ -n "${BRANCH:-}" ]; then
+            echo "[cleanup] deleting branch $BRANCH"
+            git push origin ":refs/heads/${BRANCH}" || true
+          fi
+
+          if [ -n "${TAG:-}" ]; then
+            echo "[cleanup] deleting tag $TAG"
+            git push origin ":refs/tags/${TAG}" || true
+          fi
+
   release_build_publish:
     name: Step 2 - build Windows zip, publish GitHub Release, publish crates.io (tag ref)
     runs-on: ubuntu-latest
@@ -169,7 +201,7 @@ jobs:
       - name: Install system deps (zip, mingw)
         uses: ./.github/actions/install-ubuntu-packages
         with:
-          packages: curl ca-certificates zip mingw-w64
+          packages: curl ca-certificates zip mingw-w64 gh
 
       - name: Install Rust toolchain
         uses: ./.github/actions/setup-rust
@@ -204,6 +236,27 @@ jobs:
           files: |
             ${{ steps.package.outputs.asset }}
           fail_on_unmatched_files: true
+
+      - name: Cleanup if GitHub release step failed (delete GitHub release + tag)
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          TAG: ${{ needs.prepare_release.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TAG:-}" ]; then
+            exit 0
+          fi
+
+          # Best-effort cleanup (ignore errors)
+          gh release delete "$TAG" -y --repo "$REPO" || true
+
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          git remote set-url origin "$remote" || true
+          git push origin ":refs/tags/$TAG" || true
 
       - name: Authenticate to crates.io via OIDC (trusted publishing)
         id: auth

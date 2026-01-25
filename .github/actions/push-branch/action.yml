@@ -1,113 +1,66 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: push-branch
-description: Create or update a remote branch with current workspace contents (retry-safe)
+description: Push current HEAD to a remote branch (no local commits)
 
 inputs:
   repo_url:
-    description: Repository URL (https://github.com/OWNER/REPO or ...git). If empty, uses current GITHUB_REPOSITORY.
+    description: Repository HTTPS URL. If empty, uses current repository.
     required: false
     default: ""
   token:
     description: GitHub token (PAT) with push permissions
     required: true
   branch:
-    description: Branch name to push
+    description: Branch name to push to
     required: true
-  commit_message:
-    description: Commit message
-    required: false
-    default: "chore: update"
   delete_existing:
     description: If true, delete remote branch before pushing
+    required: false
+    default: "false"
+  force:
+    description: If true, force push (uses --force-with-lease)
     required: false
     default: "false"
 
 runs:
   using: composite
   steps:
-    - name: Prepare remote URL with token
+    - name: Push HEAD to remote branch
       shell: bash
       env:
-        REPO_URL: ${{ inputs.repo_url }}
         TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.branch }}
+        REPO_URL_IN: ${{ inputs.repo_url }}
+        DELETE_EXISTING: ${{ inputs.delete_existing }}
+        FORCE: ${{ inputs.force }}
       run: |
         set -euo pipefail
 
-        if [ -z "${REPO_URL}" ]; then
-          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
+        if [ -z "${REPO_URL_IN}" ]; then
+          if [ -z "${GITHUB_REPOSITORY:-}" ]; then
+            echo "repo_url is empty and GITHUB_REPOSITORY is not set" >&2
+            exit 1
+          fi
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
+        else
+          REPO_URL="${REPO_URL_IN}"
         fi
 
-        if [[ "$REPO_URL" != https://* ]]; then
-          echo "repo_url must be https URL" >&2
+        if [[ "${REPO_URL}" != https://* ]]; then
+          echo "repo_url must be https URL (got: ${REPO_URL})" >&2
           exit 1
         fi
-        # Inject token into URL for git operations
-        echo "REMOTE_URL=${REPO_URL/https:\/\//https:\/\/x-access-token:${TOKEN}@}" >> "$GITHUB_ENV"
 
-    - name: Push branch with retry
-      shell: bash
-      env:
-        REPO_URL: ${{ env.REMOTE_URL }}
-        BRANCH: ${{ inputs.branch }}
-        COMMIT_MESSAGE: ${{ inputs.commit_message }}
-        DELETE_EXISTING: ${{ inputs.delete_existing }}
-      run: |
-        set -euo pipefail
+        REMOTE_URL="${REPO_URL/https:\/\//https:\/\/x-access-token:${TOKEN}@}"
 
-        # We clone into a temp dir so we always push a clean, isolated state.
-        # This avoids edge cases where the runner workspace has odd git state.
-        tmpdir="$(mktemp -d)"
-        trap 'rm -rf "$tmpdir"' EXIT
-
-        git clone --no-checkout "$REPO_URL" "$tmpdir/repo" >/dev/null 2>&1
-        cd "$tmpdir/repo"
-
-        git fetch origin "$BRANCH" --depth=1 || true
-        git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -B "$BRANCH"
-
-        # Copy working tree from the caller workspace into this clone.
-        rsync -a --delete --exclude='.git' "$GITHUB_WORKSPACE/" "./"
-
-        git status --porcelain || true
-
-        git add -A
-        if git diff --cached --quiet; then
-          echo "[INFO] Nothing to commit."
-        else
-          git commit -m "$COMMIT_MESSAGE"
-        fi
+        git remote set-url origin "$REMOTE_URL"
 
         if [ "${DELETE_EXISTING}" = "true" ]; then
-          echo "[INFO] Deleting remote branch origin/${BRANCH} (if exists)"
-          git push origin --delete "$BRANCH" || true
+          git push origin ":refs/heads/${BRANCH}" || true
         fi
 
-        attempt=1
-        max_attempts=5
-        while [ "$attempt" -le "$max_attempts" ]; do
-          echo "[INFO] Pushing branch (attempt ${attempt}/${max_attempts})..."
-
-          tmp_out="$(mktemp)"
-          set +e
-          git push origin "HEAD:${BRANCH}" 2>&1 | tee "$tmp_out"
-          push_rc="${PIPESTATUS[0]}"
-          set -e
-
-          if [ "$push_rc" -eq 0 ]; then
-            echo "[INFO] Push succeeded."
-            exit 0
-          fi
-
-          echo "[WARN] Push failed with exit code ${push_rc}. Output was:" >&2
-          sed 's/^/[PUSH] /' "$tmp_out" >&2
-
-          if [ "$attempt" -lt "$max_attempts" ]; then
-            sleep_time=$((2 ** attempt))
-            echo "[INFO] Retrying in ${sleep_time}s..."
-            sleep "$sleep_time"
-          fi
-          attempt=$((attempt + 1))
-        done
-
-        echo "[ERROR] Push failed after ${max_attempts} attempts." >&2
-        exit 1
+        if [ "${FORCE}" = "true" ]; then
+          git push origin "HEAD:refs/heads/${BRANCH}" --force-with-lease
+        else
+          git push origin "HEAD:refs/heads/${BRANCH}"
+        fi
