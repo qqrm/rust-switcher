@@ -4,8 +4,9 @@ description: Create or update a remote branch with current workspace contents (r
 
 inputs:
   repo_url:
-    description: Repository URL (https://github.com/OWNER/REPO.git)
-    required: true
+    description: Repository URL (https://github.com/OWNER/REPO or ...git). If empty, uses current GITHUB_REPOSITORY.
+    required: false
+    default: ""
   token:
     description: GitHub token (PAT) with push permissions
     required: true
@@ -31,6 +32,11 @@ runs:
         TOKEN: ${{ inputs.token }}
       run: |
         set -euo pipefail
+
+        if [ -z "${REPO_URL}" ]; then
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
+        fi
+
         if [[ "$REPO_URL" != https://* ]]; then
           echo "repo_url must be https URL" >&2
           exit 1

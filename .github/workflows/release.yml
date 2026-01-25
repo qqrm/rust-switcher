@@ -82,9 +82,10 @@ jobs:
         id: push_bump
         uses: ./.github/actions/push-branch
         with:
+          repo_url: https://github.com/${{ github.repository }}
           token: ${{ secrets.RELEASE_TOKEN }}
           branch: ${{ steps.bump_commit.outputs.branch }}
-          delete-existing: 'true'
+          delete_existing: 'true'
 
       - name: Create PR bump branch -> dev
         id: pr_bump
