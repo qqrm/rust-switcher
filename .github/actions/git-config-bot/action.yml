@@ -1,5 +1,3 @@
-# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
-# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
 name: Configure git identity (bot)
 description: Configure git user.name and user.email for CI commits
 inputs:
