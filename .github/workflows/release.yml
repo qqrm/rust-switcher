@@ -150,6 +150,30 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           tag: ${{ steps.bump.outputs.tag }}
 
+      - name: Cleanup bump PR/branch on failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          PR_NUMBER: ${{ steps.pr_bump.outputs.number }}
+          BRANCH: ${{ steps.bump_commit.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${PR_NUMBER:-}" ]; then
+            echo "[CLEANUP] Closing PR #${PR_NUMBER} (and deleting branch if possible)"
+            gh pr close "$PR_NUMBER" --delete-branch || true
+          fi
+
+          if [ -n "${BRANCH:-}" ]; then
+            echo "[CLEANUP] Deleting remote branch: ${BRANCH}"
+            git init -q tmp && cd tmp
+            git remote add origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git push origin --delete "$BRANCH" || true
+          fi
+
   release_build_publish:
     name: Step 2 - build Windows zip, publish GitHub Release, publish crates.io (tag ref)
     runs-on: ubuntu-latest

@@ -20,6 +20,14 @@ inputs:
     description: If true, delete remote branch before pushing
     required: false
     default: "false"
+  user_name:
+    description: git user.name used for the commit in the temporary clone
+    required: false
+    default: github-actions[bot]
+  user_email:
+    description: git user.email used for the commit in the temporary clone
+    required: false
+    default: 41898282+github-actions[bot]@users.noreply.github.com
 
 runs:
   using: composite
@@ -35,6 +43,7 @@ runs:
           echo "repo_url must be https URL" >&2
           exit 1
         fi
+
         # Inject token into URL for git operations
         echo "REMOTE_URL=${REPO_URL/https:\/\//https:\/\/x-access-token:${TOKEN}@}" >> "$GITHUB_ENV"
 
@@ -45,6 +54,8 @@ runs:
         BRANCH: ${{ inputs.branch }}
         COMMIT_MESSAGE: ${{ inputs.commit_message }}
         DELETE_EXISTING: ${{ inputs.delete_existing }}
+        USER_NAME: ${{ inputs.user_name }}
+        USER_EMAIL: ${{ inputs.user_email }}
       run: |
         set -euo pipefail
 
@@ -55,6 +66,10 @@ runs:
 
         git clone --no-checkout "$REPO_URL" "$tmpdir/repo" >/dev/null 2>&1
         cd "$tmpdir/repo"
+
+        # Ensure git identity exists for commits in this fresh clone.
+        git config user.name "$USER_NAME"
+        git config user.email "$USER_EMAIL"
 
         git fetch origin "$BRANCH" --depth=1 || true
         git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -B "$BRANCH"

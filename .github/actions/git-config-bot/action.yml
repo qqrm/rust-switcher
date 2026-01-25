@@ -13,9 +13,16 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Set git identity
+    - name: Set git identity (local + global)
       shell: bash
       run: |
         set -euo pipefail
+
+        # Global config is required because some actions (e.g. push-branch)
+        # commit in a fresh temporary clone.
+        git config --global user.name "${{ inputs.user_name }}"
+        git config --global user.email "${{ inputs.user_email }}"
+
+        # Local config keeps behavior consistent for the checked-out workspace.
         git config user.name "${{ inputs.user_name }}"
         git config user.email "${{ inputs.user_email }}"
