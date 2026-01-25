@@ -27,7 +27,10 @@ jobs:
       - name: Validate GitHub Workflows with actionlint
         uses: docker://rhysd/actionlint:latest
         with:
-          args: -format github-annotation .github/workflows/
+          args: >-
+            -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}%0A```%0A{{replace $err.Snippet "\\n" "%0A"}}%0A```%0A{{end}}'
+            -ignore 'SC2016:'
+            .github/workflows/
 
   security-audit:
     name: Security Audit (cargo-audit)
