@@ -1,8 +1,9 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-rem Build a review bundle ZIP from the current working tree (includes uncommitted changes).
-rem Excludes: .git, target
+rem Build bundle.zip from the current working tree (includes uncommitted changes).
+rem File list is produced by Git, so .gitignore is respected.
+rem Excludes: .git, target, and bundle.zip itself.
 
 for /f "usebackq delims=" %%R in (`git rev-parse --show-toplevel 2^>nul`) do set "REPO_ROOT=%%R"
 if "%REPO_ROOT%"=="" (
@@ -12,13 +13,7 @@ if "%REPO_ROOT%"=="" (
 
 pushd "%REPO_ROOT%" >nul
 
-for /f "usebackq delims=" %%H in (`git rev-parse --short HEAD 2^>nul`) do set "GIT_SHA=%%H"
-if "%GIT_SHA%"=="" set "GIT_SHA=unknown"
-
-for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd-HHmm'"`) do set "TS=%%T"
-
-rem Output name: rust-switcher-YYYY-MM-DD-HHMM-<sha>.zip
-set "OUT_NAME=rust-switcher-%TS%-%GIT_SHA%.zip"
+set "OUT_NAME=bundle.zip"
 
 if exist "%OUT_NAME%" del /f /q "%OUT_NAME%" >nul 2>&1
 
@@ -29,17 +24,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Add-Type -AssemblyName System.IO.Compression;" ^
   "Add-Type -AssemblyName System.IO.Compression.FileSystem;" ^
   "if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Force }" ^
+  "" ^
   "$zip = [System.IO.Compression.ZipFile]::Open($out, [System.IO.Compression.ZipArchiveMode]::Create);" ^
   "try {" ^
-  "  $files = Get-ChildItem -LiteralPath $root -Recurse -File -Force | Where-Object {" ^
-  "    $p = $_.FullName;" ^
-  "    $rel = $p.Substring($root.Length).TrimStart('\','/');" ^
-  "    ($rel -notmatch '^(?:\.git[\\/]|target[\\/])') -and ($rel -ne '%OUT_NAME%')" ^
-  "  };" ^
-  "  foreach ($f in $files) {" ^
-  "    $full = $f.FullName;" ^
-  "    $rel  = $full.Substring($root.Length).TrimStart('\','/');" ^
-  "    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $full, $rel, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null;" ^
+  "  $gitFiles = git -C $root ls-files -co --exclude-standard | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' };" ^
+  "  foreach ($rel in $gitFiles) {" ^
+  "    $relNorm = $rel -replace '/', '\\';" ^
+  "" ^
+  "    if ($relNorm -match '^(?:\.git\\\\|target\\\\)') { continue }" ^
+  "    if ($relNorm -ieq '%OUT_NAME%') { continue }" ^
+  "" ^
+  "    $full = Join-Path $root $relNorm;" ^
+  "    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }" ^
+  "" ^
+  "    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(" ^
+  "      $zip, $full, $relNorm, [System.IO.Compression.CompressionLevel]::Optimal" ^
+  "    ) | Out-Null;" ^
   "  }" ^
   "} finally { $zip.Dispose() }"
 
@@ -49,7 +49,33 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo OK: %OUT_NAME%
+rem Compute a cheap content hash (MD5) and rename the bundle as: bundle_<hash>.zip
+set "BUNDLE_HASH="
+for /f "usebackq delims=" %%H in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm MD5 -LiteralPath '%OUT_NAME%').Hash.Substring(0,8).ToLower()"`) do set "BUNDLE_HASH=%%H"
+
+if "%BUNDLE_HASH%"=="" (
+  echo ERROR: failed to compute bundle hash
+  popd >nul
+  exit /b 1
+)
+
+for %%A in ("%OUT_NAME%") do (
+  set "BASE=%%~nA"
+  set "EXT=%%~xA"
+)
+
+set "OUT_NAME_HASHED=%BASE%_%BUNDLE_HASH%%EXT%"
+
+if exist "%OUT_NAME_HASHED%" del /f /q "%OUT_NAME_HASHED%" >nul 2>&1
+move /y "%OUT_NAME%" "%OUT_NAME_HASHED%" >nul
+
+if errorlevel 1 (
+  echo ERROR: failed to rename bundle
+  popd >nul
+  exit /b 1
+)
+
+echo OK: %OUT_NAME_HASHED%
 
 popd >nul
 exit /b 0
