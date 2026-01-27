@@ -29,7 +29,7 @@ pub fn convert_ru_en_bidirectional(text: &str) -> String {
                 ch,
                 
                 '[' | ']' | ';' | '\'' | ',' | '.' | '`' | '{' | '}' | ':' | '"' | '<' | '>' | '~'
-                    | '?' | '/'
+                    | '?' | '/' | '&'
             )
     }
 
@@ -47,6 +47,7 @@ pub fn convert_ru_en_bidirectional(text: &str) -> String {
             // punctuation rules you requested
             ',' => '?',
             '.' => '/',
+            '?' => '&',
 
             'Й' => 'Q', 'Ц' => 'W', 'У' => 'E', 'К' => 'R', 'Е' => 'T', 'Н' => 'Y', 'Г' => 'U', 'Ш' => 'I', 'Щ' => 'O', 'З' => 'P',
             'Х' => '{', 'Ъ' => '}',
@@ -73,6 +74,7 @@ pub fn convert_ru_en_bidirectional(text: &str) -> String {
             // punctuation rules you requested
             '?' => ',',
             '/' => '.',
+            '&' => '?',
 
             'Q' => 'Й', 'W' => 'Ц', 'E' => 'У', 'R' => 'К', 'T' => 'Е', 'Y' => 'Н', 'U' => 'Г', 'I' => 'Ш', 'O' => 'Щ', 'P' => 'З',
             '{' => 'Х', '}' => 'Ъ',
