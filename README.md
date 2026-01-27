@@ -54,7 +54,7 @@ What these jobs do:
 * dev-long: fmt check, clippy, build (with debug tracing), run the app
 * release-long: fmt check, clippy, release build, run the app
 * test-long: fmt check, clippy, run tests
-* dushnota: максимально strict clippy
+* dushnota: strict clippy
 
 ## Logging (development only)
 
