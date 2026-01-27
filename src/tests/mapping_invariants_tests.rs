@@ -1,4 +1,6 @@
-use crate::domain::text::mapping::convert_ru_en_bidirectional;
+use crate::domain::text::mapping::{
+    ConversionDirection, convert_ru_en_bidirectional, convert_ru_en_with_direction,
+};
 
 const LATIN_BIJECTIVE: &str = "qwertyuiop[]asdfghjkl;'zxcvbnm,.`QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>~";
 
@@ -58,4 +60,16 @@ fn punctuation_rules_apply_only_in_en_to_ru_mode() {
 
     // Cyr dominates: ru_to_en, so '/' is not remapped by en_to_ru punctuation rule
     assert_eq!(convert_ru_en_bidirectional("/а"), "/f");
+}
+
+#[test]
+fn punctuation_only_respects_explicit_direction() {
+    assert_eq!(
+        convert_ru_en_with_direction("?", ConversionDirection::RuToEn),
+        "&"
+    );
+    assert_eq!(
+        convert_ru_en_with_direction("?", ConversionDirection::EnToRu),
+        ","
+    );
 }
