@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -30,7 +30,7 @@ jobs:
     permissions:
       contents: read
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout code (tag)
         uses: actions/checkout@v4.3.1
@@ -38,10 +38,10 @@ jobs:
           fetch-depth: 1
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Set up Rust
+      - name: Set up Rust (nightly)
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
           components: rustfmt, clippy
           targets: ${{ env.TARGET_WINDOWS }}
 
@@ -109,7 +109,7 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4.3.0
@@ -142,7 +142,7 @@ jobs:
       contents: read
       id-token: write
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout code (tag)
         uses: actions/checkout@v4.3.1
@@ -150,10 +150,10 @@ jobs:
           fetch-depth: 1
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Set up Rust
+      - name: Set up Rust (nightly)
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
 
       - name: Cache cargo builds
         uses: Swatinem/rust-cache@v2.8.2
@@ -163,10 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json
-          import os
-          import subprocess
-          import sys
+          import json, os, subprocess, sys
 
           app = os.environ["APP_NAME"]
           tag = os.environ["RELEASE_TAG"]
@@ -175,14 +172,17 @@ jobs:
               sys.exit(1)
           tag_version = tag[1:]
 
-          meta_raw = subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"], text=True)
+          meta_raw = subprocess.check_output(
+              ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+              text=True
+          )
           meta = json.loads(meta_raw)
           pkgs = [p for p in meta.get("packages", []) if p.get("name") == app]
           if not pkgs:
               print(f"Package '{app}' not found in cargo metadata", file=sys.stderr)
               sys.exit(1)
-          cargo_version = pkgs[0].get("version")
 
+          cargo_version = pkgs[0]["version"]
           if cargo_version != tag_version:
               print(f"Version mismatch: tag={tag_version}, Cargo.toml={cargo_version}", file=sys.stderr)
               sys.exit(1)
@@ -199,8 +199,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # This crate is Windows-only, so we publish without local verification.
-          # Make re-runs idempotent: if the version is already published, treat it as success.
           set +e
           output=$(cargo publish --locked --no-verify 2>&1)
           status=$?
