@@ -1,4 +1,6 @@
-use crate::domain::text::mapping::convert_ru_en_bidirectional;
+use crate::domain::text::mapping::{
+    ConversionDirection, convert_ru_en_bidirectional, convert_ru_en_with_direction,
+};
 
 const LATIN_BIJECTIVE: &str = "qwertyuiop[]asdfghjkl;'zxcvbnm,.`QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>~";
 
