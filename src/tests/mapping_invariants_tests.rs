@@ -63,13 +63,7 @@ fn punctuation_rules_apply_only_in_en_to_ru_mode() {
 }
 
 #[test]
-fn punctuation_only_respects_explicit_direction() {
-    assert_eq!(
-        convert_ru_en_with_direction("?", ConversionDirection::RuToEn),
-        "&"
-    );
-    assert_eq!(
-        convert_ru_en_with_direction("?", ConversionDirection::EnToRu),
-        ","
-    );
+fn ampersand_prefers_latin_direction_when_present() {
+    assert_eq!(convert_ru_en_bidirectional("a&"), "ф?");
+    assert_eq!(convert_ru_en_bidirectional("я?"), "z&");
 }

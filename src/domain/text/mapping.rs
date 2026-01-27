@@ -4,24 +4,25 @@ pub enum ConversionDirection {
     EnToRu,
 }
 
-fn is_cyrillic_letter(ch: char) -> bool {
-    matches!(ch, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё')
-}
+    #[rustfmt::skip]
+    fn is_latin(ch: char) -> bool {
+        ch.is_ascii_alphabetic()
+            || matches!(
+                ch,
+                
+                '[' | ']' | ';' | '\'' | ',' | '.' | '`' | '{' | '}' | ':' | '"' | '<' | '>' | '~'
+                    | '?' | '/' | '&'
+            )
+    }
 
 fn is_latin_letter(ch: char) -> bool {
     ch.is_ascii_alphabetic()
 }
 
-fn map_ru_to_en(ch: char) -> char {
-    #[rustfmt::skip]
-    match ch {
-        'й' => 'q', 'ц' => 'w', 'у' => 'e', 'к' => 'r', 'е' => 't', 'н' => 'y', 'г' => 'u', 'ш' => 'i', 'щ' => 'o', 'з' => 'p',
-        'х' => '[', 'ъ' => ']',
-        'ф' => 'a', 'ы' => 's', 'в' => 'd', 'а' => 'f', 'п' => 'g', 'р' => 'h', 'о' => 'j', 'л' => 'k', 'д' => 'l',
-        'ж' => ';', 'э' => '\'',
-        'я' => 'z', 'ч' => 'x', 'с' => 'c', 'м' => 'v', 'и' => 'b', 'т' => 'n', 'ь' => 'm',
-        'б' => ',', 'ю' => '.',
-        'ё' => '`',
+            // punctuation rules you requested
+            ',' => '?',
+            '.' => '/',
+            '?' => '&',
 
         // punctuation rules you requested
         ',' => '?',
@@ -50,10 +51,10 @@ fn map_en_to_ru(ch: char) -> char {
         ',' => 'б', '.' => 'ю',
         '`' => 'ё',
 
-        // punctuation rules you requested
-        '?' => ',',
-        '/' => '.',
-        '&' => '?',
+            // punctuation rules you requested
+            '?' => ',',
+            '/' => '.',
+            '&' => '?',
 
         'Q' => 'Й', 'W' => 'Ц', 'E' => 'У', 'R' => 'К', 'T' => 'Е', 'Y' => 'Н', 'U' => 'Г', 'I' => 'Ш', 'O' => 'Щ', 'P' => 'З',
         '{' => 'Х', '}' => 'Ъ',
