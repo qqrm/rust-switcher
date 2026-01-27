@@ -1,11 +1,11 @@
 use std::fmt::Write as _;
 
 use crate::config::{
-    Config,
     constants::{CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT},
+    raw_config::*,
 };
 
-pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
+pub fn find_duplicate_hotkey_sequences(config: &RawConfig) -> Option<String> {
     let sequences = [
         (CONVERT_LAST_WORD, &config.hotkey_convert_last_word_sequence),
         (PAUSE, &config.hotkey_pause_sequence),
@@ -54,12 +54,10 @@ pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
     }
 }
 
-impl Config {
+impl RawConfig {
     pub fn validate_hotkey_sequences(&self) -> Result<(), String> {
-        if let Some(error) = find_duplicate_hotkey_sequences(self) {
-            Err(error)
-        } else {
-            Ok(())
-        }
+        find_duplicate_hotkey_sequences(self)
+            .map(Err)
+            .unwrap_or(Ok(()))
     }
 }

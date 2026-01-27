@@ -91,10 +91,18 @@ fn register_one(hwnd: HWND, id: i32, hk: Option<config::Hotkey>) -> windows::cor
 pub fn register_from_config(hwnd: HWND, cfg: &config::Config) -> windows::core::Result<()> {
     unregister_all(hwnd)?;
 
-    register_one(hwnd, HK_CONVERT_LAST_WORD_ID, cfg.hotkey_convert_last_word)?;
-    register_one(hwnd, HK_PAUSE_TOGGLE_ID, cfg.hotkey_pause)?;
-    register_one(hwnd, HK_CONVERT_SELECTION_ID, cfg.hotkey_convert_selection)?;
-    register_one(hwnd, HK_SWITCH_LAYOUT_ID, cfg.hotkey_switch_layout)?;
+    register_one(
+        hwnd,
+        HK_CONVERT_LAST_WORD_ID,
+        cfg.hotkey_convert_last_word(),
+    )?;
+    register_one(hwnd, HK_PAUSE_TOGGLE_ID, cfg.hotkey_pause())?;
+    register_one(
+        hwnd,
+        HK_CONVERT_SELECTION_ID,
+        cfg.hotkey_convert_selection(),
+    )?;
+    register_one(hwnd, HK_SWITCH_LAYOUT_ID, cfg.hotkey_switch_layout())?;
 
     Ok(())
 }

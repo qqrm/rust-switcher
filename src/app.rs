@@ -41,10 +41,10 @@ pub struct HotkeyValues {
 impl HotkeyValues {
     pub fn from_config(cfg: &config::Config) -> Self {
         Self {
-            last_word: cfg.hotkey_convert_last_word,
-            pause: cfg.hotkey_pause,
-            selection: cfg.hotkey_convert_selection,
-            switch_layout: cfg.hotkey_switch_layout,
+            last_word: cfg.hotkey_convert_last_word(),
+            pause: cfg.hotkey_pause(),
+            selection: cfg.hotkey_convert_selection(),
+            switch_layout: cfg.hotkey_switch_layout(),
         }
     }
 
@@ -79,10 +79,10 @@ pub struct HotkeySequenceValues {
 impl HotkeySequenceValues {
     pub fn from_config(cfg: &config::Config) -> Self {
         Self {
-            last_word: cfg.hotkey_convert_last_word_sequence,
-            pause: cfg.hotkey_pause_sequence,
-            selection: cfg.hotkey_convert_selection_sequence,
-            switch_layout: cfg.hotkey_switch_layout_sequence,
+            last_word: cfg.hotkey_convert_last_word_sequence(),
+            pause: cfg.hotkey_pause_sequence(),
+            selection: cfg.hotkey_convert_selection_sequence(),
+            switch_layout: cfg.hotkey_switch_layout_sequence(),
         }
     }
 

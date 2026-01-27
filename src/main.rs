@@ -24,7 +24,7 @@ fn main() -> windows::core::Result<()> {
 
     let cfg_hidden = config::load()
         .ok()
-        .map(|c| c.start_minimized)
+        .map(|c| c.start_minimized())
         .unwrap_or(false);
 
     let start_hidden = autostart_hidden || cfg_hidden;

@@ -88,7 +88,7 @@ pub(crate) fn apply_theme_from_tray(hwnd: HWND, dark: bool) {
 
     // Persist only this setting, do not overwrite other pending UI edits.
     let mut cfg = config::load().unwrap_or_default();
-    cfg.theme_dark = dark;
+    cfg.set_theme_dark(dark);
 
     if let Err(e) = config::save(&cfg) {
         with_state_mut_do(hwnd, |state| {
@@ -113,44 +113,44 @@ fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::co
     helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms)?;
 
     refresh_autostart_checkbox(state)?;
-    helpers::set_checkbox(state.checkboxes.start_minimized, cfg.start_minimized);
-    helpers::set_checkbox(state.checkboxes.theme_dark, cfg.theme_dark);
+    helpers::set_checkbox(state.checkboxes.start_minimized, cfg.start_minimized());
+    helpers::set_checkbox(state.checkboxes.theme_dark, cfg.theme_dark());
 
     state.hotkey_values = crate::app::HotkeyValues::from_config(cfg);
     state.hotkey_sequence_values = crate::app::HotkeySequenceValues::from_config(cfg);
 
-    let last_word_text = if cfg.hotkey_convert_last_word_sequence.is_some() {
-        format_hotkey_sequence(cfg.hotkey_convert_last_word_sequence)
+    let last_word_text = if cfg.hotkey_convert_last_word_sequence().is_some() {
+        format_hotkey_sequence(cfg.hotkey_convert_last_word_sequence())
     } else {
-        format_hotkey(cfg.hotkey_convert_last_word)
+        format_hotkey(cfg.hotkey_convert_last_word())
     };
     set_hwnd_text(state.hotkeys.last_word, &last_word_text)?;
 
-    let pause_text = if cfg.hotkey_pause_sequence.is_some() {
-        format_hotkey_sequence(cfg.hotkey_pause_sequence)
+    let pause_text = if cfg.hotkey_pause_sequence().is_some() {
+        format_hotkey_sequence(cfg.hotkey_pause_sequence())
     } else {
-        format_hotkey(cfg.hotkey_pause)
+        format_hotkey(cfg.hotkey_pause())
     };
     set_hwnd_text(state.hotkeys.pause, &pause_text)?;
 
-    let selection_text = if cfg.hotkey_convert_selection_sequence.is_some() {
-        format_hotkey_sequence(cfg.hotkey_convert_selection_sequence)
+    let selection_text = if cfg.hotkey_convert_selection_sequence().is_some() {
+        format_hotkey_sequence(cfg.hotkey_convert_selection_sequence())
     } else {
-        format_hotkey(cfg.hotkey_convert_selection)
+        format_hotkey(cfg.hotkey_convert_selection())
     };
     set_hwnd_text(state.hotkeys.selection, &selection_text)?;
 
-    let switch_layout_text = if cfg.hotkey_switch_layout_sequence.is_some() {
-        format_hotkey_sequence(cfg.hotkey_switch_layout_sequence)
+    let switch_layout_text = if cfg.hotkey_switch_layout_sequence().is_some() {
+        format_hotkey_sequence(cfg.hotkey_switch_layout_sequence())
     } else {
-        format_hotkey(cfg.hotkey_switch_layout)
+        format_hotkey(cfg.hotkey_switch_layout())
     };
     set_hwnd_text(state.hotkeys.switch_layout, &switch_layout_text)?;
 
     Ok(())
 }
 
-fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Config {
+fn read_ui_to_config(state: &AppState, mut cfg: config::RawConfig) -> config::RawConfig {
     cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
 
     cfg.start_minimized = helpers::get_checkbox(state.checkboxes.start_minimized);
@@ -200,7 +200,7 @@ fn apply_config_runtime(
     state.runtime_chord_capture = crate::app::RuntimeChordCapture::default();
     state.hotkey_sequence_progress = crate::app::HotkeySequenceProgress::default();
 
-    state.active_switch_layout_sequence = cfg.hotkey_switch_layout_sequence;
+    state.active_switch_layout_sequence = cfg.hotkey_switch_layout_sequence();
     state.switch_layout_waiting_second = false;
     state.switch_layout_first_tick_ms = 0;
 
@@ -214,7 +214,7 @@ fn apply_config_runtime(
 
     // ВАЖНО: зафиксировать тему в state до любых WM_CTLCOLOR*.
     // А само применение Visual Styles для чекбоксов делать отложенно на старте.
-    let dark = cfg.theme_dark;
+    let dark = cfg.theme_dark();
 
     state.current_theme_dark = dark;
 
@@ -280,8 +280,9 @@ pub fn handle_autostart_toggle(hwnd: HWND, state: &mut AppState) {
 /// On invalid config, this function notifies the user and falls back to defaults.
 /// This keeps the application operational even when the config file was edited manually.
 fn load_config_or_default(hwnd: HWND, state: &mut AppState) -> config::Config {
-    config::load()
-        .map_err(|e| {
+    match config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => {
             crate::platform::ui::error_notifier::push(
                 hwnd,
                 state,
@@ -289,20 +290,9 @@ fn load_config_or_default(hwnd: HWND, state: &mut AppState) -> config::Config {
                 "Failed to load config, using defaults",
                 &io_to_win(e),
             );
-        })
-        .ok()
-        .and_then(|cfg| match cfg.validate_hotkey_sequences() {
-            Ok(()) => Some(cfg),
-            Err(msg) => {
-                let user_text = msg.clone();
-                let source = io_to_win(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg));
-                crate::platform::ui::error_notifier::push(
-                    hwnd, state, T_CONFIG, &user_text, &source,
-                );
-                None
-            }
-        })
-        .unwrap_or_default()
+            config::Config::default()
+        }
+    }
 }
 
 fn on_create(hwnd: HWND) -> LRESULT {
@@ -520,20 +510,19 @@ impl ApplyConfigError {
 fn build_and_save_config_from_ui(
     state: &mut AppState,
 ) -> std::result::Result<config::Config, ApplyConfigError> {
-    // Apply must not depend on reading existing config file.
-    // Build a fresh config from UI and overwrite on disk.
-    let cfg = read_ui_to_config(state, config::Config::default());
+    let raw_config = read_ui_to_config(state, config::RawConfig::default());
 
-    config::save(&cfg).map_err(|e| {
-        let user_text = match e.kind() {
-            std::io::ErrorKind::InvalidInput => e.to_string(),
-            _ => "Failed to save config".to_string(),
-        };
+    let cfg = config::Config::try_from(raw_config).map_err(|e| ApplyConfigError {
+        user_text: e.to_string(),
+        source: io_to_win(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            e.to_string(),
+        )),
+    })?;
 
-        ApplyConfigError {
-            user_text,
-            source: io_to_win(e),
-        }
+    config::save(&cfg).map_err(|e| ApplyConfigError {
+        user_text: "Failed to save config".to_string(),
+        source: io_to_win(e),
     })?;
 
     Ok(cfg)

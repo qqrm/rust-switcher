@@ -7,7 +7,7 @@ use std::{
 
 use windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL;
 
-use crate::config::{self, Config, HotkeyChord, HotkeySequence};
+use crate::config::{self, Config, HotkeyChord, HotkeySequence, RawConfig};
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -72,28 +72,29 @@ impl Drop for AppDataOverride {
 fn config_save_and_load_roundtrip_via_appdata() {
     let _env = AppDataOverride::new("appdata");
 
-    let cfg = Config {
+    let raw_config = RawConfig {
         hotkey_pause_sequence: Some(seq_ctrl_a()),
         ..Default::default()
     };
 
-    config::save(&cfg).unwrap();
+    let config = Config::try_from(raw_config).unwrap();
+    config::save(&config).unwrap();
     let loaded = config::load().unwrap();
 
-    assert_eq!(loaded.hotkey_pause_sequence, cfg.hotkey_pause_sequence);
+    assert_eq!(
+        loaded.hotkey_pause_sequence(),
+        config.hotkey_pause_sequence()
+    );
 }
 
 #[test]
 fn config_save_rejects_invalid_sequences() {
-    let _env = AppDataOverride::new("appdata-invalid");
-
-    let cfg = Config {
+    let raw_config = RawConfig {
         hotkey_convert_last_word_sequence: Some(seq_ctrl_a()),
         hotkey_pause_sequence: Some(seq_ctrl_a()),
         ..Default::default()
     };
 
-    let err = config::save(&cfg).unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
-    assert!(err.to_string().contains("unique hotkey sequence"));
+    let err = Config::try_from(raw_config).unwrap_err();
+    assert!(err.contains("unique hotkey sequence"));
 }

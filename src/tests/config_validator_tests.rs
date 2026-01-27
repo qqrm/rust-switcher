@@ -1,7 +1,7 @@
 use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN};
 
 use crate::config::{
-    Config, HotkeyChord, HotkeySequence,
+    HotkeyChord, HotkeySequence, RawConfig,
     constants::{CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT},
 };
 
@@ -50,8 +50,8 @@ fn mk_cfg(
     pause: Option<HotkeySequence>,
     selection: Option<HotkeySequence>,
     layout: Option<HotkeySequence>,
-) -> Config {
-    Config {
+) -> RawConfig {
+    RawConfig {
         hotkey_convert_last_word_sequence: last_word,
         hotkey_pause_sequence: pause,
         hotkey_convert_selection_sequence: selection,
@@ -60,12 +60,12 @@ fn mk_cfg(
     }
 }
 
-fn assert_ok(cfg: Config) {
+fn assert_ok(cfg: RawConfig) {
     let res = cfg.validate_hotkey_sequences();
     assert!(res.is_ok(), "expected Ok(()), got Err: {res:?}");
 }
 
-fn assert_err(cfg: Config) -> String {
+fn assert_err(cfg: RawConfig) -> String {
     match cfg.validate_hotkey_sequences() {
         Ok(()) => panic!("expected Err, got Ok(())"),
         Err(e) => e,
