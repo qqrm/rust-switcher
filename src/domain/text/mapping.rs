@@ -4,7 +4,7 @@ pub enum ConversionDirection {
     EnToRu,
 }
 
-    #[rustfmt::skip]
+#[rustfmt::skip]
     fn is_latin(ch: char) -> bool {
         ch.is_ascii_alphabetic()
             || matches!(
@@ -19,15 +19,13 @@ fn is_latin_letter(ch: char) -> bool {
     ch.is_ascii_alphabetic()
 }
 
+fn map_ru_to_en(ch: char) -> char {
+    #[rustfmt::skip]
+    match ch {
             // punctuation rules you requested
             ',' => '?',
             '.' => '/',
             '?' => '&',
-
-        // punctuation rules you requested
-        ',' => '?',
-        '.' => '/',
-        '?' => '&',
 
         'Й' => 'Q', 'Ц' => 'W', 'У' => 'E', 'К' => 'R', 'Е' => 'T', 'Н' => 'Y', 'Г' => 'U', 'Ш' => 'I', 'Щ' => 'O', 'З' => 'P',
         'Х' => '{', 'Ъ' => '}',
