@@ -1,31 +1,33 @@
+// File: src/domain/text/mapping.rs
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ConversionDirection {
     RuToEn,
     EnToRu,
 }
 
-#[rustfmt::skip]
-    fn is_latin(ch: char) -> bool {
-        ch.is_ascii_alphabetic()
-            || matches!(
-                ch,
-                
-                '[' | ']' | ';' | '\'' | ',' | '.' | '`' | '{' | '}' | ':' | '"' | '<' | '>' | '~'
-                    | '?' | '/' | '&'
-            )
-    }
-
 fn is_latin_letter(ch: char) -> bool {
     ch.is_ascii_alphabetic()
+}
+
+fn is_cyrillic_letter(ch: char) -> bool {
+    matches!(ch, 'А'..='Я' | 'а'..='я' | 'Ё' | 'ё')
 }
 
 fn map_ru_to_en(ch: char) -> char {
     #[rustfmt::skip]
     match ch {
-            // punctuation rules you requested
-            ',' => '?',
-            '.' => '/',
-            '?' => '&',
+        // punctuation rules you requested (for . , ? keys)
+        ',' => '?',
+        '.' => '/',
+        '?' => '&',
+
+        // number row shift symbols (RU -> EN, same physical keys)
+        '"' => '@',   // RU Shift+2 -> EN Shift+2
+        '№' => '#',   // RU Shift+3 -> EN Shift+3
+        ';' => '$',   // RU Shift+4 -> EN Shift+4
+        ':' => '^',   // RU Shift+6 -> EN Shift+6
+        // RU Shift+7 is '?' -> '&' already covered above
 
         'Й' => 'Q', 'Ц' => 'W', 'У' => 'E', 'К' => 'R', 'Е' => 'T', 'Н' => 'Y', 'Г' => 'U', 'Ш' => 'I', 'Щ' => 'O', 'З' => 'P',
         'Х' => '{', 'Ъ' => '}',
@@ -41,6 +43,7 @@ fn map_ru_to_en(ch: char) -> char {
 fn map_en_to_ru(ch: char) -> char {
     #[rustfmt::skip]
     match ch {
+        // letters / punctuation keys (EN -> RU)
         'q' => 'й', 'w' => 'ц', 'e' => 'у', 'r' => 'к', 't' => 'е', 'y' => 'н', 'u' => 'г', 'i' => 'ш', 'o' => 'щ', 'p' => 'з',
         '[' => 'х', ']' => 'ъ',
         'a' => 'ф', 's' => 'ы', 'd' => 'в', 'f' => 'а', 'g' => 'п', 'h' => 'р', 'j' => 'о', 'k' => 'л', 'l' => 'д',
@@ -49,11 +52,19 @@ fn map_en_to_ru(ch: char) -> char {
         ',' => 'б', '.' => 'ю',
         '`' => 'ё',
 
-            // punctuation rules you requested
-            '?' => ',',
-            '/' => '.',
-            '&' => '?',
+        // punctuation rules you requested (for . , ? keys)
+        '?' => ',',
+        '/' => '.',
+        '&' => '?',
 
+        // number row shift symbols (EN -> RU, same physical keys)
+        '@' => '"',   // EN Shift+2 -> RU Shift+2
+        '#' => '№',   // EN Shift+3 -> RU Shift+3
+        '$' => ';',   // EN Shift+4 -> RU Shift+4
+        '^' => ':',   // EN Shift+6 -> RU Shift+6
+        // EN Shift+7 is '&' -> '?' already covered above
+
+        // shifted letters / punctuation keys (EN -> RU)
         'Q' => 'Й', 'W' => 'Ц', 'E' => 'У', 'R' => 'К', 'T' => 'Е', 'Y' => 'Н', 'U' => 'Г', 'I' => 'Ш', 'O' => 'Щ', 'P' => 'З',
         '{' => 'Х', '}' => 'Ъ',
         'A' => 'Ф', 'S' => 'Ы', 'D' => 'В', 'F' => 'А', 'G' => 'П', 'H' => 'Р', 'J' => 'О', 'K' => 'Л', 'L' => 'Д',
@@ -91,13 +102,6 @@ pub fn conversion_direction_for_text(text: &str) -> Option<ConversionDirection> 
 }
 
 /// Converts text between English QWERTY and Russian ЙЦУКЕН keyboard layouts in the given direction.
-///
-/// Complexity:
-/// - O(n) over Unicode scalar values of the input string.
-///
-/// Notes:
-/// - This is a layout conversion, not a transliteration.
-/// - Non ASCII and non Russian letters are preserved as is.
 pub fn convert_ru_en_with_direction(text: &str, direction: ConversionDirection) -> String {
     let mut out = String::with_capacity(text.len());
     match direction {
@@ -115,24 +119,9 @@ pub fn convert_ru_en_with_direction(text: &str, direction: ConversionDirection) 
     out
 }
 
-/// Converts text between English QWERTY and Russian ЙЦУКЕН keyboard layouts in both directions.
-///
-/// Behavior:
-/// - Counts Latin vs Cyrillic letters to choose a conversion direction.
-/// - If the counts are equal, defaults to RU -> EN.
-///
-/// Mapping coverage:
-/// - Letters a-z and A-Z.
-/// - Punctuation on the same physical keys: brackets, semicolon, quote, comma, dot, backtick.
-/// - Russian letters include ё and Ё.
-/// - Curly braces `{}` and quotes `"` are produced from shifted bracket/quote keys, matching typical layouts.
-///
-/// Complexity:
-/// - O(n) over Unicode scalar values of the input string.
-///
-/// Notes:
-/// - This is a layout conversion, not a transliteration.
-/// - Non ASCII and non Russian letters are preserved as is.
+/// Test-only helper: bidirectional convenience wrapper.
+/// Not part of the release binary API to avoid `dead_code` under `-D warnings`.
+#[cfg(test)]
 pub fn convert_ru_en_bidirectional(text: &str) -> String {
     let direction = conversion_direction_for_text(text).unwrap_or(ConversionDirection::RuToEn);
     convert_ru_en_with_direction(text, direction)
