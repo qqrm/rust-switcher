@@ -59,3 +59,15 @@ fn punctuation_rules_apply_only_in_en_to_ru_mode() {
     // Cyr dominates: ru_to_en, so '/' is not remapped by en_to_ru punctuation rule
     assert_eq!(convert_ru_en_bidirectional("/а"), "/f");
 }
+
+
+#[test]
+fn double_shift_linux_word() {
+    assert_eq!(convert_force("Linux"), "Линукс");
+    assert_eq!(convert_force("Линукс"), "Linux");
+}
+
+#[test]
+fn double_shift_mixed_word() {
+    assert_eq!(convert_force("Ghbdtn123"), "Привет123");
+}

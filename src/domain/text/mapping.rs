@@ -110,3 +110,16 @@ pub fn convert_ru_en_bidirectional(text: &str) -> String {
 
     out
 }
+
+
+pub fn convert_force(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if is_cyrillic_letter(ch) {
+            out.push(map_ru_to_en(ch));
+        } else {
+            out.push(map_en_to_ru(ch));
+        }
+    }
+    out
+}
