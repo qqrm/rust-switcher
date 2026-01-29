@@ -1,0 +1,86 @@
+name: Promote dev to main + tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.0.4). Leave empty to use Cargo.toml version from dev."
+        required: false
+      tag_prefix:
+        description: "Tag prefix"
+        required: false
+        default: "v"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-dev-to-main
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: dev
+
+      - name: Determine version + tag
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            version="${{ github.event.inputs.version }}"
+          else
+            version="$(grep -m1 '^version\s*=\s*"' Cargo.toml | sed -E 's/^version\s*=\s*"([^"]+)".*/\1/')"
+            if [ -z "$version" ]; then
+              echo "Failed to parse version from Cargo.toml" >&2
+              exit 1
+            fi
+          fi
+          tag="${{ github.event.inputs.tag_prefix }}${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Using version=$version tag=$tag"
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+
+      - name: Fetch main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+
+      - name: Merge dev into main and tag
+        env:
+          PAT: ${{ secrets.RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # switch to main tracked from origin
+          git checkout -B main origin/main
+
+          # merge dev with merge commit (safe, no ff assumptions)
+          git merge --no-ff origin/dev -m "Release ${{ steps.ver.outputs.tag }}"
+
+          tag="${{ steps.ver.outputs.tag }}"
+
+          # prevent accidental retag
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists" >&2
+            exit 1
+          fi
+
+          git tag -a "$tag" -m "$tag"
+
+          # push via PAT
+          git remote set-url origin "https://x-access-token:${PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin main
+          git push origin "$tag"
