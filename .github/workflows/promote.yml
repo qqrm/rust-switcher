@@ -20,67 +20,77 @@ concurrency:
 
 jobs:
   promote:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+
     steps:
       - name: Checkout dev
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: dev
+          # Use PAT so pushing to protected branches/tags works if required by repo settings
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Determine version + tag
         id: ver
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            version="${{ github.event.inputs.version }}"
-          else
-            version="$(grep -m1 '^version\s*=\s*"' Cargo.toml | sed -E 's/^version\s*=\s*"([^"]+)".*/\1/')"
-            if [ -z "$version" ]; then
-              echo "Failed to parse version from Cargo.toml" >&2
-              exit 1
-            fi
-          fi
-          tag="${{ github.event.inputs.tag_prefix }}${version}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Using version=$version tag=$tag"
+          $ErrorActionPreference = "Stop"
+
+          $inputVersion = "${{ github.event.inputs.version }}"
+          if (-not [string]::IsNullOrWhiteSpace($inputVersion)) {
+            $version = $inputVersion.Trim()
+          } else {
+            $cargoToml = Get-Content -Raw -Encoding UTF8 -Path "Cargo.toml"
+            $m = [regex]::Match($cargoToml, '(?m)^\s*version\s*=\s*"([^"]+)"\s*$')
+            if (-not $m.Success) {
+              throw "Failed to parse version from Cargo.toml"
+            }
+            $version = $m.Groups[1].Value
+          }
+
+          $tagPrefix = "${{ github.event.inputs.tag_prefix }}"
+          if ([string]::IsNullOrWhiteSpace($tagPrefix)) { $tagPrefix = "v" }
+
+          $tag = "$tagPrefix$version"
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          Write-Host "Using version=$version tag=$tag"
 
       - name: Configure git author
+        shell: pwsh
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
 
       - name: Fetch main
+        shell: pwsh
         run: |
-          set -euo pipefail
+          $ErrorActionPreference = "Stop"
           git fetch origin main
 
       - name: Merge dev into main and tag
-        env:
-          PAT: ${{ secrets.RELEASE_TOKEN }}
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
+          $ErrorActionPreference = "Stop"
 
-          # switch to main tracked from origin
+          # Switch to main tracked from origin
           git checkout -B main origin/main
 
-          # merge dev with merge commit (safe, no ff assumptions)
+          # Merge dev with merge commit (safe, no ff assumptions)
           git merge --no-ff origin/dev -m "Release ${{ steps.ver.outputs.tag }}"
 
-          tag="${{ steps.ver.outputs.tag }}"
+          $tag = "${{ steps.ver.outputs.tag }}"
 
-          # prevent accidental retag
-          if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "Tag $tag already exists" >&2
-            exit 1
-          fi
+          # Prevent accidental retag
+          git rev-parse $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Tag $tag already exists"
+          }
 
-          git tag -a "$tag" -m "$tag"
+          git tag -a $tag -m $tag
 
-          # push via PAT
-          git remote set-url origin "https://x-access-token:${PAT}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin main
-          git push origin "$tag"
+          git push origin $tag
