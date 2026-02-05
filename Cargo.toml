@@ -62,11 +62,12 @@ windows = { version = "0.62", features = ["Win32_System_SystemServices"] }
 
 [profile.release]
 opt-level = "z"
-lto = "fat"
+lto = true          # full LTO (обычно меньше бинарь, но медленнее)
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
 debug = 0
+incremental = false
 
 [dev-dependencies]
 tracing-test = "0.2.5"

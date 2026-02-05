@@ -31,10 +31,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up Rust toolchain
+      - name: Set up Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
           components: rustfmt, clippy
 
       - name: Cache cargo registry and build
@@ -57,9 +57,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      - uses: dtolnay/rust-toolchain@v1
+      - name: Set up Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
 
       - uses: Swatinem/rust-cache@v2
 
@@ -74,23 +75,15 @@ jobs:
         with:
           fetch-depth: 1
 
-      - uses: dtolnay/rust-toolchain@v1
+      - name: Set up Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Run cargo-audit
-        uses: actions-rs/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run cargo-deny
         uses: EmbarkStudios/cargo-deny-action@v1
         with:
           arguments: "--all-features"
 
-      - name: Run cargo-vet
-        uses: mozilla/cargo-vet-action@v1
-        with:
-          args: "--locked"

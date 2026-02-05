@@ -1,5 +1,6 @@
 use std::{ptr::null_mut, thread, time::Duration};
 
+use mapping::{ConversionDirection, conversion_direction_for_text, convert_ru_en_with_direction};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
     System::DataExchange::GetClipboardSequenceNumber,
@@ -158,7 +159,10 @@ fn convert_selection_from_text(
 ) -> Result<(), ConvertSelectionError> {
     let delay_ms = crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100);
 
-    let converted = convert_force(text);
+    let direction = conversion_direction_for_text(text)
+        .or_else(expected_direction_for_foreground_window)
+        .unwrap_or(ConversionDirection::RuToEn);
+    let converted = convert_ru_en_with_direction(text, direction);
     let converted_units = converted.encode_utf16().count();
 
     thread::sleep(Duration::from_millis(u64::from(delay_ms)));
@@ -219,6 +223,48 @@ fn current_layout_for_window(fg: HWND) -> HKL {
         let tid = GetWindowThreadProcessId(fg, None);
         GetKeyboardLayout(tid)
     }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum LayoutLanguage {
+    English,
+    Russian,
+}
+
+const LANG_ID_PRIMARY_MASK: u16 = 0x03ff;
+const LANG_ENGLISH: u16 = 0x0009;
+const LANG_RUSSIAN: u16 = 0x0019;
+
+fn lang_id_from_hkl(hkl: HKL) -> u16 {
+    (hkl.0 as usize & 0xffff) as u16
+}
+
+fn primary_lang_id(lang_id: u16) -> u16 {
+    lang_id & LANG_ID_PRIMARY_MASK
+}
+
+/// Returns the active language of the layout (based on LANGID in HKL).
+fn active_layout_language(hkl: HKL) -> Option<LayoutLanguage> {
+    match primary_lang_id(lang_id_from_hkl(hkl)) {
+        LANG_RUSSIAN => Some(LayoutLanguage::Russian),
+        LANG_ENGLISH => Some(LayoutLanguage::English),
+        _ => None,
+    }
+}
+
+/// Returns the expected conversion direction for a given keyboard layout.
+fn expected_direction_for_layout(hkl: HKL) -> Option<ConversionDirection> {
+    match active_layout_language(hkl) {
+        Some(LayoutLanguage::Russian) => Some(ConversionDirection::RuToEn),
+        Some(LayoutLanguage::English) => Some(ConversionDirection::EnToRu),
+        None => None,
+    }
+}
+
+pub(crate) fn expected_direction_for_foreground_window() -> Option<ConversionDirection> {
+    let fg = foreground_window()?;
+    let layout = current_layout_for_window(fg);
+    expected_direction_for_layout(layout)
 }
 
 /// Enumerates installed keyboard layouts for the current desktop.

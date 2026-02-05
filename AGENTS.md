@@ -120,3 +120,14 @@ cargo +nightly test test_name -- --nocapture
 ```
 
 Test modules cover: config I/O, config validation, hotkey formatting, keyboard sequences, character mapping invariants, ring buffer.
+
+## Agent Workflow Requirements
+
+When making changes in this repository, always:
+
+- Run formatting, linting, build, and tests before reporting results:
+  - `cargo +nightly fmt --check`
+  - `cargo +nightly clippy --all-targets --all-features -- -D warnings`
+  - `cargo +nightly build --features debug-tracing`
+  - `cargo +nightly test --locked`
+- Address and fix any findings from these checks before finalizing work.

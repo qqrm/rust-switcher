@@ -1,2 +1,12 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-Dwarnings"]
+
+[target.'cfg(all(windows, not(debug_assertions)))']
+rustflags = [
+    "-C",
+    "link-arg=/OPT:REF",
+    "-C",
+    "link-arg=/OPT:ICF",
+    "-C",
+    "link-arg=/INCREMENTAL:NO",
+]

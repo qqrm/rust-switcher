@@ -55,3 +55,9 @@ fn involution_on_common_samples() {
         assert_eq!(convert_force(&convert_force(s)), s);
     }
 }
+
+#[test]
+fn ampersand_prefers_latin_direction_when_present() {
+    assert_eq!(convert_ru_en_bidirectional("a&"), "ф?");
+    assert_eq!(convert_ru_en_bidirectional("я?"), "z&");
+}

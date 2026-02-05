@@ -13,7 +13,11 @@ use windows::Win32::UI::{
     Input::KeyboardAndMouse::VIRTUAL_KEY, WindowsAndMessaging::GetForegroundWindow,
 };
 
-use super::{mapping::convert_force, switch_keyboard_layout, wait_shift_released};
+use super::{
+    convert::expected_direction_for_foreground_window,
+    mapping::{ConversionDirection, conversion_direction_for_text, convert_ru_en_with_direction},
+    switch_keyboard_layout, wait_shift_released,
+};
 use crate::{
     app::AppState,
     conversion::input::{KeySequence, send_text_unicode},
@@ -28,6 +32,13 @@ const MIN_CONVERTED_CONFIDENCE: f64 = 0.70;
 const MIN_CONFIDENCE_GAIN: f64 = 0.25;
 
 static AUTOCONVERT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+fn convert_with_layout_fallback(text: &str) -> String {
+    let direction = conversion_direction_for_text(text)
+        .or_else(expected_direction_for_foreground_window)
+        .unwrap_or(ConversionDirection::RuToEn);
+    convert_ru_en_with_direction(text, direction)
+}
 
 pub fn convert_last_word(state: &mut AppState) {
     convert_last_word_impl(state, true);
@@ -277,7 +288,7 @@ fn autoconvert_candidate(p: &LastWordPayload) -> Result<String, SkipReason> {
 
     let (word_core, word_punct) = split_trailing_convertible_punct(&p.word);
 
-    let converted_core = convert_force(word_core);
+    let converted_core = convert_with_layout_fallback(word_core);
 
     let mut converted = String::with_capacity(converted_core.len() + word_punct.len());
     converted.push_str(&converted_core);
@@ -505,7 +516,7 @@ fn convert_last_word_impl(state: &mut AppState, switch_layout: bool) {
         return;
     }
 
-    let converted = convert_force(&payload.word);
+    let converted = convert_with_layout_fallback(&payload.word);
     tracing::trace!(%converted, "converted");
 
     if let Err(err) = apply_last_word_replacement(&payload, &converted) {
@@ -677,7 +688,7 @@ mod tests {
         let detector = detector_ru_en();
 
         let word = "привет";
-        let converted = convert_force(word);
+        let converted = convert_with_layout_fallback(word);
         assert_eq!(converted, "ghbdtn");
 
         let decision = should_autoconvert_word(&detector, word, &converted);
@@ -692,7 +703,7 @@ mod tests {
         let detector = detector_ru_en();
 
         let word = "ghbdtn";
-        let converted = convert_force(word);
+        let converted = convert_with_layout_fallback(word);
         assert_eq!(converted, "привет");
 
         match should_autoconvert_word(&detector, word, &converted) {
@@ -708,7 +719,7 @@ mod tests {
         let detector = detector_ru_en();
 
         let word = "world";
-        let converted = convert_force(word);
+        let converted = convert_with_layout_fallback(word);
         assert_ne!(converted, word);
 
         let decision = should_autoconvert_word(&detector, word, &converted);
@@ -723,7 +734,7 @@ mod tests {
         let detector = detector_ru_en();
 
         let word = "rfr"; // "как"
-        let converted = convert_force(word);
+        let converted = convert_with_layout_fallback(word);
         assert_eq!(converted, "как");
 
         let decision = should_autoconvert_word(&detector, word, &converted);
@@ -738,7 +749,7 @@ mod tests {
         let detector = detector_ru_en();
 
         let word = ";tklf"; // starts with punctuation, should fail script heuristics
-        let converted = convert_force(word);
+        let converted = convert_with_layout_fallback(word);
         assert_ne!(converted, word);
 
         let decision = should_autoconvert_word(&detector, word, &converted);
@@ -774,7 +785,7 @@ mod tests {
         let detector = detector_ru_en();
 
         let word = "hellp";
-        let converted = convert_force(word);
+        let converted = convert_with_layout_fallback(word);
         assert_ne!(converted, word);
 
         let decision = should_autoconvert_word(&detector, word, &converted);
@@ -786,7 +797,7 @@ mod tests {
         let detector = detector_ru_en();
 
         let word = "hjyxnmyuj";
-        let converted = convert_force(word);
+        let converted = convert_with_layout_fallback(word);
         assert_eq!(converted, "рончтьнго");
 
         match should_autoconvert_word(&detector, word, &converted) {
@@ -821,7 +832,7 @@ mod tests {
         ];
 
         for (word, should_convert) in cases {
-            let converted = convert_force(word);
+            let converted = convert_with_layout_fallback(word);
 
             let decision = should_autoconvert_word(&detector, word, &converted);
             match (should_convert, decision) {
@@ -847,7 +858,7 @@ mod tests {
         assert_eq!(p.word.as_str(), "ghbdtn,");
         assert_eq!(p.suffix.as_str(), "   \t");
 
-        let converted = convert_force(&p.word);
+        let converted = convert_with_layout_fallback(&p.word);
         let decision = should_autoconvert_word(&detector, &p.word, &converted);
 
         assert!(
