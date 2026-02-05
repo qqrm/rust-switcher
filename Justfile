@@ -9,13 +9,13 @@ default:
 # -----------------------------
 
 fmt:
-  cargo fmt --all -- --check
+  cargo fmt --check
 
 clippy:
-  cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+  cargo clippy --all-targets --all-features --locked -- -D warnings
 
 test:
-  cargo test --workspace --all-features --all-targets --locked
+  cargo test --locked
 
 check: fmt clippy test
 
@@ -23,34 +23,39 @@ check: fmt clippy test
 # Release helpers
 # -----------------------------
 
-# Dry-run: shows next version only.
-next bump="patch":
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump {{bump}} -DryRun
+bump VERSION:
+  $ErrorActionPreference = 'Stop'
+  $version = '{{VERSION}}'
+  if (-not $version) {
+    throw 'VERSION is required (example: just bump 1.2.3)'
+  }
+  $toml = Get-Content Cargo.toml -Raw
+  $updated = [regex]::Replace($toml, '(?m)^version\s*=\s*"[^"]+"', "version = \"$version\"", 1)
+  if ($toml -eq $updated) {
+    throw 'Failed to update version in Cargo.toml'
+  }
+  Set-Content -Path Cargo.toml -Value $updated
+  if (git ls-files --error-unmatch Cargo.lock) {
+    cargo update -p rust-switcher --precise $version
+  }
+  git add Cargo.toml
+  if (git ls-files --error-unmatch Cargo.lock) {
+    git add Cargo.lock
+  }
+  git commit -m "chore: bump version to $version"
 
-# Main entry: bump + checks + commit + push + PR
-release bump="patch":
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump {{bump}} -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
-
-# Aliases (no nesting, always explicit bump)
-release-patch:
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump patch -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
-
-release-minor:
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump minor -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
-
-release-major:
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump major -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr
-
-# Full auto: also tries merge + tag (may fail due to branch protection)
-release-full bump="patch":
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump {{bump}} -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
-
-# Full auto aliases (recommended)
-release-full-patch:
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump patch -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
-
-release-full-minor:
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump minor -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
-
-release-full-major:
-  pwsh -NoLogo -NoProfile -File ./scripts/release.ps1 -Bump major -Branch dev -Main main -Remote origin -Package rust-switcher -RunChecks -Commit -Push -CreatePr -MergePr -Tag -TagOnMain
+publish:
+  $ErrorActionPreference = 'Stop'
+  $branch = git rev-parse --abbrev-ref HEAD
+  if ($branch -ne 'dev') {
+    throw "Must be on dev branch (current: $branch)"
+  }
+  if (git status --porcelain) {
+    throw 'Working tree must be clean'
+  }
+  $version = rg -m 1 '^version\s*=\s*"(?<ver>[^"]+)"' Cargo.toml --replace '$ver'
+  if (-not $version) {
+    throw 'Unable to read version from Cargo.toml'
+  }
+  $prUrl = gh pr create --base main --head dev --title "Release v$version" --body "Release v$version" --json url -q '.url'
+  gh pr merge $prUrl --auto --squash

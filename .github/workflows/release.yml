@@ -1,218 +1,108 @@
-name: Release
+name: release
 
 on:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Existing tag (e.g. v1.2.3) to build release from when manually triggered."
-        required: true
-        type: string
 
 permissions:
-  contents: read
-
-concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-  cancel-in-progress: false
-
-env:
-  CARGO_TERM_COLOR: always
-  APP_NAME: rust-switcher
-  TARGET_WINDOWS: x86_64-pc-windows-msvc
+  contents: write
+  pull-requests: write
 
 jobs:
   build-windows:
-    name: Build (Windows)
     runs-on: windows-latest
-    permissions:
-      contents: read
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     steps:
-      - name: Checkout code (tag)
-        uses: actions/checkout@v4.3.1
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 1
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Set up Rust (nightly)
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: nightly
-          components: rustfmt, clippy
-          targets: ${{ env.TARGET_WINDOWS }}
-
-      - name: Cache cargo builds
-        uses: Swatinem/rust-cache@v2.8.2
-
-      - name: Verify version matches tag
-        shell: powershell
-        run: |
-          $tag = $env.RELEASE_TAG
-          if (-not $tag.StartsWith('v')) { throw "Release tag must start with 'v' (got: $tag)" }
-          $tagVersion = $tag.Substring(1)
-
-          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $pkg = $meta.packages | Where-Object { $_.name -eq $env.APP_NAME } | Select-Object -First 1
-          if (-not $pkg) { throw "Package '$env.APP_NAME' not found in cargo metadata" }
-
-          if ($pkg.version -ne $tagVersion) {
-            throw "Version mismatch: tag=$tagVersion, Cargo.toml=$($pkg.version). Fix Cargo.toml version before tagging."
-          }
-
-      - name: cargo fmt (check)
-        run: cargo fmt --all -- --check
-
-      - name: cargo clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-
-      - name: cargo test
-        run: cargo test --workspace --all-features --locked
-
-      - name: Build release binary
-        run: cargo build --release --locked --target ${{ env.TARGET_WINDOWS }} --bin ${{ env.APP_NAME }}
-
-      - name: Package release (zip)
-        shell: powershell
+          fetch-depth: 0
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+      - name: Build release
+        run: cargo build --release
+      - name: Package artifacts
+        id: package
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
-          $outDir = Join-Path $PWD "dist"
-          if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
-          New-Item -ItemType Directory -Path $outDir | Out-Null
-
-          $exe = Join-Path $PWD "target/${{ env.TARGET_WINDOWS }}/release/${{ env.APP_NAME }}.exe"
-          if (-not (Test-Path $exe)) { throw "Expected binary not found: $exe" }
-
-          Copy-Item $exe (Join-Path $outDir "${{ env.APP_NAME }}.exe")
-          if (Test-Path "README.md") { Copy-Item "README.md" $outDir }
-          if (Test-Path "LICENSE") { Copy-Item "LICENSE" $outDir }
-
-          $zipName = "${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-${{ env.TARGET_WINDOWS }}.zip"
-          if (Test-Path $zipName) { Remove-Item -Force $zipName }
-          Compress-Archive -Path (Join-Path $outDir '*') -DestinationPath $zipName
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: windows-${{ env.TARGET_WINDOWS }}
-          path: "${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-${{ env.TARGET_WINDOWS }}.zip"
-          if-no-files-found: error
-
-  github-release:
-    name: Create GitHub Release
-    needs: build-windows
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4.3.0
-        with:
-          path: ./artifacts
-
-      - name: Generate checksums (SHA256SUMS)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd artifacts
-          find . -type f -maxdepth 2 -name "*.zip" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
-
-      - name: Create / Update GitHub Release
-        uses: softprops/action-gh-release@v2.5.0
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: Release ${{ env.RELEASE_TAG }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            artifacts/**/${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-*.zip
-            artifacts/SHA256SUMS
-
-  publish-crates-io:
-    name: Publish to crates.io (Trusted Publishing)
-    needs: github-release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-    steps:
-      - name: Checkout code (tag)
-        uses: actions/checkout@v4.3.1
-        with:
-          fetch-depth: 1
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Set up Rust (nightly)
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: nightly
-
-      - name: Cache cargo builds
-        uses: Swatinem/rust-cache@v2.8.2
-
-      - name: Verify version matches tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json, os, subprocess, sys
-
-          app = os.environ["APP_NAME"]
-          tag = os.environ["RELEASE_TAG"]
-          if not tag.startswith("v"):
-              print(f"Release tag must start with 'v' (got: {tag})", file=sys.stderr)
-              sys.exit(1)
-          tag_version = tag[1:]
-
-          meta_raw = subprocess.check_output(
-              ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-              text=True
-          )
-          meta = json.loads(meta_raw)
-          pkgs = [p for p in meta.get("packages", []) if p.get("name") == app]
-          if not pkgs:
-              print(f"Package '{app}' not found in cargo metadata", file=sys.stderr)
-              sys.exit(1)
-
-          cargo_version = pkgs[0]["version"]
-          if cargo_version != tag_version:
-              print(f"Version mismatch: tag={tag_version}, Cargo.toml={cargo_version}", file=sys.stderr)
-              sys.exit(1)
-          PY
-
-      - name: Authenticate to crates.io (OIDC)
-        id: cratesio
-        uses: rust-lang/crates-io-auth-action@v1.0.3
-
-      - name: cargo publish (idempotent)
-        shell: bash
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $package = $metadata.packages | Where-Object { $_.name -eq 'rust-switcher' }
+          if (-not $package) {
+            throw 'Package rust-switcher not found in cargo metadata.'
+          }
+          $binTarget = $package.targets | Where-Object { $_.kind -contains 'bin' } | Select-Object -First 1
+          if (-not $binTarget) {
+            throw 'Binary target not found in cargo metadata.'
+          }
+          $binName = $binTarget.name
+          $exePath = "target\\release\\$binName.exe"
+          if (-not (Test-Path $exePath)) {
+            throw "Executable not found at $exePath"
+          }
+          $artifactsDir = "artifacts"
+          New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
+          Copy-Item $exePath -Destination $artifactsDir
+          $zipPath = Join-Path $artifactsDir "$binName-${{ github.ref_name }}-windows-x64.zip"
+          $zipItems = @($exePath)
+          foreach ($item in @('README.md', 'LICENSE')) {
+            if (Test-Path $item) {
+              $zipItems += $item
+            }
+          }
+          if (Test-Path "config.example.json") {
+            $zipItems += "config.example.json"
+          }
+          Compress-Archive -Path $zipItems -DestinationPath $zipPath -Force
+          $exeSha = Join-Path $artifactsDir "$binName.exe.sha256"
+          $zipSha = Join-Path $artifactsDir "$(Split-Path $zipPath -Leaf).sha256"
+          (certutil -hashfile $exePath SHA256)[1] | Set-Content -Path $exeSha
+          (certutil -hashfile $zipPath SHA256)[1] | Set-Content -Path $zipSha
+          "exe_path=$exePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      - name: Upload assets to GitHub Release
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.cratesio.outputs.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "${{ github.ref_name }}"
+          gh release upload $tag artifacts\* --clobber
+
+  publish-crates:
+    runs-on: ubuntu-latest
+    needs: build-windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
+
+  sync-main-to-dev:
+    runs-on: ubuntu-latest
+    needs: publish-crates
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Create sync PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
         run: |
           set -euo pipefail
-
-          set +e
-          output=$(cargo publish --locked --no-verify 2>&1)
-          status=$?
-          set -e
-
-          echo "$output"
-
-          if [[ $status -eq 0 ]]; then
+          tag="${GITHUB_REF_NAME}"
+          title="Sync main back to dev (${tag})"
+          existing=$(gh pr list --base dev --head main --state open --json url -q '.[0].url')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title"
+            gh pr merge "$existing" --auto --squash
             exit 0
           fi
-
-          if echo "$output" | grep -qiE "already\s+uploaded|already\s+exists|previously\s+published"; then
-            echo "Crate version already published; skipping."
-            exit 0
-          fi
-
-          exit $status
+          pr=$(gh pr create --base dev --head main --title "$title" --body "Sync main back to dev for ${tag}.")
+          gh pr merge "$pr" --auto --squash
