@@ -1,28 +1,37 @@
 set dotenv-load := true
 set shell := ["pwsh", "-NoLogo", "-NoProfile", "-Command"]
 
-default:
+# Show all available recipes.
+default: help
+
+# List all recipes with descriptions.
+help:
   @just --list
 
 # -----------------------------
 # Quality gates
 # -----------------------------
 
+# Check formatting.
 fmt:
   cargo fmt --check
 
+# Run clippy with CI flags.
 clippy:
   cargo clippy --all-targets --all-features --locked -- -D warnings
 
+# Run the test suite.
 test:
   cargo test --locked
 
+# Run all quality checks.
 check: fmt clippy test
 
 # -----------------------------
 # Release helpers
 # -----------------------------
 
+# Bump Cargo.toml (and Cargo.lock) version and commit.
 bump VERSION:
   $ErrorActionPreference = 'Stop'
   $version = '{{VERSION}}'
@@ -44,6 +53,7 @@ bump VERSION:
   }
   git commit -m "chore: bump version to $version"
 
+# Create and auto-merge a release PR from dev to main.
 publish:
   $ErrorActionPreference = 'Stop'
   $branch = git rev-parse --abbrev-ref HEAD
