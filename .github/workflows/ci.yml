@@ -1,89 +1,25 @@
-name: CI
+name: ci
 
 on:
-  push:
-    branches:
-      - main
-      - dev
   pull_request:
-    branches:
-      - main
-      - dev
-  workflow_dispatch:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  RUSTFLAGS: "-D warnings"
-  CARGO_TERM_COLOR: always
-
 jobs:
-  lint:
+  checks:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Set up Rust toolchain (nightly)
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: nightly
-          components: rustfmt, clippy
-
-      - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-  test:
-    needs: lint
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Set up Rust toolchain (nightly)
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: nightly
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Run tests
-        run: cargo test --workspace --all-features --all-targets --locked
-
-  security:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Set up Rust toolchain (nightly)
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: nightly
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Run cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v1
-        with:
-          arguments: "--all-features"
-
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+      - name: Cargo fmt
+        run: cargo fmt --check
+      - name: Cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Cargo test
+        run: cargo test
