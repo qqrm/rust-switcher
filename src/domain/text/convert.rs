@@ -1,6 +1,5 @@
 use std::{ptr::null_mut, thread, time::Duration};
 
-use mapping::convert_ru_en_bidirectional;
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
     System::DataExchange::GetClipboardSequenceNumber,
@@ -15,7 +14,6 @@ use windows::Win32::{
     },
 };
 
-use super::mapping;
 use crate::{
     app::AppState,
     conversion::{
@@ -25,6 +23,7 @@ use crate::{
             send_text_unicode,
         },
     },
+    domain::text::mapping::convert_force,
 };
 
 const MAX_SELECTION_CHARS: usize = 512;
@@ -159,7 +158,7 @@ fn convert_selection_from_text(
 ) -> Result<(), ConvertSelectionError> {
     let delay_ms = crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100);
 
-    let converted = convert_ru_en_bidirectional(text);
+    let converted = convert_force(text);
     let converted_units = converted.encode_utf16().count();
 
     thread::sleep(Duration::from_millis(u64::from(delay_ms)));

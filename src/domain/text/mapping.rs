@@ -1,125 +1,108 @@
-/// Converts text between English QWERTY and Russian ЙЦУКЕН keyboard layouts in both directions.
-///
-/// Behavior:
-/// - For each input Unicode scalar value (`char`), tries to map it as EN -> RU.
-/// - If EN -> RU mapping is not found, tries RU -> EN.
-/// - If neither mapping exists, the character is copied unchanged.
-///
-/// Mapping coverage:
-/// - Letters a-z and A-Z.
-/// - Punctuation on the same physical keys: brackets, semicolon, quote, comma, dot, backtick.
-/// - Russian letters include ё and Ё.
-/// - Curly braces `{}` and quotes `"` are produced from shifted bracket/quote keys, matching typical layouts.
-///
-/// Complexity:
-/// - O(n) over Unicode scalar values of the input string.
-///
-/// Notes:
-/// - This is a layout conversion, not a transliteration.
-/// - Non ASCII and non Russian letters are preserved as is.
-pub fn convert_ru_en_bidirectional(text: &str) -> String {
-    fn is_cyrillic(ch: char) -> bool {
-        matches!(ch, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё')
-    }
-
-    #[rustfmt::skip]
-    fn is_latin(ch: char) -> bool {
-        ch.is_ascii_alphabetic()
-            || matches!(
-                ch,
-                
-                '[' | ']' | ';' | '\'' | ',' | '.' | '`' | '{' | '}' | ':' | '"' | '<' | '>' | '~'
-                    | '?' | '/'
-            )
-    }
-
-    fn map_ru_to_en(ch: char) -> char {
-        #[rustfmt::skip]
-        match ch {
-            'й' => 'q', 'ц' => 'w', 'у' => 'e', 'к' => 'r', 'е' => 't', 'н' => 'y', 'г' => 'u', 'ш' => 'i', 'щ' => 'o', 'з' => 'p',
-            'х' => '[', 'ъ' => ']',
-            'ф' => 'a', 'ы' => 's', 'в' => 'd', 'а' => 'f', 'п' => 'g', 'р' => 'h', 'о' => 'j', 'л' => 'k', 'д' => 'l',
-            'ж' => ';', 'э' => '\'',
-            'я' => 'z', 'ч' => 'x', 'с' => 'c', 'м' => 'v', 'и' => 'b', 'т' => 'n', 'ь' => 'm',
-            'б' => ',', 'ю' => '.',
-            'ё' => '`',
-
-            // punctuation rules you requested
-            ',' => '?',
-            '.' => '/',
-
-            'Й' => 'Q', 'Ц' => 'W', 'У' => 'E', 'К' => 'R', 'Е' => 'T', 'Н' => 'Y', 'Г' => 'U', 'Ш' => 'I', 'Щ' => 'O', 'З' => 'P',
-            'Х' => '{', 'Ъ' => '}',
-            'Ф' => 'A', 'Ы' => 'S', 'В' => 'D', 'А' => 'F', 'П' => 'G', 'Р' => 'H', 'О' => 'J', 'Л' => 'K', 'Д' => 'L',
-            'Ж' => ':', 'Э' => '"',
-            'Я' => 'Z', 'Ч' => 'X', 'С' => 'C', 'М' => 'V', 'И' => 'B', 'Т' => 'N', 'Ь' => 'M',
-            'Б' => '<', 'Ю' => '>',
-            'Ё' => '~',
-            _ => ch,
-        }
-    }
-
-    fn map_en_to_ru(ch: char) -> char {
-        #[rustfmt::skip]
-        match ch {
-            'q' => 'й', 'w' => 'ц', 'e' => 'у', 'r' => 'к', 't' => 'е', 'y' => 'н', 'u' => 'г', 'i' => 'ш', 'o' => 'щ', 'p' => 'з',
-            '[' => 'х', ']' => 'ъ',
-            'a' => 'ф', 's' => 'ы', 'd' => 'в', 'f' => 'а', 'g' => 'п', 'h' => 'р', 'j' => 'о', 'k' => 'л', 'l' => 'д',
-            ';' => 'ж', '\'' => 'э',
-            'z' => 'я', 'x' => 'ч', 'c' => 'с', 'v' => 'м', 'b' => 'и', 'n' => 'т', 'm' => 'ь',
-            ',' => 'б', '.' => 'ю',
-            '`' => 'ё',
-
-            // punctuation rules you requested
-            '?' => ',',
-            '/' => '.',
-
-            'Q' => 'Й', 'W' => 'Ц', 'E' => 'У', 'R' => 'К', 'T' => 'Е', 'Y' => 'Н', 'U' => 'Г', 'I' => 'Ш', 'O' => 'Щ', 'P' => 'З',
-            '{' => 'Х', '}' => 'Ъ',
-            'A' => 'Ф', 'S' => 'Ы', 'D' => 'В', 'F' => 'А', 'G' => 'П', 'H' => 'Р', 'J' => 'О', 'K' => 'Л', 'L' => 'Д',
-            ':' => 'Ж', '"' => 'Э',
-            'Z' => 'Я', 'X' => 'Ч', 'C' => 'С', 'V' => 'М', 'B' => 'И', 'N' => 'Т', 'M' => 'Ь',
-            '<' => 'Б', '>' => 'Ю',
-            '~' => 'Ё',
-            _ => ch,
-        }
-    }
-
-    let mut cyr = 0usize;
-    let mut lat = 0usize;
-    for ch in text.chars() {
-        if is_cyrillic(ch) {
-            cyr += 1;
-        } else if is_latin(ch) {
-            lat += 1;
-        }
-    }
-
-    let ru_to_en = cyr >= lat;
-
-    let mut out = String::with_capacity(text.len());
-    if ru_to_en {
-        for ch in text.chars() {
-            out.push(map_ru_to_en(ch));
-        }
-    } else {
-        for ch in text.chars() {
-            out.push(map_en_to_ru(ch));
-        }
-    }
-
-    out
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ConversionDirection {
+    RuToEn,
+    EnToRu,
 }
 
+// Physical key inversion between:
+// EN (US QWERTY) and RU (ЙЦУКЕН).
+//
+// Important: direction is chosen ONCE per token/string, then applied to all chars.
+// This is required for punctuation/symbols to be reversible.
+const EN_UNSHIFT: &str = "`qwertyuiop[]asdfghjkl;'zxcvbnm,./";
+const RU_UNSHIFT: &str = "ёйцукенгшщзхъфывапролджэячсмитьбю.";
 
-pub fn convert_force(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        if is_cyrillic_letter(ch) {
-            out.push(map_ru_to_en(ch));
-        } else {
-            out.push(map_en_to_ru(ch));
+const EN_SHIFT: &str = "~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?";
+const RU_SHIFT: &str = "ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
+
+// Digit row (Shift+1..=Shift+=) differs on RU layout.
+const EN_DIGIT_SHIFT: &str = "!@#$%^&*()_+";
+const RU_DIGIT_SHIFT: &str = "!\"№;%:?*()_+";
+
+fn map_by_table(ch: char, from: &str, to: &str) -> Option<char> {
+    // Both strings are ASCII on EN side, RU side is UTF-8; we compare by chars.
+    let mut fi = from.chars();
+    let mut ti = to.chars();
+    loop {
+        match (fi.next(), ti.next()) {
+            (Some(f), Some(t)) => {
+                if f == ch {
+                    return Some(t);
+                }
+            }
+            _ => return None,
         }
     }
-    out
+}
+
+fn map_en_to_ru(ch: char) -> char {
+    // order matters: digit-shift first (contains '@', '#', '$', '^', '&')
+    if let Some(x) = map_by_table(ch, EN_DIGIT_SHIFT, RU_DIGIT_SHIFT) {
+        return x;
+    }
+    if let Some(x) = map_by_table(ch, EN_SHIFT, RU_SHIFT) {
+        return x;
+    }
+    if let Some(x) = map_by_table(ch, EN_UNSHIFT, RU_UNSHIFT) {
+        return x;
+    }
+    // keys identical / not handled
+    ch
+}
+
+fn map_ru_to_en(ch: char) -> char {
+    if let Some(x) = map_by_table(ch, RU_DIGIT_SHIFT, EN_DIGIT_SHIFT) {
+        return x;
+    }
+    if let Some(x) = map_by_table(ch, RU_SHIFT, EN_SHIFT) {
+        return x;
+    }
+    if let Some(x) = map_by_table(ch, RU_UNSHIFT, EN_UNSHIFT) {
+        return x;
+    }
+    ch
+}
+
+fn score_direction(s: &str) -> (usize, usize) {
+    let mut en_hits = 0usize;
+    let mut ru_hits = 0usize;
+
+    for ch in s.chars() {
+        let to_ru = map_en_to_ru(ch);
+        let to_en = map_ru_to_en(ch);
+
+        if to_ru != ch {
+            en_hits += 1;
+        }
+        if to_en != ch {
+            ru_hits += 1;
+        }
+    }
+
+    (en_hits, ru_hits)
+}
+
+pub fn guess_direction(s: &str) -> ConversionDirection {
+    let (en_hits, ru_hits) = score_direction(s);
+
+    if ru_hits > en_hits {
+        ConversionDirection::RuToEn
+    } else {
+        // tie -> default EN->RU (most common: typed on EN but wanted RU)
+        ConversionDirection::EnToRu
+    }
+}
+
+pub fn convert_ru_en_with_direction(input: &str, direction: ConversionDirection) -> String {
+    match direction {
+        ConversionDirection::RuToEn => input.chars().map(map_ru_to_en).collect(),
+        ConversionDirection::EnToRu => input.chars().map(map_en_to_ru).collect(),
+    }
+}
+
+// “Force” conversion used by manual convert and by autoconvert candidate generation.
+// It picks a direction ONCE for the whole string and converts all chars.
+pub fn convert_force(input: &str) -> String {
+    let dir = guess_direction(input);
+    convert_ru_en_with_direction(input, dir)
 }
