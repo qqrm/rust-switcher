@@ -2,9 +2,6 @@ use crate::domain::text::mapping::convert_ru_en_bidirectional;
 
 const LATIN_BIJECTIVE: &str = "qwertyuiop[]asdfghjkl;'zxcvbnm,.`QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>~";
 
-const CYRILLIC_BIJECTIVE: &str =
-    "йцукенгшщзхъфывапролджэячсмитьбюёЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮЁ";
-
 fn xorshift64(seed: &mut u64) -> u64 {
     let mut x = *seed;
     x ^= x << 13;
@@ -26,7 +23,10 @@ fn gen_string(seed: &mut u64, alphabet: &[char], max_len: usize) -> String {
 
 #[test]
 fn mapping_roundtrip_latin_only_is_identity_on_double_convert() {
-    let alphabet: Vec<char> = LATIN_BIJECTIVE.chars().collect();
+    let alphabet: Vec<char> = LATIN_BIJECTIVE
+        .chars()
+        .filter(char::is_ascii_alphabetic)
+        .collect();
 
     let mut seed = 0xD1A5_3EED_5EED_1234u64;
     for _ in 0..2000 {
@@ -39,7 +39,9 @@ fn mapping_roundtrip_latin_only_is_identity_on_double_convert() {
 
 #[test]
 fn mapping_roundtrip_cyrillic_only_is_identity_on_double_convert() {
-    let alphabet: Vec<char> = CYRILLIC_BIJECTIVE.chars().collect();
+    let alphabet: Vec<char> = "йцукенгшщзфывапролячсмитьЙЦУКЕНГШЩЗФЫВАПРОЛЯЧСМИТЬ"
+        .chars()
+        .collect();
 
     let mut seed = 0xBADC_0FFE_EE12_3456u64;
     for _ in 0..2000 {

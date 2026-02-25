@@ -3,6 +3,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
+#[cfg(windows)]
 use windows::Win32::UI::{
     Input::KeyboardAndMouse::{
         GetAsyncKeyState, GetKeyboardLayout, GetKeyboardState, MOD_ALT, MOD_CONTROL, ToUnicodeEx,
@@ -20,7 +21,9 @@ fn journal() -> &'static Mutex<InputJournal> {
     JOURNAL.get_or_init(|| Mutex::new(InputJournal::new(100)))
 }
 
+#[cfg(windows)]
 const LANG_ENGLISH_PRIMARY: u16 = 0x09;
+#[cfg(windows)]
 const LANG_RUSSIAN_PRIMARY: u16 = 0x19;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,6 +60,7 @@ struct InputJournal {
     cap_chars: usize,
     total_chars: usize,
     last_token_autoconverted: bool,
+    #[cfg(windows)]
     last_fg_hwnd: isize,
 }
 
@@ -67,10 +71,12 @@ impl InputJournal {
             cap_chars,
             total_chars: 0,
             last_token_autoconverted: false,
+            #[cfg(windows)]
             last_fg_hwnd: 0,
         }
     }
 
+    #[cfg(any(test, windows))]
     fn clear(&mut self) {
         self.runs.clear();
         self.total_chars = 0;
@@ -171,6 +177,7 @@ impl InputJournal {
         }
     }
 
+    #[cfg(any(test, windows))]
     fn backspace(&mut self) {
         let mut pop_last = false;
 
@@ -189,6 +196,7 @@ impl InputJournal {
         }
     }
 
+    #[cfg(windows)]
     fn invalidate_if_foreground_changed(&mut self) {
         let fg = unsafe { GetForegroundWindow() };
         let raw = fg.0 as isize;
@@ -209,10 +217,12 @@ impl InputJournal {
         }
     }
 
+    #[cfg(any(test, windows))]
     fn last_char(&self) -> Option<char> {
         self.runs.back()?.text.chars().last()
     }
 
+    #[cfg(any(test, windows))]
     fn prev_char_before_last(&self) -> Option<char> {
         let mut runs_it = self.runs.iter().rev();
         let last_run = runs_it.next()?;
@@ -259,12 +269,14 @@ impl InputJournal {
     }
 }
 
+#[cfg(windows)]
 #[derive(Debug)]
 struct DecodedText {
     text: String,
     layout: LayoutTag,
 }
 
+#[cfg(windows)]
 pub fn layout_tag_from_hkl(hkl_raw: isize) -> LayoutTag {
     if hkl_raw == 0 {
         return LayoutTag::Unknown;
@@ -280,6 +292,7 @@ pub fn layout_tag_from_hkl(hkl_raw: isize) -> LayoutTag {
     }
 }
 
+#[cfg(windows)]
 fn current_foreground_layout_tag() -> LayoutTag {
     let fg = unsafe { GetForegroundWindow() };
     if fg.0.is_null() {
@@ -297,6 +310,7 @@ pub fn mark_last_token_autoconverted() {
     }
 }
 
+#[cfg(any(test, windows))]
 pub fn last_token_autoconverted() -> bool {
     journal()
         .lock()
@@ -304,11 +318,13 @@ pub fn last_token_autoconverted() -> bool {
         .is_some_and(|j| j.last_token_autoconverted)
 }
 
+#[cfg(windows)]
 fn mods_ctrl_or_alt_down() -> bool {
     let mods = crate::platform::win::keyboard::mods::mods_now();
     (mods & (MOD_CONTROL.0 | MOD_ALT.0)) != 0
 }
 
+#[cfg(windows)]
 fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<DecodedText> {
     let fg = unsafe { GetForegroundWindow() };
     if fg.0.is_null() {
@@ -369,6 +385,7 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<DecodedTex
     Some(DecodedText { text: s, layout })
 }
 
+#[cfg(windows)]
 pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
     if kb.flags.contains(LLKHF_INJECTED) {
         return None;
@@ -456,6 +473,7 @@ pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
     journal().lock().ok()?.take_last_layout_run_with_suffix()
 }
 
+#[cfg(windows)]
 pub fn take_last_word_with_suffix() -> Option<(String, String)> {
     let (run, suffix_runs) = take_last_layout_run_with_suffix()?;
     let suffix: String = suffix_runs.into_iter().map(|r| r.text).collect();
@@ -495,12 +513,14 @@ pub fn runs_snapshot() -> Vec<InputRun> {
         .map_or_else(Vec::new, |j| j.runs.iter().cloned().collect())
 }
 
+#[cfg(any(test, windows))]
 pub fn invalidate() {
     if let Ok(mut j) = journal().lock() {
         j.clear();
     }
 }
 
+#[cfg(any(test, windows))]
 pub fn last_char_triggers_autoconvert() -> bool {
     let Ok(j) = journal().lock() else {
         return false;
