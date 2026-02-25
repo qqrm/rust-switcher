@@ -1,16 +1,26 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![feature(stmt_expr_attributes)]
 
+#[cfg(windows)]
 mod app;
+#[cfg(windows)]
 mod config;
+#[cfg(windows)]
 mod conversion;
+#[cfg(windows)]
 mod domain;
+#[cfg(windows)]
 mod helpers;
+#[cfg(windows)]
 mod input;
+#[cfg(windows)]
 mod input_journal;
+#[cfg(windows)]
 mod platform;
+#[cfg(windows)]
 mod utils;
 
+#[cfg(windows)]
 fn main() -> windows::core::Result<()> {
     utils::tracing::init_tracing();
     utils::helpers::init_app_user_model_id()?;
@@ -32,5 +42,12 @@ fn main() -> windows::core::Result<()> {
     platform::win::run(start_hidden)
 }
 
-#[cfg(test)]
+#[cfg(not(windows))]
+fn main() {
+    eprintln!(
+        "rust-switcher is a Windows-only binary. Linux CI should run `cargo test --lib --tests`."
+    );
+}
+
+#[cfg(all(test, windows))]
 mod tests;
