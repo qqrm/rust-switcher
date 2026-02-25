@@ -766,7 +766,7 @@ fn set_autoconvert_enabled_from_tray(
         format!("Status: paused.\nAuto convert: OFF.\nToggle: {hotkey_text}")
     };
 
-    if let Err(e) = crate::platform::win::tray::balloon_info(hwnd, "RustSwitcher", &body) {
+    if let Err(e) = crate::platform::win::tray::balloon_info(hwnd, "Rust Switcher", &body) {
         tracing::warn!(error = ?e, "tray balloon failed");
     }
 }
