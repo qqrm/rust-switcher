@@ -30,6 +30,7 @@ const ID_EXIT: u32 = 1001;
 const ID_SHOW_HIDE: u32 = 1002;
 const ID_AUTOCONVERT_TOGGLE: u32 = 1003;
 const ID_CHANGE_THEME: u32 = 1004;
+const TRAY_TOOLTIP: &str = "Rust Switcher";
 
 unsafe fn show_popup_menu_at_cursor(hwnd: HWND, hmenu: HMENU) -> u32 {
     let mut pt = POINT { x: 0, y: 0 };
@@ -125,7 +126,7 @@ unsafe fn apply_tray_identity(nid: &mut NOTIFYICONDATAW, hwnd: HWND) -> windows:
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
 
     nid.hIcon = unsafe { default_icon(hwnd) }?;
-    fill_wide(&mut nid.szTip, "RustSwitcher");
+    fill_wide(&mut nid.szTip, TRAY_TOOLTIP);
 
     Ok(())
 }
@@ -281,6 +282,7 @@ pub fn switch_tray_icon(hwnd: HWND, use_green: bool) -> windows::core::Result<()
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
         nid.uCallbackMessage = WM_APP_TRAY;
         nid.hIcon = icon;
+        fill_wide(&mut nid.szTip, TRAY_TOOLTIP);
 
         shell_notify(NIM_MODIFY, &nid, "switch_tray_icon")
     }
