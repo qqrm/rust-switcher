@@ -20,40 +20,173 @@ fn journal() -> &'static Mutex<InputJournal> {
     JOURNAL.get_or_init(|| Mutex::new(InputJournal::new(100)))
 }
 
+const LANG_ENGLISH_PRIMARY: u16 = 0x09;
+const LANG_RUSSIAN_PRIMARY: u16 = 0x19;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LayoutTag {
+    Ru,
+    En,
+    Other(u16),
+    Unknown,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RunOrigin {
+    Physical,
+    Programmatic,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RunKind {
+    Text,
+    Whitespace,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputRun {
+    pub text: String,
+    pub layout: LayoutTag,
+    pub origin: RunOrigin,
+    pub kind: RunKind,
+}
+
 #[derive(Debug, Default)]
 struct InputJournal {
-    cap: usize,
-    buf: VecDeque<char>,
+    runs: VecDeque<InputRun>,
+    cap_chars: usize,
+    total_chars: usize,
     last_token_autoconverted: bool,
     last_fg_hwnd: isize,
 }
 
 impl InputJournal {
-    fn new(cap: usize) -> Self {
+    fn new(cap_chars: usize) -> Self {
         Self {
-            cap,
-            buf: VecDeque::with_capacity(cap),
+            runs: VecDeque::new(),
+            cap_chars,
+            total_chars: 0,
             last_token_autoconverted: false,
             last_fg_hwnd: 0,
         }
     }
 
     fn clear(&mut self) {
-        self.buf.clear();
+        self.runs.clear();
+        self.total_chars = 0;
         self.last_token_autoconverted = false;
     }
 
-    fn push_str(&mut self, s: &str) {
-        for ch in s.chars() {
-            self.buf.push_back(ch);
+    fn append_segment(&mut self, text: &str, layout: LayoutTag, origin: RunOrigin, kind: RunKind) {
+        if text.is_empty() {
+            return;
         }
-        while self.buf.len() > self.cap {
-            let _ = self.buf.pop_front();
+
+        if let Some(last) = self.runs.back_mut()
+            && last.layout == layout
+            && last.origin == origin
+            && last.kind == kind
+        {
+            last.text.push_str(text);
+            self.total_chars += text.chars().count();
+            self.enforce_cap_chars();
+            return;
+        }
+
+        self.total_chars += text.chars().count();
+        self.runs.push_back(InputRun {
+            text: text.to_string(),
+            layout,
+            origin,
+            kind,
+        });
+        self.enforce_cap_chars();
+    }
+
+    fn push_text_internal(&mut self, text: &str, layout: LayoutTag, origin: RunOrigin) {
+        let mut segment = String::new();
+        let mut segment_kind: Option<RunKind> = None;
+
+        for ch in text.chars() {
+            let kind = if ch.is_whitespace() {
+                RunKind::Whitespace
+            } else {
+                RunKind::Text
+            };
+
+            match segment_kind {
+                Some(current) if current == kind => segment.push(ch),
+                Some(current) => {
+                    self.append_segment(&segment, layout.clone(), origin, current);
+                    segment.clear();
+                    segment.push(ch);
+                    segment_kind = Some(kind);
+                }
+                None => {
+                    segment.push(ch);
+                    segment_kind = Some(kind);
+                }
+            }
+        }
+
+        if let Some(kind) = segment_kind {
+            self.append_segment(&segment, layout, origin, kind);
+        }
+    }
+
+    fn push_run(&mut self, run: InputRun) {
+        self.append_segment(&run.text, run.layout, run.origin, run.kind);
+    }
+
+    fn push_runs(&mut self, runs: impl IntoIterator<Item = InputRun>) {
+        for run in runs {
+            self.push_run(run);
+        }
+    }
+
+    fn enforce_cap_chars(&mut self) {
+        while self.total_chars > self.cap_chars {
+            let mut remove_front_run = false;
+
+            if let Some(front) = self.runs.front_mut() {
+                if let Some((idx, _)) = front.text.char_indices().nth(1) {
+                    front.text.drain(..idx);
+                } else {
+                    front.text.clear();
+                    remove_front_run = true;
+                }
+                self.total_chars = self.total_chars.saturating_sub(1);
+
+                if front.text.is_empty() {
+                    remove_front_run = true;
+                }
+            } else {
+                self.total_chars = 0;
+                break;
+            }
+
+            if remove_front_run {
+                let _ = self.runs.pop_front();
+            }
         }
     }
 
     fn backspace(&mut self) {
-        let _ = self.buf.pop_back();
+        let mut pop_last = false;
+
+        if let Some(last) = self.runs.back_mut()
+            && let Some((idx, _)) = last.text.char_indices().last()
+        {
+            last.text.drain(idx..);
+            self.total_chars = self.total_chars.saturating_sub(1);
+            if last.text.is_empty() {
+                pop_last = true;
+            }
+        }
+
+        if pop_last {
+            let _ = self.runs.pop_back();
+        }
     }
 
     fn invalidate_if_foreground_changed(&mut self) {
@@ -75,6 +208,87 @@ impl InputJournal {
             self.last_fg_hwnd = raw;
         }
     }
+
+    fn last_char(&self) -> Option<char> {
+        self.runs.back()?.text.chars().last()
+    }
+
+    fn prev_char_before_last(&self) -> Option<char> {
+        let mut runs_it = self.runs.iter().rev();
+        let last_run = runs_it.next()?;
+
+        let mut chars = last_run.text.chars().rev();
+        let _ = chars.next()?;
+        if let Some(prev) = chars.next() {
+            return Some(prev);
+        }
+
+        for run in runs_it {
+            if let Some(ch) = run.text.chars().last() {
+                return Some(ch);
+            }
+        }
+
+        None
+    }
+
+    fn take_last_layout_run_with_suffix(&mut self) -> Option<(InputRun, Vec<InputRun>)> {
+        let mut suffix_runs: Vec<InputRun> = Vec::new();
+        while self
+            .runs
+            .back()
+            .is_some_and(|run| run.kind == RunKind::Whitespace)
+        {
+            let run = self.runs.pop_back()?;
+            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+            suffix_runs.push(run);
+        }
+
+        if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
+            while let Some(run) = suffix_runs.pop() {
+                self.total_chars += run.text.chars().count();
+                self.runs.push_back(run);
+            }
+            return None;
+        }
+
+        let run = self.runs.pop_back()?;
+        self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+        suffix_runs.reverse();
+        Some((run, suffix_runs))
+    }
+}
+
+#[derive(Debug)]
+struct DecodedText {
+    text: String,
+    layout: LayoutTag,
+}
+
+pub fn layout_tag_from_hkl(hkl_raw: isize) -> LayoutTag {
+    if hkl_raw == 0 {
+        return LayoutTag::Unknown;
+    }
+
+    let lang_id = (hkl_raw as usize & 0xFFFF) as u16;
+    let primary = lang_id & 0x03FF;
+
+    match primary {
+        LANG_ENGLISH_PRIMARY => LayoutTag::En,
+        LANG_RUSSIAN_PRIMARY => LayoutTag::Ru,
+        _ => LayoutTag::Other(lang_id),
+    }
+}
+
+fn current_foreground_layout_tag() -> LayoutTag {
+    let fg = unsafe { GetForegroundWindow() };
+    if fg.0.is_null() {
+        return LayoutTag::Unknown;
+    }
+
+    let tid = unsafe { GetWindowThreadProcessId(fg, None) };
+    let hkl = unsafe { GetKeyboardLayout(tid) };
+    layout_tag_from_hkl(hkl.0)
 }
 
 pub fn mark_last_token_autoconverted() {
@@ -95,7 +309,7 @@ fn mods_ctrl_or_alt_down() -> bool {
     (mods & (MOD_CONTROL.0 | MOD_ALT.0)) != 0
 }
 
-fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<String> {
+fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<DecodedText> {
     let fg = unsafe { GetForegroundWindow() };
     if fg.0.is_null() {
         return None;
@@ -103,6 +317,7 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<String> {
 
     let tid = unsafe { GetWindowThreadProcessId(fg, None) };
     let hkl = unsafe { GetKeyboardLayout(tid) };
+    let layout = layout_tag_from_hkl(hkl.0);
 
     let mut state = [0u8; 256];
     if unsafe { GetKeyboardState(&mut state) }.is_err() {
@@ -151,7 +366,7 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<String> {
         return None;
     }
 
-    Some(s)
+    Some(DecodedText { text: s, layout })
 }
 
 pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
@@ -165,7 +380,11 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
     enum JournalAction {
         Clear,
         Backspace,
-        Push(String),
+        PushText {
+            text: String,
+            layout: LayoutTag,
+            origin: RunOrigin,
+        },
     }
 
     let mut action: Option<JournalAction> = None;
@@ -176,12 +395,22 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
         | VK_END | VK_PRIOR | VK_NEXT => action = Some(JournalAction::Clear),
         VK_BACK => action = Some(JournalAction::Backspace),
         VK_RETURN => {
+            let layout = current_foreground_layout_tag();
             output = Some("\n".to_string());
-            action = Some(JournalAction::Push("\n".to_string()));
+            action = Some(JournalAction::PushText {
+                text: "\n".to_string(),
+                layout,
+                origin: RunOrigin::Physical,
+            });
         }
         VK_TAB => {
+            let layout = current_foreground_layout_tag();
             output = Some("\t".to_string());
-            action = Some(JournalAction::Push("\t".to_string()));
+            action = Some(JournalAction::PushText {
+                text: "\t".to_string(),
+                layout,
+                origin: RunOrigin::Physical,
+            });
         }
         _ => {}
     }
@@ -191,9 +420,13 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
     }
 
     if action.is_none() {
-        let s = decode_typed_text(kb, vk)?;
-        output = Some(s.clone());
-        action = Some(JournalAction::Push(s));
+        let decoded = decode_typed_text(kb, vk)?;
+        output = Some(decoded.text.clone());
+        action = Some(JournalAction::PushText {
+            text: decoded.text,
+            layout: decoded.layout,
+            origin: RunOrigin::Physical,
+        });
     }
 
     if let Ok(mut j) = journal().lock() {
@@ -202,11 +435,15 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
             match action {
                 JournalAction::Clear => j.clear(),
                 JournalAction::Backspace => j.backspace(),
-                JournalAction::Push(s) => {
-                    if s.chars().any(char::is_alphanumeric) {
+                JournalAction::PushText {
+                    text,
+                    layout,
+                    origin,
+                } => {
+                    if text.chars().any(char::is_alphanumeric) {
                         j.last_token_autoconverted = false;
                     }
-                    j.push_str(&s);
+                    j.push_text_internal(&text, layout, origin);
                 }
             }
         }
@@ -215,48 +452,47 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
     output
 }
 
+pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
+    journal().lock().ok()?.take_last_layout_run_with_suffix()
+}
+
 pub fn take_last_word_with_suffix() -> Option<(String, String)> {
-    let Ok(mut j) = journal().lock() else {
-        return None;
-    };
-
-    // Trailing whitespace is suffix (spaces, tabs, newlines, etc).
-    let mut suffix: Vec<char> = Vec::new();
-    while let Some(&ch) = j.buf.back() {
-        if ch.is_whitespace() {
-            suffix.push(j.buf.pop_back()?);
-        } else {
-            break;
-        }
-    }
-
-    // Token is the last contiguous run of non-whitespace characters.
-    let mut token: Vec<char> = Vec::new();
-    while let Some(&ch) = j.buf.back() {
-        if ch.is_whitespace() {
-            break;
-        }
-        token.push(j.buf.pop_back()?);
-    }
-
-    if token.is_empty() {
-        // Restore suffix if we didn't get a token.
-        while let Some(ch) = suffix.pop() {
-            j.buf.push_back(ch);
-        }
-        return None;
-    }
-
-    token.reverse();
-    suffix.reverse();
-
-    Some((token.into_iter().collect(), suffix.into_iter().collect()))
+    let (run, suffix_runs) = take_last_layout_run_with_suffix()?;
+    let suffix: String = suffix_runs.into_iter().map(|r| r.text).collect();
+    Some((run.text, suffix))
 }
 
 pub fn push_text(s: &str) {
     if let Ok(mut j) = journal().lock() {
-        j.push_str(s);
+        j.push_text_internal(s, LayoutTag::Unknown, RunOrigin::Programmatic);
     }
+}
+
+pub fn push_run(run: InputRun) {
+    if let Ok(mut j) = journal().lock() {
+        j.push_run(run);
+    }
+}
+
+pub fn push_runs(runs: impl IntoIterator<Item = InputRun>) {
+    if let Ok(mut j) = journal().lock() {
+        j.push_runs(runs);
+    }
+}
+
+#[cfg(test)]
+pub fn test_backspace() {
+    if let Ok(mut j) = journal().lock() {
+        j.backspace();
+    }
+}
+
+#[cfg(test)]
+pub fn runs_snapshot() -> Vec<InputRun> {
+    journal()
+        .lock()
+        .ok()
+        .map_or_else(Vec::new, |j| j.runs.iter().cloned().collect())
 }
 
 pub fn invalidate() {
@@ -270,31 +506,20 @@ pub fn last_char_triggers_autoconvert() -> bool {
         return false;
     };
 
-    let len = j.buf.len();
-    if len == 0 {
-        return false;
-    }
-
-    let Some(&last) = j.buf.back() else {
+    let Some(last) = j.last_char() else {
         return false;
     };
 
-    // Trigger on punctuation immediately following a non-whitespace char.
     if matches!(last, '.' | ',' | '!' | '?' | ';' | ':') {
-        if len < 2 {
-            return false;
-        }
-        let prev = j.buf[len - 2];
-        return !prev.is_whitespace();
+        return j
+            .prev_char_before_last()
+            .is_some_and(|prev| !prev.is_whitespace());
     }
 
-    // Trigger on the first whitespace after a non-whitespace run.
     if last.is_whitespace() {
-        if len < 2 {
-            return false;
-        }
-        let prev = j.buf[len - 2];
-        return !prev.is_whitespace();
+        return j
+            .prev_char_before_last()
+            .is_some_and(|prev| !prev.is_whitespace());
     }
 
     false

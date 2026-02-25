@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
 pub use crate::input::ring_buffer::{
-    mark_last_token_autoconverted, push_text, take_last_word_with_suffix,
+    InputRun, LayoutTag, RunKind, RunOrigin, mark_last_token_autoconverted, push_run, push_runs,
+    push_text, take_last_layout_run_with_suffix,
 };
