@@ -1,9 +1,9 @@
 #![feature(stmt_expr_attributes)]
 
 #[cfg(windows)]
-mod app;
+pub mod app;
 
-mod config;
+pub mod config;
 
 #[cfg(windows)]
 mod conversion;
