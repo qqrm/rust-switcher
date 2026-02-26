@@ -671,6 +671,7 @@ dependencies = [
  "confy",
  "embed-resource",
  "lingua",
+ "rust-switcher-core",
  "serde",
  "tracing",
  "tracing-appender",
@@ -678,6 +679,10 @@ dependencies = [
  "tracing-test",
  "windows",
 ]
+
+[[package]]
+name = "rust-switcher-core"
+version = "0.1.0"
 
 [[package]]
 name = "rustc_version"

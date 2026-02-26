@@ -1,3 +1,6 @@
+[workspace]
+members = ["crates/rust-switcher-core"]
+
 [package]
 name = "rust-switcher"
 version = "1.0.3"
@@ -12,6 +15,7 @@ keywords = ["windows", "winapi", "keyboard", "hotkey", "tray"]
 categories = ["gui", "os::windows-apis"]
 
 [dependencies]
+rust-switcher-core = { path = "crates/rust-switcher-core" }
 serde = { version = "1.0", features = ["derive"] }
 confy = "2.0"
 lingua = { version = "1.7", default-features = false, features = [
