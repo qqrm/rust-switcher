@@ -6,10 +6,9 @@ use std::{
 #[cfg(windows)]
 use windows::Win32::UI::{
     Input::KeyboardAndMouse::{
-        GetAsyncKeyState, GetKeyboardLayout, GetKeyboardState, HKL, MOD_ALT, MOD_CONTROL,
-        ToUnicodeEx, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME,
-        VK_INSERT, VK_LEFT, VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_SHIFT,
-        VK_TAB, VK_UP,
+        GetAsyncKeyState, GetKeyboardLayout, GetKeyboardState, HKL, ToUnicodeEx, VIRTUAL_KEY,
+        VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_LSHIFT,
+        VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_SHIFT, VK_TAB, VK_UP,
     },
     WindowsAndMessaging::{
         GetForegroundWindow, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
@@ -323,8 +322,11 @@ pub fn last_token_autoconverted() -> bool {
 
 #[cfg(windows)]
 fn mods_ctrl_or_alt_down() -> bool {
-    let mods = crate::platform::win::keyboard::mods::mods_now();
-    (mods & (MOD_CONTROL.0 | MOD_ALT.0)) != 0
+    // Keep this module independent from `crate::platform` so it can be built from the minimal lib target.
+    // VK_CONTROL = 0x11, VK_MENU (Alt) = 0x12.
+    let ctrl = unsafe { GetAsyncKeyState(0x11) }.cast_unsigned();
+    let alt = unsafe { GetAsyncKeyState(0x12) }.cast_unsigned();
+    (ctrl & 0x8000) != 0 || (alt & 0x8000) != 0
 }
 
 #[cfg(windows)]
