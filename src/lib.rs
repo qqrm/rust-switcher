@@ -1,26 +1,31 @@
-#![feature(stmt_expr_attributes)]
+// Library target is intentionally minimal and cross-platform.
+//
+// The Windows application lives in `src/main.rs` and declares its own module tree.
+// If we compile the Windows app modules here, `cargo check` / `cargo clippy --all-targets`
+// will build the library target first and hit `dead_code` cascades under `-D warnings`.
+//
+// The only code that belongs in the shared library right now is `rust-switcher-core`.
 
-#[cfg(windows)]
-pub mod app;
+pub use rust_switcher_core as core;
 
-pub mod config;
+// Compatibility shim for existing unit tests that still refer to
+// `crate::domain::text::mapping::*`.
+pub mod domain {
+    pub mod text {
+        pub mod mapping {
+            pub use rust_switcher_core::text::mapping::*;
+        }
+    }
+}
 
-#[cfg(windows)]
-mod conversion;
+#[path = "input/ring_buffer.rs"]
+pub mod ring_buffer;
 
-mod domain;
-
-#[cfg(windows)]
-mod helpers;
-
-mod input;
-mod input_journal;
-
-#[cfg(windows)]
-mod platform;
-
-#[cfg(windows)]
-mod utils;
+// Compatibility shim for unit tests that still refer to
+// `crate::input::ring_buffer::*`.
+pub mod input {
+    pub use super::ring_buffer;
+}
 
 #[cfg(test)]
 mod core_tests;
