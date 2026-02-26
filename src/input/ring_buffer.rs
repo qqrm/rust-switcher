@@ -109,6 +109,7 @@ impl InputJournal {
         self.enforce_cap_chars();
     }
 
+    #[cfg(any(test, windows))]
     fn push_text_internal(&mut self, text: &str, layout: LayoutTag, origin: RunOrigin) {
         let mut segment = String::new();
         let mut segment_kind: Option<RunKind> = None;
@@ -478,6 +479,7 @@ pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
     journal().lock().ok()?.take_last_layout_run_with_suffix()
 }
 
+#[cfg(test)]
 pub fn push_text(s: &str) {
     if let Ok(mut j) = journal().lock() {
         j.push_text_internal(s, LayoutTag::Unknown, RunOrigin::Programmatic);
