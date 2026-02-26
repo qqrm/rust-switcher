@@ -476,13 +476,6 @@ pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
     journal().lock().ok()?.take_last_layout_run_with_suffix()
 }
 
-#[cfg(windows)]
-pub fn take_last_word_with_suffix() -> Option<(String, String)> {
-    let (run, suffix_runs) = take_last_layout_run_with_suffix()?;
-    let suffix: String = suffix_runs.into_iter().map(|r| r.text).collect();
-    Some((run.text, suffix))
-}
-
 pub fn push_text(s: &str) {
     if let Ok(mut j) = journal().lock() {
         j.push_text_internal(s, LayoutTag::Unknown, RunOrigin::Programmatic);

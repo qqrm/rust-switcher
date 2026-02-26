@@ -1,29 +1,26 @@
 #![feature(stmt_expr_attributes)]
 
 #[cfg(windows)]
-pub mod app;
+mod app;
 
-pub mod config;
-
-#[cfg(windows)]
-pub mod conversion;
-
-pub mod domain;
+mod config;
 
 #[cfg(windows)]
-pub mod helpers;
+mod conversion;
 
-pub mod input;
-pub mod input_journal;
-
-#[cfg(windows)]
-pub mod platform;
+mod domain;
 
 #[cfg(windows)]
-pub mod utils;
+mod helpers;
+
+mod input;
+mod input_journal;
+
+#[cfg(windows)]
+mod platform;
+
+#[cfg(windows)]
+mod utils;
 
 #[cfg(test)]
 mod core_tests;
-
-#[cfg(all(test, windows))]
-mod tests;
