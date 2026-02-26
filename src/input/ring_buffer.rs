@@ -6,9 +6,10 @@ use std::{
 #[cfg(windows)]
 use windows::Win32::UI::{
     Input::KeyboardAndMouse::{
-        GetAsyncKeyState, GetKeyboardLayout, GetKeyboardState, MOD_ALT, MOD_CONTROL, ToUnicodeEx,
-        VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT,
-        VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_SHIFT, VK_TAB, VK_UP,
+        GetAsyncKeyState, GetKeyboardLayout, GetKeyboardState, HKL, MOD_ALT, MOD_CONTROL,
+        ToUnicodeEx, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME,
+        VK_INSERT, VK_LEFT, VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_SHIFT,
+        VK_TAB, VK_UP,
     },
     WindowsAndMessaging::{
         GetForegroundWindow, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
@@ -277,12 +278,14 @@ struct DecodedText {
 }
 
 #[cfg(windows)]
-pub fn layout_tag_from_hkl(hkl_raw: isize) -> LayoutTag {
+pub fn layout_tag_from_hkl(hkl: HKL) -> LayoutTag {
+    let hkl_raw = hkl.0 as usize;
+
     if hkl_raw == 0 {
         return LayoutTag::Unknown;
     }
 
-    let lang_id = (hkl_raw as usize & 0xFFFF) as u16;
+    let lang_id = (hkl_raw & 0xFFFF) as u16;
     let primary = lang_id & 0x03FF;
 
     match primary {
@@ -301,7 +304,7 @@ fn current_foreground_layout_tag() -> LayoutTag {
 
     let tid = unsafe { GetWindowThreadProcessId(fg, None) };
     let hkl = unsafe { GetKeyboardLayout(tid) };
-    layout_tag_from_hkl(hkl.0)
+    layout_tag_from_hkl(hkl)
 }
 
 pub fn mark_last_token_autoconverted() {
@@ -333,7 +336,7 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<DecodedTex
 
     let tid = unsafe { GetWindowThreadProcessId(fg, None) };
     let hkl = unsafe { GetKeyboardLayout(tid) };
-    let layout = layout_tag_from_hkl(hkl.0);
+    let layout = layout_tag_from_hkl(hkl);
 
     let mut state = [0u8; 256];
     if unsafe { GetKeyboardState(&mut state) }.is_err() {
