@@ -57,6 +57,12 @@ impl KeySequence {
     }
 }
 
+impl Default for KeySequence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for KeySequence {
     fn drop(&mut self) {
         for vk in self.pressed.drain(..).rev() {
