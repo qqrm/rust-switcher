@@ -665,7 +665,7 @@ fn handle_convert_smart(state: &mut AppState) {
     if crate::conversion::convert_selection_if_any(state) {
         return;
     }
-    crate::conversion::convert_last_word(state);
+    crate::conversion::convert_last_sequence(state);
 }
 
 #[cfg(test)]

@@ -85,7 +85,7 @@ This is the primary conversion action.
 
 Behavior:
 - If there is a non empty selection, it converts the selection.
-- Otherwise it converts last word using the input journal.
+- Otherwise it converts last sequence using the input journal.
 
 ### Convert selection
 
@@ -100,10 +100,10 @@ Algorithm (src/domain/text/convert.rs and clipboard helper module):
 
 This intentionally avoids paste via Ctrl+V to reduce interference with application specific paste behavior.
 
-### Convert last word
+### Convert last sequence
 
 Algorithm (src/domain/text/last_word.rs):
-- Uses the input journal tokenization to determine the last word.
+- Uses the input journal tokenization to determine the last sequence.
 - Sleep for autoconvert_delay_ms before conversion and replacement.
 - Applies an input based replacement strategy (backspace and Unicode injection via SendInput).
 - Clipboard is not used as the primary mechanism.

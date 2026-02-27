@@ -40,8 +40,14 @@ fn convert_with_layout_fallback(text: &str, layout: &LayoutTag) -> String {
     .unwrap_or(ConversionDirection::RuToEn);
     convert_ru_en_with_direction(text, direction)
 }
+pub fn convert_last_sequence(state: &mut AppState) {
+    convert_last_sequence_impl(state, true);
+}
+
+/// Backwards-compatible alias.
+#[allow(dead_code)]
 pub fn convert_last_word(state: &mut AppState) {
-    convert_last_word_impl(state, true);
+    convert_last_sequence(state);
 }
 pub fn autoconvert_last_word(state: &mut AppState) {
     if !foreground_window_alive() {
@@ -122,6 +128,30 @@ impl Drop for JournalRestore<'_> {
         }
         restore_journal_original(self.payload);
         tracing::trace!("autoconvert: journal restored");
+    }
+}
+
+struct JournalRestoreSequence<'a> {
+    payload: &'a LastSequencePayload,
+    committed: bool,
+}
+impl<'a> JournalRestoreSequence<'a> {
+    fn new(payload: &'a LastSequencePayload) -> Self {
+        Self {
+            payload,
+            committed: false,
+        }
+    }
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+impl Drop for JournalRestoreSequence<'_> {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        restore_journal_original_sequence(self.payload);
     }
 }
 #[derive(Copy, Clone, Debug)]
@@ -411,7 +441,7 @@ fn apply_last_word_replacement(p: &LastRunPayload, converted: &str) -> Result<()
     }
 }
 #[tracing::instrument(level = "trace", skip(state))]
-fn convert_last_word_impl(state: &mut AppState, switch_layout: bool) {
+fn convert_last_sequence_impl(state: &mut AppState, switch_layout: bool) {
     if !foreground_window_alive() {
         tracing::warn!("foreground window is null");
         return;
@@ -421,30 +451,31 @@ fn convert_last_word_impl(state: &mut AppState, switch_layout: bool) {
         return;
     }
     sleep_before_convert(state);
-    let Some(payload) = take_last_word_payload() else {
-        tracing::info!("journal: no last word");
+    let Some(payload) = take_last_sequence_payload() else {
+        tracing::info!("journal: no last sequence");
         return;
     };
-    let mut restore = JournalRestore::new(&payload);
-    if payload.suffix_has_newline {
-        tracing::trace!("suffix contains newline, skipping convert_last_word");
+    let mut restore = JournalRestoreSequence::new(&payload);
+    if payload.suffix_has_newline || payload.seq_has_newline {
+        tracing::trace!("newline present, skipping convert_last_sequence");
         return;
     }
-    let converted = convert_with_layout_fallback(&payload.run.text, &payload.run.layout);
+    let converted = convert_with_layout_fallback(&payload.seq_text, &payload.layout);
     tracing::trace!(%converted, "converted");
-    if let Err(err) = apply_last_word_replacement(&payload, &converted) {
-        tracing::warn!(error = %err.as_str(), "convert apply failed");
-        return;
-    }
-    update_journal(&payload, &converted);
-    restore.commit();
-    if switch_layout {
-        match switch_keyboard_layout() {
-            Ok(()) => tracing::trace!("layout switched"),
-            Err(e) => tracing::warn!(error = ?e, "layout switch failed"),
+    if apply_last_sequence_conversion(&payload, &converted) {
+        update_journal_sequence(&payload, &converted);
+        restore.commit();
+        if switch_layout {
+            match switch_keyboard_layout() {
+                Ok(()) => tracing::trace!("layout switched"),
+                Err(e) => tracing::warn!(error = ?e, "layout switch failed"),
+            }
         }
+    } else {
+        tracing::warn!("convert apply failed");
     }
 }
+
 fn foreground_window_alive() -> bool {
     let fg = unsafe { GetForegroundWindow() };
     !fg.0.is_null()
@@ -462,6 +493,19 @@ struct LastRunPayload {
     suffix_len: usize,
     suffix_spaces_only: bool,
     suffix_has_newline: bool,
+}
+
+struct LastSequencePayload {
+    runs: Vec<InputRun>,
+    layout: LayoutTag,
+    suffix_runs: Vec<InputRun>,
+    suffix_text: String,
+    seq_text: String,
+    seq_len: usize,
+    suffix_len: usize,
+    suffix_spaces_only: bool,
+    suffix_has_newline: bool,
+    seq_has_newline: bool,
 }
 fn join_suffix_text(suffix_runs: &[InputRun]) -> String {
     suffix_runs.iter().map(|run| run.text.as_str()).collect()
@@ -498,6 +542,55 @@ fn take_last_word_payload() -> Option<LastRunPayload> {
         suffix_has_newline,
     })
 }
+fn join_runs_text(runs: &[InputRun]) -> String {
+    runs.iter().map(|run| run.text.as_str()).collect()
+}
+
+fn take_last_sequence_payload() -> Option<LastSequencePayload> {
+    let (runs, suffix_runs) = crate::input_journal::take_last_layout_sequence_with_suffix()?;
+    let last = runs.last()?;
+    if last.kind != RunKind::Text {
+        return None;
+    }
+    let layout = last.layout.clone();
+    let seq_text = join_runs_text(&runs);
+    if seq_text.is_empty() {
+        return None;
+    }
+    let suffix_text = join_suffix_text(&suffix_runs);
+    let seq_len = seq_text.chars().count();
+    let suffix_len = suffix_text.chars().count();
+    let suffix_spaces_only =
+        !suffix_text.is_empty() && suffix_text.chars().all(|c| c == ' ' || c == '\t');
+    let suffix_has_newline = suffix_text.contains('\n') || suffix_text.contains('\r');
+    let seq_has_newline = seq_text.contains('\n') || seq_text.contains('\r');
+
+    tracing::trace!(
+        seq_text = %seq_text,
+        seq_layout = ?layout,
+        suffix_text = %suffix_text,
+        seq_len,
+        suffix_len,
+        suffix_spaces_only,
+        suffix_has_newline,
+        seq_has_newline,
+        "journal extracted sequence"
+    );
+
+    Some(LastSequencePayload {
+        runs,
+        layout,
+        suffix_runs,
+        suffix_text,
+        seq_text,
+        seq_len,
+        suffix_len,
+        suffix_spaces_only,
+        suffix_has_newline,
+        seq_has_newline,
+    })
+}
+
 fn apply_last_word_conversion(p: &LastRunPayload, converted: &str) -> bool {
     const MAX_TAPS: usize = 4096;
     let run_len = p.run_len.min(MAX_TAPS);
@@ -514,6 +607,23 @@ fn apply_last_word_conversion(p: &LastRunPayload, converted: &str) -> bool {
             && (p.suffix_text.is_empty() || send_text_unicode(&p.suffix_text))
     }
 }
+fn apply_last_sequence_conversion(p: &LastSequencePayload, converted: &str) -> bool {
+    const MAX_TAPS: usize = 4096;
+    let seq_len = p.seq_len.min(MAX_TAPS);
+    let suffix_len = p.suffix_len.min(MAX_TAPS);
+    if p.suffix_spaces_only {
+        move_caret_left(suffix_len)
+            && delete_with_backspace(seq_len)
+            && send_text_unicode(converted)
+            && move_caret_right(suffix_len)
+    } else {
+        let delete_count = p.seq_len.saturating_add(p.suffix_len).min(MAX_TAPS);
+        delete_with_backspace(delete_count)
+            && send_text_unicode(converted)
+            && (p.suffix_text.is_empty() || send_text_unicode(&p.suffix_text))
+    }
+}
+
 fn flipped_layout(layout: &LayoutTag) -> LayoutTag {
     match layout {
         LayoutTag::Ru => LayoutTag::En,
@@ -523,6 +633,21 @@ fn flipped_layout(layout: &LayoutTag) -> LayoutTag {
     }
 }
 /// Updates the input journal to match what was inserted.
+fn restore_journal_original_sequence(p: &LastSequencePayload) {
+    crate::input_journal::push_runs(p.runs.iter().cloned());
+    crate::input_journal::push_runs(p.suffix_runs.iter().cloned());
+    tracing::trace!("journal restored (original sequence metadata)");
+}
+
+fn update_journal_sequence(p: &LastSequencePayload, converted: &str) {
+    crate::input_journal::push_text_with_meta(
+        converted,
+        flipped_layout(&p.layout),
+        RunOrigin::Programmatic,
+    );
+    crate::input_journal::push_runs(p.suffix_runs.iter().cloned());
+    tracing::trace!("journal updated (sequence)");
+}
 fn restore_journal_original(p: &LastRunPayload) {
     crate::input_journal::push_run(p.run.clone());
     crate::input_journal::push_runs(p.suffix_runs.iter().cloned());
@@ -681,6 +806,83 @@ mod tests {
         assert_eq!(converted, "приветб");
         assert!(should_autoconvert_word(&detector, word, &converted).is_ok());
     }
+    #[test]
+    fn last_sequence_payload_spans_whitespace_and_uses_single_layout() {
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: "  ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+        ]);
+
+        let payload = take_last_sequence_payload().expect("sequence payload expected");
+        assert_eq!(payload.layout, LayoutTag::En);
+        assert_eq!(payload.seq_text, "ghbdtn rjynhjkm");
+        assert_eq!(payload.suffix_text, "  ");
+    }
+
+    #[test]
+    fn update_journal_sequence_preserves_whitespace_tokenization() {
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let payload = take_last_sequence_payload().expect("sequence payload expected");
+        update_journal_sequence(&payload, "привет школа");
+
+        let (runs, suffix) =
+            ring_buffer::take_last_layout_sequence_with_suffix().expect("seq expected");
+        assert!(suffix.is_empty());
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0].text, "привет");
+        assert_eq!(runs[0].kind, RunKind::Text);
+        assert_eq!(runs[0].origin, RunOrigin::Programmatic);
+        assert_eq!(runs[0].layout, LayoutTag::Ru);
+        assert_eq!(runs[1].text, " ");
+        assert_eq!(runs[1].kind, RunKind::Whitespace);
+        assert_eq!(runs[2].text, "школа");
+        assert_eq!(runs[2].kind, RunKind::Text);
+    }
+
     #[test]
     fn suffix_spaces_only_is_false_for_newline_suffix() {
         ring_buffer::invalidate();
