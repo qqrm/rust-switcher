@@ -268,6 +268,60 @@ impl InputJournal {
         suffix_runs.reverse();
         Some((run, suffix_runs))
     }
+
+    fn take_last_layout_sequence_with_suffix(&mut self) -> Option<(Vec<InputRun>, Vec<InputRun>)> {
+        let mut suffix_runs: Vec<InputRun> = Vec::new();
+        while self
+            .runs
+            .back()
+            .is_some_and(|run| run.kind == RunKind::Whitespace)
+        {
+            let run = self.runs.pop_back()?;
+            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+            suffix_runs.push(run);
+        }
+
+        if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
+            while let Some(run) = suffix_runs.pop() {
+                self.total_chars += run.text.chars().count();
+                self.runs.push_back(run);
+            }
+            return None;
+        }
+
+        let last = self.runs.back()?.clone();
+        // Convert only sequences produced by physical input to avoid re-converting injected text.
+        if last.origin != RunOrigin::Physical {
+            while let Some(run) = suffix_runs.pop() {
+                self.total_chars += run.text.chars().count();
+                self.runs.push_back(run);
+            }
+            return None;
+        }
+
+        let target_layout = last.layout.clone();
+        let mut seq_rev: Vec<InputRun> = Vec::new();
+        while let Some(run) = self.runs.back() {
+            if run.layout != target_layout || run.origin != RunOrigin::Physical {
+                break;
+            }
+            let run = self.runs.pop_back()?;
+            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+            seq_rev.push(run);
+        }
+
+        if seq_rev.is_empty() {
+            while let Some(run) = suffix_runs.pop() {
+                self.total_chars += run.text.chars().count();
+                self.runs.push_back(run);
+            }
+            return None;
+        }
+
+        seq_rev.reverse();
+        suffix_runs.reverse();
+        Some((seq_rev, suffix_runs))
+    }
 }
 
 #[cfg(windows)]
@@ -479,6 +533,13 @@ pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
     journal().lock().ok()?.take_last_layout_run_with_suffix()
 }
 
+pub fn take_last_layout_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<InputRun>)> {
+    journal()
+        .lock()
+        .ok()?
+        .take_last_layout_sequence_with_suffix()
+}
+
 #[cfg(test)]
 pub fn push_text(s: &str) {
     if let Ok(mut j) = journal().lock() {
@@ -495,6 +556,13 @@ pub fn push_run(run: InputRun) {
 pub fn push_runs(runs: impl IntoIterator<Item = InputRun>) {
     if let Ok(mut j) = journal().lock() {
         j.push_runs(runs);
+    }
+}
+
+#[cfg(any(test, windows))]
+pub fn push_text_with_meta(text: &str, layout: LayoutTag, origin: RunOrigin) {
+    if let Ok(mut j) = journal().lock() {
+        j.push_text_internal(text, layout, origin);
     }
 }
 

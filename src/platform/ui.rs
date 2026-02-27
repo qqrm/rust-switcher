@@ -324,7 +324,7 @@ fn create_hotkey_rows(
         hy,
         g.w_label,
         g.w_edit,
-        w!("Convert last word:"),
+        w!("Convert last sequence:"),
         Some(ControlId::HotkeyLastWord.hmenu()),
     )?;
     hy += 28;
