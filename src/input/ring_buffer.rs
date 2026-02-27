@@ -290,19 +290,11 @@ impl InputJournal {
         }
 
         let last = self.runs.back()?.clone();
-        // Convert only sequences produced by physical input to avoid re-converting injected text.
-        if last.origin != RunOrigin::Physical {
-            while let Some(run) = suffix_runs.pop() {
-                self.total_chars += run.text.chars().count();
-                self.runs.push_back(run);
-            }
-            return None;
-        }
-
         let target_layout = last.layout.clone();
+        let target_origin = last.origin;
         let mut seq_rev: Vec<InputRun> = Vec::new();
         while let Some(run) = self.runs.back() {
-            if run.layout != target_layout || run.origin != RunOrigin::Physical {
+            if run.layout != target_layout || run.origin != target_origin {
                 break;
             }
             let run = self.runs.pop_back()?;

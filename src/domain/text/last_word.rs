@@ -843,6 +843,87 @@ mod tests {
     }
 
     #[test]
+    fn manual_sequence_can_toggle_back_via_programmatic_origin() {
+        // Repro of the bug:
+        // - First manual convert pushes Programmatic runs.
+        // - Extractor must allow Programmatic-origin sequences, otherwise second convert cannot happen.
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        // First extraction (physical EN)
+        let p1 = take_last_sequence_payload().expect("sequence payload expected");
+        assert_eq!(p1.layout, LayoutTag::En);
+        assert_eq!(p1.seq_text, "ghbdtn rjynhjkm");
+
+        // Simulate manual conversion journal update (programmatic RU)
+        update_journal_sequence(&p1, "привет школа");
+
+        // Second extraction must succeed (programmatic RU), enabling toggle-back.
+        let p2 = take_last_sequence_payload()
+            .expect("sequence payload after programmatic update expected");
+        assert_eq!(p2.layout, LayoutTag::Ru);
+        assert_eq!(p2.seq_text, "привет школа");
+        assert!(p2.suffix_text.is_empty());
+    }
+
+    #[test]
+    fn manual_sequence_toggles_roundtrip_twice() {
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let p1 = take_last_sequence_payload().expect("first sequence payload expected");
+        let c1 = convert_with_layout_fallback(&p1.seq_text, &p1.layout);
+        assert_ne!(c1, p1.seq_text);
+        update_journal_sequence(&p1, &c1);
+
+        let p2 = take_last_sequence_payload().expect("second sequence payload expected");
+        let c2 = convert_with_layout_fallback(&p2.seq_text, &p2.layout);
+        update_journal_sequence(&p2, &c2);
+
+        let p3 = take_last_sequence_payload().expect("third sequence payload expected");
+        assert_eq!(p3.layout, LayoutTag::En);
+        assert_eq!(p3.seq_text, p1.seq_text);
+    }
+
+    #[test]
     fn update_journal_sequence_preserves_whitespace_tokenization() {
         ring_buffer::invalidate();
         ring_buffer::push_runs([
