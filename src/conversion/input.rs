@@ -1,6 +1,6 @@
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
-    VIRTUAL_KEY,
+    VIRTUAL_KEY, VK_CONTROL,
 };
 
 /// Virtual key code for the Left Arrow key.
@@ -17,6 +17,14 @@ const VK_RIGHT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x27);
 ///
 /// Used as a selection modifier.
 const VK_SHIFT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x10);
+
+/// Presses Ctrl, taps the provided virtual key, then releases Ctrl.
+///
+/// Returns `true` if all input events were successfully sent.
+pub fn send_ctrl_combo(vk: VIRTUAL_KEY) -> bool {
+    let mut seq = KeySequence::new();
+    seq.down(VK_CONTROL) && KeySequence::tap(vk)
+}
 
 /// A small RAII helper that tracks pressed keys and releases them on drop.
 ///

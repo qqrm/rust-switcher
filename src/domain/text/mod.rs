@@ -3,8 +3,6 @@ pub mod convert;
 #[cfg(windows)]
 pub mod last_word;
 pub mod mapping;
-#[cfg(windows)]
-mod selection_probe;
 
 #[cfg(windows)]
 pub use convert::{switch_keyboard_layout, wait_shift_released};
