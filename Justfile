@@ -33,25 +33,7 @@ check: fmt clippy test
 
 # Bump Cargo.toml (and Cargo.lock) version and commit.
 bump VERSION:
-	$ErrorActionPreference = 'Stop'
-	$version = '{{VERSION}}'
-	if (-not $version) {
-	throw 'VERSION is required (example: just bump 1.2.3)'
-	}
-	$toml = Get-Content Cargo.toml -Raw
-	$updated = [regex]::Replace($toml, '(?m)^version\s*=\s*"[^"]+"', "version = \"$version\"", 1)
-	if ($toml -eq $updated) {
-	throw 'Failed to update version in Cargo.toml'
-	}
-	Set-Content -Path Cargo.toml -Value $updated
-	if (git ls-files --error-unmatch Cargo.lock) {
-	cargo update -p rust-switcher --precise $version
-	}
-	git add Cargo.toml
-	if (git ls-files --error-unmatch Cargo.lock) {
-	git add Cargo.lock
-	}
-	git commit -m "chore: bump version to $version"
+	& { $ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true; $version='{{VERSION}}'; if (-not $version) { throw 'VERSION is required (example: just bump 1.2.3)' }; $toml=Get-Content Cargo.toml -Raw; $updated=[regex]::Replace($toml,'(?m)^version\s*=\s*"[^"]+"',"version = `"`$version`"`",1); if ($toml -eq $updated) { throw 'Failed to update version in Cargo.toml' }; Set-Content -Path Cargo.toml -Value $updated; if (git ls-files --error-unmatch Cargo.lock) { cargo update -p rust-switcher --precise $version }; git add Cargo.toml; if (git ls-files --error-unmatch Cargo.lock) { git add Cargo.lock }; git commit -m "chore: bump version to $version" }
 
 # Create and auto-merge a release PR from dev to main.
 publish:
