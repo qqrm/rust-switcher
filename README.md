@@ -6,9 +6,9 @@ Rust Switcher is a Windows 11 utility that helps convert text between RU and EN 
 
 ## Features
 
-- Convert selected text (RU-EN)
-- Convert the last typed sequence via a hotkey
-- Auto-convert the last word while typing (can be paused)
+- Convert selected text (RU↔EN)
+- Convert the last typed sequence via a hotkey ("smart" conversion also handles selection)
+- Auto-convert the last word while typing (runtime toggle, starts paused)
 - Tray icon and quick actions menu
 - Light and dark UI themes
 - Settings are saved to a config file
@@ -26,7 +26,7 @@ Rust Switcher is a Windows 11 utility that helps convert text between RU and EN 
 
 ```powershell
 cargo install rust-switcher
-````
+```
 
 ### From GitHub Releases
 
@@ -37,6 +37,12 @@ Download `rust-switcher.exe` from Releases.
 The config file is stored at:
 
 * `%APPDATA%\RustSwitcher\config.json`
+
+Default hotkey sequences:
+
+* Convert smart: double tap Left Shift
+* Autoconvert toggle: Left Shift + Right Shift
+* Switch layout: CapsLock
 
 ## Development
 
