@@ -34,3 +34,7 @@ check: fmt clippy test
 # Bump Cargo.toml (and Cargo.lock) version and commit.
 bump VERSION:
 	@pwsh -NoLogo -NoProfile -File scripts\release\bump.ps1 {{VERSION}}
+
+# Create and auto-merge a release PR from dev to main.
+publish:
+	@pwsh -NoLogo -NoProfile -File scripts\release\publish.ps1
