@@ -38,7 +38,9 @@ It is intended as onboarding documentation and as a reference for expected runti
 - Domain logic:
   - Text conversion, replacement of selection, insertion via SendInput
 - Platform integration:
-  - Global hotkeys are implemented via WH_KEYBOARD_LL + sequence matcher (not RegisterHotKey)
+  - Global hotkeys are implemented by a hybrid model:
+    - RegisterHotKey for legacy single-chord bindings
+    - WH_KEYBOARD_LL + sequence matcher for hotkey sequences
   - Keyboard layout switching
   - Autostart shortcut in Startup folder
   - Notifications (tray balloon, MessageBox fallback)
@@ -49,7 +51,7 @@ It is intended as onboarding documentation and as a reference for expected runti
 
 Config fields (see src/config.rs):
 
-- autoconvert_delay_ms: u32
+- delay_ms: u32
 - start_minimized: bool
 - theme_dark: bool
 
@@ -67,7 +69,7 @@ Hotkey sequences (preferred, optional):
 
 Notes:
 - Autoconvert enabled is runtime only and is not stored in config.
-- Hotkey values shown in UI are derived from config and are read only.
+- Hotkey fields are shown in read-only edits, but user interaction updates pending sequence values that are applied on Apply.
 - Hotkey sequences are validated on save.
 
 Default bindings (current defaults in code):
@@ -146,7 +148,8 @@ Buttons:
 - Apply: persists config and applies theme changes immediately
 - Cancel: reloads config from disk and applies it to UI and runtime (including theme)
 - Exit: closes the application
-- GitHub: opens repository page
+
+Note: there is currently no dedicated GitHub/"Report issue" button in the shipped UI.
 
 Theme behavior:
 - Theme can be changed from UI checkbox + Apply.
