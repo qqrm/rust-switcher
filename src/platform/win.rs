@@ -326,11 +326,24 @@ fn on_create(hwnd: HWND) -> LRESULT {
     state.hotkey_values = crate::app::HotkeyValues::from_config(&cfg);
     state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(&cfg);
 
-    #[rustfmt::skip] {
-        startup_or_return0!(hwnd, &mut state, "Failed to apply config to UI", apply_config_to_ui(state.as_mut(), &cfg));
-        startup_or_return0!(hwnd, &mut state, "Failed to read autostart state", refresh_autostart_checkbox(state.as_mut()));
-        startup_or_return0!(hwnd, &mut state, "Failed to apply config at runtime", apply_config_runtime(hwnd, state.as_mut(), &cfg));
-    }
+    startup_or_return0!(
+        hwnd,
+        &mut state,
+        "Failed to apply config to UI",
+        apply_config_to_ui(state.as_mut(), &cfg)
+    );
+    startup_or_return0!(
+        hwnd,
+        &mut state,
+        "Failed to read autostart state",
+        refresh_autostart_checkbox(state.as_mut())
+    );
+    startup_or_return0!(
+        hwnd,
+        &mut state,
+        "Failed to apply config at runtime",
+        apply_config_runtime(hwnd, state.as_mut(), &cfg)
+    );
 
     keyboard::install(hwnd, state.as_mut());
     mouse::install();
