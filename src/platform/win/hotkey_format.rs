@@ -11,7 +11,7 @@ pub(crate) fn format_hotkey(hk: Option<config::Hotkey>) -> String {
 
     let chord = config::HotkeyChord {
         mods: hk.mods,
-        mods_vks: 0,
+        mods_vks: hk.mods_vks,
         vk: (hk.vk != 0).then_some(hk.vk),
     };
 
@@ -23,22 +23,18 @@ pub(crate) fn format_hotkey_sequence(seq: Option<config::HotkeySequence>) -> Str
         return "None".to_string();
     };
 
-    let mut chords: Vec<String> = Vec::new();
-    chords.push(format_hotkey_chord(seq.first));
-    if let Some(c1) = seq.second {
-        chords.push(format_hotkey_chord(c1));
-    }
-
-    chords.join("; ")
+    std::iter::once(seq.first)
+        .chain(seq.second)
+        .map(format_hotkey_chord)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn format_hotkey_chord(ch: config::HotkeyChord) -> String {
     fn vk_to_display(vk: u32) -> String {
         if (0x41..=0x5A).contains(&vk) || (0x30..=0x39).contains(&vk) {
-            let Ok(vk_u8) = u8::try_from(vk) else {
-                return vk.to_string();
-            };
-            return (vk_u8 as char).to_string();
+            // Safe due to explicit ASCII range checks above.
+            return (vk as u8 as char).to_string();
         }
 
         let sc = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_VSC) };
@@ -55,60 +51,57 @@ fn format_hotkey_chord(ch: config::HotkeyChord) -> String {
         }
 
         let Ok(len) = usize::try_from(len) else {
-            return String::new(); // или return vk.to_string(), если это функция форматирования
+            return format!("VK 0x{vk:02X}");
         };
         String::from_utf16_lossy(&buf[..len])
     }
 
-    let mut parts: Vec<String> = Vec::new();
+    const MODS_VKS_ORDER: &[(u32, &str)] = &[
+        (config::MODVK_LCTRL, "LCtrl"),
+        (config::MODVK_RCTRL, "RCtrl"),
+        (config::MODVK_LALT, "LAlt"),
+        (config::MODVK_RALT, "RAlt"),
+        (config::MODVK_LSHIFT, "LShift"),
+        (config::MODVK_RSHIFT, "RShift"),
+        (config::MODVK_LWIN, "LWin"),
+        (config::MODVK_RWIN, "RWin"),
+    ];
+    const MODS_ORDER: &[(u32, &str)] = &[
+        (MOD_CONTROL.0, "Ctrl"),
+        (MOD_ALT.0, "Alt"),
+        (MOD_SHIFT.0, "Shift"),
+        (MOD_WIN.0, "Win"),
+    ];
+
+    let mut mods: Vec<&'static str> = Vec::new();
 
     if ch.mods_vks != 0 {
-        if (ch.mods_vks & config::MODVK_LCTRL) != 0 {
-            parts.push("LCtrl".to_string());
-        }
-        if (ch.mods_vks & config::MODVK_RCTRL) != 0 {
-            parts.push("RCtrl".to_string());
-        }
-        if (ch.mods_vks & config::MODVK_LALT) != 0 {
-            parts.push("LAlt".to_string());
-        }
-        if (ch.mods_vks & config::MODVK_RALT) != 0 {
-            parts.push("RAlt".to_string());
-        }
-        if (ch.mods_vks & config::MODVK_LSHIFT) != 0 {
-            parts.push("LShift".to_string());
-        }
-        if (ch.mods_vks & config::MODVK_RSHIFT) != 0 {
-            parts.push("RShift".to_string());
-        }
-        if (ch.mods_vks & config::MODVK_LWIN) != 0 {
-            parts.push("LWin".to_string());
-        }
-        if (ch.mods_vks & config::MODVK_RWIN) != 0 {
-            parts.push("RWin".to_string());
-        }
+        mods.extend(
+            MODS_VKS_ORDER
+                .iter()
+                .filter_map(|(mask, label)| ((ch.mods_vks & mask) != 0).then_some(*label)),
+        );
     } else {
-        if (ch.mods & MOD_CONTROL.0) != 0 {
-            parts.push("Ctrl".to_string());
-        }
-        if (ch.mods & MOD_ALT.0) != 0 {
-            parts.push("Alt".to_string());
-        }
-        if (ch.mods & MOD_SHIFT.0) != 0 {
-            parts.push("Shift".to_string());
-        }
-        if (ch.mods & MOD_WIN.0) != 0 {
-            parts.push("Win".to_string());
-        }
+        mods.extend(
+            MODS_ORDER
+                .iter()
+                .filter_map(|(mask, label)| ((ch.mods & mask) != 0).then_some(*label)),
+        );
     }
+
+    let mut out = mods.join(" + ");
 
     if let Some(vk) = ch.vk {
-        parts.push(vk_to_display(vk));
+        let key = vk_to_display(vk);
+        if !out.is_empty() {
+            out.push_str(" + ");
+        }
+        out.push_str(&key);
     }
 
-    if parts.is_empty() {
+    if out.is_empty() {
         "None".to_string()
     } else {
-        parts.join(" + ")
+        out
     }
 }

@@ -43,10 +43,8 @@ pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
         let mut error = String::from("Duplicate hotkey sequences found:\n\n");
 
         for (name1, name2) in &duplicates {
-            debug_assert!(
-                writeln!(error, "• '{name1}' and '{name2}'").is_ok(),
-                "writing to String must not fail"
-            );
+            // `String` implements `fmt::Write` infallibly; ignore the `fmt::Result` for clarity.
+            let _ = writeln!(error, "• '{name1}' and '{name2}'");
         }
 
         error.push_str("\nEach action must have a unique hotkey sequence.");

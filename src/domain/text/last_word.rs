@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::{
     sync::{
         OnceLock,
@@ -92,6 +91,7 @@ pub fn autoconvert_last_word(state: &mut AppState) {
         Err(e) => tracing::warn!(error = ?e, "layout switch failed (autoconvert)"),
     }
 }
+#[must_use = "guard must be kept alive to prevent reentry"]
 struct AutoconvertGuard;
 impl AutoconvertGuard {
     fn try_acquire() -> Result<Self, SkipReason> {
@@ -106,6 +106,7 @@ impl Drop for AutoconvertGuard {
         AUTOCONVERT_IN_PROGRESS.store(false, Ordering::Release);
     }
 }
+#[must_use = "restore guard must be kept alive until commit"]
 struct JournalRestore<'a> {
     payload: &'a LastRunPayload,
     committed: bool,
@@ -131,6 +132,7 @@ impl Drop for JournalRestore<'_> {
     }
 }
 
+#[must_use = "restore guard must be kept alive until commit"]
 struct JournalRestoreSequence<'a> {
     payload: &'a LastSequencePayload,
     committed: bool,
@@ -279,29 +281,25 @@ fn looks_like_ascii_word(s: &str) -> bool {
     if bytes.is_empty() {
         return false;
     }
-    let is_ascii_letter = |b: u8| b.is_ascii_uppercase() || b.is_ascii_lowercase();
-    let mut has_letter = false;
-    for i in 0..bytes.len() {
-        let b = bytes[i];
-        if is_ascii_letter(b) {
-            has_letter = true;
-            continue;
+
+    let is_ascii_letter = |b: u8| b.is_ascii_alphabetic();
+    let has_letter = bytes.iter().copied().any(is_ascii_letter);
+    if !has_letter {
+        return false;
+    }
+
+    bytes.iter().copied().enumerate().all(|(i, b)| {
+        if is_ascii_letter(b) || b == b'\'' {
+            return true;
         }
-        if b == b'\'' {
-            continue;
-        }
+
         // Allow dot or comma only when it is between ASCII letters.
-        if (b == b'.' || b == b',')
+        (b == b'.' || b == b',')
             && i > 0
             && i + 1 < bytes.len()
             && is_ascii_letter(bytes[i - 1])
             && is_ascii_letter(bytes[i + 1])
-        {
-            continue;
-        }
-        return false;
-    }
-    has_letter
+    })
 }
 fn trailing_convertible_punct_count(s: &str) -> usize {
     s.chars()
@@ -313,13 +311,12 @@ fn trim_tail_chars(s: &str, n: usize) -> &str {
     if n == 0 {
         return s;
     }
-    let total = s.chars().count();
-    if n >= total {
+
+    // `n` is usually tiny (trailing punctuation), so scan from the end for the cut boundary.
+    let Some((cut, _)) = s.char_indices().rev().nth(n.saturating_sub(1)) else {
         return "";
-    }
-    let keep = total - n;
-    let byte_idx = s.char_indices().nth(keep).map_or(s.len(), |(i, _)| i);
-    &s[..byte_idx]
+    };
+    &s[..cut]
 }
 fn should_autoconvert_word(
     detector: &lingua::LanguageDetector,
@@ -507,20 +504,21 @@ struct LastSequencePayload {
     suffix_has_newline: bool,
     seq_has_newline: bool,
 }
-fn join_suffix_text(suffix_runs: &[InputRun]) -> String {
-    suffix_runs.iter().map(|run| run.text.as_str()).collect()
+fn suffix_text_and_meta(suffix_runs: &[InputRun]) -> (String, usize, bool, bool) {
+    let text: String = suffix_runs.iter().map(|run| run.text.as_str()).collect();
+    let len = text.chars().count();
+    let spaces_only = !text.is_empty() && text.chars().all(|c| c == ' ' || c == '\t');
+    let has_newline = text.contains('\n') || text.contains('\r');
+    (text, len, spaces_only, has_newline)
 }
 fn take_last_word_payload() -> Option<LastRunPayload> {
     let (run, suffix_runs) = crate::input_journal::take_last_layout_run_with_suffix()?;
     if run.kind != RunKind::Text || run.text.is_empty() {
         return None;
     }
-    let suffix_text = join_suffix_text(&suffix_runs);
+    let (suffix_text, suffix_len, suffix_spaces_only, suffix_has_newline) =
+        suffix_text_and_meta(&suffix_runs);
     let run_len = run.text.chars().count();
-    let suffix_len = suffix_text.chars().count();
-    let suffix_spaces_only =
-        !suffix_text.is_empty() && suffix_text.chars().all(|c| c == ' ' || c == '\t');
-    let suffix_has_newline = suffix_text.contains('\n') || suffix_text.contains('\r');
     tracing::trace!(
         run_text = %run.text,
         run_layout = ?run.layout,
@@ -552,17 +550,14 @@ fn take_last_sequence_payload() -> Option<LastSequencePayload> {
     if last.kind != RunKind::Text {
         return None;
     }
-    let layout = last.layout.clone();
+    let layout = last.layout;
     let seq_text = join_runs_text(&runs);
     if seq_text.is_empty() {
         return None;
     }
-    let suffix_text = join_suffix_text(&suffix_runs);
+    let (suffix_text, suffix_len, suffix_spaces_only, suffix_has_newline) =
+        suffix_text_and_meta(&suffix_runs);
     let seq_len = seq_text.chars().count();
-    let suffix_len = suffix_text.chars().count();
-    let suffix_spaces_only =
-        !suffix_text.is_empty() && suffix_text.chars().all(|c| c == ' ' || c == '\t');
-    let suffix_has_newline = suffix_text.contains('\n') || suffix_text.contains('\r');
     let seq_has_newline = seq_text.contains('\n') || seq_text.contains('\r');
 
     tracing::trace!(
@@ -591,45 +586,56 @@ fn take_last_sequence_payload() -> Option<LastSequencePayload> {
     })
 }
 
-fn apply_last_word_conversion(p: &LastRunPayload, converted: &str) -> bool {
+fn apply_conversion(
+    core_len: usize,
+    suffix_len: usize,
+    suffix_spaces_only: bool,
+    suffix_text: &str,
+    converted: &str,
+) -> bool {
     const MAX_TAPS: usize = 4096;
-    let run_len = p.run_len.min(MAX_TAPS);
-    let suffix_len = p.suffix_len.min(MAX_TAPS);
-    if p.suffix_spaces_only {
+
+    let core_len = core_len.min(MAX_TAPS);
+    let suffix_len = suffix_len.min(MAX_TAPS);
+
+    if suffix_spaces_only {
         move_caret_left(suffix_len)
-            && delete_with_backspace(run_len)
+            && delete_with_backspace(core_len)
             && send_text_unicode(converted)
             && move_caret_right(suffix_len)
     } else {
-        let delete_count = p.run_len.saturating_add(p.suffix_len).min(MAX_TAPS);
+        let delete_count = core_len.saturating_add(suffix_len).min(MAX_TAPS);
         delete_with_backspace(delete_count)
             && send_text_unicode(converted)
-            && (p.suffix_text.is_empty() || send_text_unicode(&p.suffix_text))
-    }
-}
-fn apply_last_sequence_conversion(p: &LastSequencePayload, converted: &str) -> bool {
-    const MAX_TAPS: usize = 4096;
-    let seq_len = p.seq_len.min(MAX_TAPS);
-    let suffix_len = p.suffix_len.min(MAX_TAPS);
-    if p.suffix_spaces_only {
-        move_caret_left(suffix_len)
-            && delete_with_backspace(seq_len)
-            && send_text_unicode(converted)
-            && move_caret_right(suffix_len)
-    } else {
-        let delete_count = p.seq_len.saturating_add(p.suffix_len).min(MAX_TAPS);
-        delete_with_backspace(delete_count)
-            && send_text_unicode(converted)
-            && (p.suffix_text.is_empty() || send_text_unicode(&p.suffix_text))
+            && (suffix_text.is_empty() || send_text_unicode(suffix_text))
     }
 }
 
-fn flipped_layout(layout: &LayoutTag) -> LayoutTag {
+fn apply_last_word_conversion(p: &LastRunPayload, converted: &str) -> bool {
+    apply_conversion(
+        p.run_len,
+        p.suffix_len,
+        p.suffix_spaces_only,
+        &p.suffix_text,
+        converted,
+    )
+}
+
+fn apply_last_sequence_conversion(p: &LastSequencePayload, converted: &str) -> bool {
+    apply_conversion(
+        p.seq_len,
+        p.suffix_len,
+        p.suffix_spaces_only,
+        &p.suffix_text,
+        converted,
+    )
+}
+
+fn flipped_layout(layout: LayoutTag) -> LayoutTag {
     match layout {
         LayoutTag::Ru => LayoutTag::En,
         LayoutTag::En => LayoutTag::Ru,
-        LayoutTag::Other(id) => LayoutTag::Other(*id),
-        LayoutTag::Unknown => LayoutTag::Unknown,
+        other => other,
     }
 }
 /// Updates the input journal to match what was inserted.
@@ -642,7 +648,7 @@ fn restore_journal_original_sequence(p: &LastSequencePayload) {
 fn update_journal_sequence(p: &LastSequencePayload, converted: &str) {
     crate::input_journal::push_text_with_meta(
         converted,
-        flipped_layout(&p.layout),
+        flipped_layout(p.layout),
         RunOrigin::Programmatic,
     );
     crate::input_journal::push_runs(p.suffix_runs.iter().cloned());
@@ -656,7 +662,7 @@ fn restore_journal_original(p: &LastRunPayload) {
 fn update_journal(p: &LastRunPayload, converted: &str) {
     crate::input_journal::push_run(InputRun {
         text: converted.to_string(),
-        layout: flipped_layout(&p.run.layout),
+        layout: flipped_layout(p.run.layout),
         origin: RunOrigin::Programmatic,
         kind: RunKind::Text,
     });
@@ -683,6 +689,7 @@ fn repeat_tap(vk: VIRTUAL_KEY, count: usize, err_msg: &'static str) -> bool {
 }
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use lingua::{Language, LanguageDetectorBuilder};
 
     use super::*;

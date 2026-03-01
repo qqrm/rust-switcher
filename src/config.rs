@@ -152,7 +152,6 @@ pub fn load() -> io::Result<Config> {
     confy::load_path(path).map_err(confy_err)
 }
 
-#[allow(dead_code)]
 pub fn save(cfg: &Config) -> io::Result<()> {
     let path = config_path()?;
     ensure_parent_dir(&path)?;
