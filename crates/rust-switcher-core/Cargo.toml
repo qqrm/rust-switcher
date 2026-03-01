@@ -1,14 +1,9 @@
 [package]
+repository = "https://github.com/qqrm/rust-switcher"
+description = "Core library for rust-switcher (Windows keyboard layout/typing conversion)."
 name = "rust-switcher-core"
 version = "1.0.4"
 edition = "2024"
-rust-version = "1.93"
 license = "MIT"
-repository = "https://github.com/qqrm/rust-switcher"
-homepage = "https://github.com/qqrm/rust-switcher"
-readme = "README.md"
-description = "Core library for rust-switcher (Windows keyboard layout/typing conversion)."
-keywords = ["keyboard", "layout", "transliteration", "conversion"]
-categories = ["text-processing"]
 
 [dependencies]
