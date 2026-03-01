@@ -1,5 +1,6 @@
 // File: src/domain/text/mapping.rs
 
+/// Direction of text conversion between Russian ЙЦУКЕН and English QWERTY layouts.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ConversionDirection {
     RuToEn,
@@ -214,7 +215,12 @@ pub fn conversion_direction_for_text(text: &str) -> Option<ConversionDirection> 
 /// Converts text between English QWERTY and Russian ЙЦУКЕН keyboard layouts in the given direction.
 #[must_use]
 pub fn convert_ru_en_with_direction(text: &str, direction: ConversionDirection) -> String {
-    let mut out = String::with_capacity(text.len());
+    // `text.len()` is in bytes. For En->Ru conversions, the output is commonly UTF-8 Cyrillic
+    // (2 bytes per character), so we pre-allocate a bit more to avoid reallocations.
+    let mut out = match direction {
+        ConversionDirection::RuToEn => String::with_capacity(text.len()),
+        ConversionDirection::EnToRu => String::with_capacity(text.len().saturating_mul(2)),
+    };
     match direction {
         ConversionDirection::RuToEn => {
             for ch in text.chars() {
