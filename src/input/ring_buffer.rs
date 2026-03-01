@@ -21,12 +21,37 @@ fn journal() -> &'static Mutex<InputJournal> {
     JOURNAL.get_or_init(|| Mutex::new(InputJournal::new(100)))
 }
 
+fn with_journal_mut<R>(f: impl FnOnce(&mut InputJournal) -> R) -> R {
+    let mut guard = match journal().lock() {
+        Ok(g) => g,
+        Err(poison) => {
+            #[cfg(debug_assertions)]
+            tracing::warn!("input journal mutex was poisoned; continuing with inner value");
+            poison.into_inner()
+        }
+    };
+    f(&mut guard)
+}
+
+#[cfg(any(test, windows))]
+fn with_journal<R>(f: impl FnOnce(&InputJournal) -> R) -> R {
+    let guard = match journal().lock() {
+        Ok(g) => g,
+        Err(poison) => {
+            #[cfg(debug_assertions)]
+            tracing::warn!("input journal mutex was poisoned; continuing with inner value");
+            poison.into_inner()
+        }
+    };
+    f(&guard)
+}
+
 #[cfg(windows)]
 const LANG_ENGLISH_PRIMARY: u16 = 0x09;
 #[cfg(windows)]
 const LANG_RUSSIAN_PRIMARY: u16 = 0x19;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum LayoutTag {
     Ru,
     En,
@@ -111,33 +136,39 @@ impl InputJournal {
 
     #[cfg(any(test, windows))]
     fn push_text_internal(&mut self, text: &str, layout: LayoutTag, origin: RunOrigin) {
-        let mut segment = String::new();
-        let mut segment_kind: Option<RunKind> = None;
+        if text.is_empty() {
+            return;
+        }
 
-        for ch in text.chars() {
+        // Segment the input without intermediate allocations by slicing `text` at kind boundaries.
+        // This keeps the journal cheap for frequent short inputs (single key presses) and also
+        // efficient for programmatic multi-character inserts.
+        let mut start = 0usize;
+        let mut current_kind: Option<RunKind> = None;
+
+        for (i, ch) in text.char_indices() {
             let kind = if ch.is_whitespace() {
                 RunKind::Whitespace
             } else {
                 RunKind::Text
             };
 
-            match segment_kind {
-                Some(current) if current == kind => segment.push(ch),
-                Some(current) => {
-                    self.append_segment(&segment, layout.clone(), origin, current);
-                    segment.clear();
-                    segment.push(ch);
-                    segment_kind = Some(kind);
-                }
+            match current_kind {
                 None => {
-                    segment.push(ch);
-                    segment_kind = Some(kind);
+                    start = i;
+                    current_kind = Some(kind);
+                }
+                Some(k) if k == kind => {}
+                Some(k) => {
+                    self.append_segment(&text[start..i], layout, origin, k);
+                    start = i;
+                    current_kind = Some(kind);
                 }
             }
         }
 
-        if let Some(kind) = segment_kind {
-            self.append_segment(&segment, layout, origin, kind);
+        if let Some(kind) = current_kind {
+            self.append_segment(&text[start..], layout, origin, kind);
         }
     }
 
@@ -244,22 +275,10 @@ impl InputJournal {
     }
 
     fn take_last_layout_run_with_suffix(&mut self) -> Option<(InputRun, Vec<InputRun>)> {
-        let mut suffix_runs: Vec<InputRun> = Vec::new();
-        while self
-            .runs
-            .back()
-            .is_some_and(|run| run.kind == RunKind::Whitespace)
-        {
-            let run = self.runs.pop_back()?;
-            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
-            suffix_runs.push(run);
-        }
+        let mut suffix_runs = self.pop_suffix_whitespace();
 
         if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
-            while let Some(run) = suffix_runs.pop() {
-                self.total_chars += run.text.chars().count();
-                self.runs.push_back(run);
-            }
+            self.restore_suffix(&mut suffix_runs);
             return None;
         }
 
@@ -270,27 +289,15 @@ impl InputJournal {
     }
 
     fn take_last_layout_sequence_with_suffix(&mut self) -> Option<(Vec<InputRun>, Vec<InputRun>)> {
-        let mut suffix_runs: Vec<InputRun> = Vec::new();
-        while self
-            .runs
-            .back()
-            .is_some_and(|run| run.kind == RunKind::Whitespace)
-        {
-            let run = self.runs.pop_back()?;
-            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
-            suffix_runs.push(run);
-        }
+        let mut suffix_runs = self.pop_suffix_whitespace();
 
         if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
-            while let Some(run) = suffix_runs.pop() {
-                self.total_chars += run.text.chars().count();
-                self.runs.push_back(run);
-            }
+            self.restore_suffix(&mut suffix_runs);
             return None;
         }
 
-        let last = self.runs.back()?.clone();
-        let target_layout = last.layout.clone();
+        let last = self.runs.back()?;
+        let target_layout = last.layout;
         let target_origin = last.origin;
         let mut seq_rev: Vec<InputRun> = Vec::new();
         while let Some(run) = self.runs.back() {
@@ -303,16 +310,37 @@ impl InputJournal {
         }
 
         if seq_rev.is_empty() {
-            while let Some(run) = suffix_runs.pop() {
-                self.total_chars += run.text.chars().count();
-                self.runs.push_back(run);
-            }
+            self.restore_suffix(&mut suffix_runs);
             return None;
         }
 
         seq_rev.reverse();
         suffix_runs.reverse();
         Some((seq_rev, suffix_runs))
+    }
+
+    fn pop_suffix_whitespace(&mut self) -> Vec<InputRun> {
+        let mut suffix_runs: Vec<InputRun> = Vec::new();
+        while self
+            .runs
+            .back()
+            .is_some_and(|run| run.kind == RunKind::Whitespace)
+        {
+            let Some(run) = self.runs.pop_back() else {
+                break;
+            };
+            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+            suffix_runs.push(run);
+        }
+        suffix_runs
+    }
+
+    fn restore_suffix(&mut self, suffix_runs: &mut Vec<InputRun>) {
+        // `suffix_runs` is expected to be in reverse order (from repeated `pop_back`).
+        while let Some(run) = suffix_runs.pop() {
+            self.total_chars += run.text.chars().count();
+            self.runs.push_back(run);
+        }
     }
 }
 
@@ -354,18 +382,13 @@ fn current_foreground_layout_tag() -> LayoutTag {
 }
 
 pub fn mark_last_token_autoconverted() {
-    if let Ok(mut j) = journal().lock() {
-        j.last_token_autoconverted = true;
-    }
+    with_journal_mut(|j| j.last_token_autoconverted = true);
 }
 
 #[cfg(any(test, windows))]
 #[must_use]
 pub fn last_token_autoconverted() -> bool {
-    journal()
-        .lock()
-        .ok()
-        .is_some_and(|j| j.last_token_autoconverted)
+    with_journal(|j| j.last_token_autoconverted)
 }
 
 #[cfg(windows)]
@@ -499,7 +522,7 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
         });
     }
 
-    if let Ok(mut j) = journal().lock() {
+    with_journal_mut(|j| {
         j.invalidate_if_foreground_changed();
         if let Some(action) = action {
             match action {
@@ -517,94 +540,74 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
                 }
             }
         }
-    }
+    });
 
     output
 }
 
 #[must_use]
 pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
-    journal().lock().ok()?.take_last_layout_run_with_suffix()
+    with_journal_mut(|j| j.take_last_layout_run_with_suffix())
 }
 
 #[must_use]
 pub fn take_last_layout_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<InputRun>)> {
-    journal()
-        .lock()
-        .ok()?
-        .take_last_layout_sequence_with_suffix()
+    with_journal_mut(|j| j.take_last_layout_sequence_with_suffix())
 }
 
 #[cfg(test)]
 pub fn push_text(s: &str) {
-    if let Ok(mut j) = journal().lock() {
-        j.push_text_internal(s, LayoutTag::Unknown, RunOrigin::Programmatic);
-    }
+    with_journal_mut(|j| j.push_text_internal(s, LayoutTag::Unknown, RunOrigin::Programmatic));
 }
 
 pub fn push_run(run: InputRun) {
-    if let Ok(mut j) = journal().lock() {
-        j.push_run(run);
-    }
+    with_journal_mut(|j| j.push_run(run));
 }
 
 pub fn push_runs(runs: impl IntoIterator<Item = InputRun>) {
-    if let Ok(mut j) = journal().lock() {
-        j.push_runs(runs);
-    }
+    with_journal_mut(|j| j.push_runs(runs));
 }
 
 #[cfg(any(test, windows))]
 pub fn push_text_with_meta(text: &str, layout: LayoutTag, origin: RunOrigin) {
-    if let Ok(mut j) = journal().lock() {
-        j.push_text_internal(text, layout, origin);
-    }
+    with_journal_mut(|j| j.push_text_internal(text, layout, origin));
 }
 
 #[cfg(test)]
 pub fn test_backspace() {
-    if let Ok(mut j) = journal().lock() {
-        j.backspace();
-    }
+    with_journal_mut(|j| j.backspace());
 }
 
 #[cfg(test)]
 pub fn runs_snapshot() -> Vec<InputRun> {
-    journal()
-        .lock()
-        .ok()
-        .map_or_else(Vec::new, |j| j.runs.iter().cloned().collect())
+    with_journal(|j| j.runs.iter().cloned().collect())
 }
 
 #[cfg(any(test, windows))]
 pub fn invalidate() {
-    if let Ok(mut j) = journal().lock() {
-        j.clear();
-    }
+    with_journal_mut(|j| j.clear());
 }
 
 #[cfg(any(test, windows))]
 #[must_use]
 pub fn last_char_triggers_autoconvert() -> bool {
-    let Ok(j) = journal().lock() else {
-        return false;
-    };
+    with_journal(|j| {
+        let Some(last) = j.last_char() else {
+            return false;
+        };
 
-    let Some(last) = j.last_char() else {
-        return false;
-    };
+        if matches!(last, '.' | ',' | '!' | '?' | ';' | ':') {
+            return j
+                .prev_char_before_last()
+                .is_some_and(|prev| !prev.is_whitespace());
+        }
 
-    if matches!(last, '.' | ',' | '!' | '?' | ';' | ':') {
-        return j
-            .prev_char_before_last()
-            .is_some_and(|prev| !prev.is_whitespace());
-    }
+        if last.is_whitespace() {
+            return j
+                .prev_char_before_last()
+                .is_some_and(|prev| !prev.is_whitespace());
+        }
 
-    if last.is_whitespace() {
-        return j
-            .prev_char_before_last()
-            .is_some_and(|prev| !prev.is_whitespace());
-    }
-
-    false
+        false
+    })
 }
