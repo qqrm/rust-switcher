@@ -3,7 +3,6 @@ use std::{ptr::null_mut, thread, time::Duration};
 use mapping::{ConversionDirection, conversion_direction_for_text, convert_ru_en_with_direction};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
-    System::DataExchange::GetClipboardSequenceNumber,
     UI::{
         Input::KeyboardAndMouse::{
             GetAsyncKeyState, GetKeyboardLayout, GetKeyboardLayoutList, HKL, VIRTUAL_KEY,
@@ -15,54 +14,55 @@ use windows::Win32::{
     },
 };
 
-use super::mapping;
+use super::{
+    mapping,
+    selection_probe::{SelectionProbe, probe_selection_uia, probe_selection_win32},
+};
 use crate::{
     app::AppState,
-    conversion::{
-        clipboard as clip,
-        input::{
-            KeySequence, reselect_last_inserted_text_utf16_units, send_ctrl_combo,
-            send_text_unicode,
-        },
-    },
+    conversion::input::{KeySequence, reselect_last_inserted_text_utf16_units, send_text_unicode},
 };
 
 const MAX_SELECTION_CHARS: usize = 512;
-
-/// Virtual key code for the `C` key.
-///
-/// Used together with Ctrl to trigger the standard Copy shortcut.
-const VK_C_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x43);
 
 /// Virtual key code for the Delete key.
 ///
 /// Used to remove the current selection before inserting converted text.
 const VK_DELETE_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x2E);
 
-/// Attempts to convert the current selection by reading it through the clipboard.
-///
-/// This helper performs only the clipboard based selection acquisition:
-/// - sends Ctrl+C to the foreground application
-/// - waits for `GetClipboardSequenceNumber` to change
-/// - reads Unicode text from the clipboard
-/// - restores previous clipboard contents via `ClipboardRestore`
-///
-/// Return value:
-/// - `None` if there is no eligible selection (empty, multiline, too long, or clipboard did not change)
-/// - `Some(Ok(()))` if selection was converted successfully
-/// - `Some(Err(ConvertSelectionError))` if selection was present but the conversion pipeline failed
-///
-/// Architectural note:
-/// This function does not perform UI safety checks (foreground window, modifier keys).
-/// Callers on the UI boundary should gate calls with `GetForegroundWindow` and `wait_shift_released`.
-fn try_convert_selection_from_clipboard(
-    state: &mut AppState,
-    max_chars: usize,
-) -> Option<std::result::Result<(), ConvertSelectionError>> {
-    copy_selection_text_with_clipboard_restore(max_chars).map(|s| {
-        tracing::trace!(len = s.chars().count(), "selection detected");
-        convert_selection_from_text(state, &s)
-    })
+fn probe_convertible_selection(max_chars: usize) -> Option<String> {
+    match probe_selection_uia(max_chars) {
+        SelectionProbe::SelectionText(text) => {
+            tracing::trace!(len = text.chars().count(), "selection detected through UIA");
+            return Some(text);
+        }
+        SelectionProbe::SelectionPresentButUnreadable(err) => {
+            tracing::trace!(error = ?err, "UIA selection present but unreadable");
+        }
+        SelectionProbe::SelectionPresentButIneligible => {
+            tracing::trace!("UIA selection present but ineligible");
+        }
+        SelectionProbe::NoSelection | SelectionProbe::Unsupported => {}
+    }
+
+    match probe_selection_win32(max_chars) {
+        SelectionProbe::SelectionText(text) => {
+            tracing::trace!(
+                len = text.chars().count(),
+                "selection detected through Win32"
+            );
+            Some(text)
+        }
+        SelectionProbe::SelectionPresentButUnreadable(err) => {
+            tracing::trace!(error = ?err, "Win32 selection present but unreadable");
+            None
+        }
+        SelectionProbe::SelectionPresentButIneligible => {
+            tracing::trace!("Win32 selection present but ineligible");
+            None
+        }
+        SelectionProbe::NoSelection | SelectionProbe::Unsupported => None,
+    }
 }
 
 /// Converts the currently selected text, if there is any selection.
@@ -117,10 +117,13 @@ enum ConvertOutcome {
 ///
 /// This function does not perform UI safety checks.
 fn convert_selection_outcome(state: &mut AppState, max_chars: usize) -> ConvertOutcome {
-    match try_convert_selection_from_clipboard(state, max_chars) {
-        None => ConvertOutcome::Noop,
-        Some(Ok(())) => ConvertOutcome::Ok,
-        Some(Err(e)) => ConvertOutcome::Err(e),
+    let Some(text) = probe_convertible_selection(max_chars) else {
+        return ConvertOutcome::Noop;
+    };
+
+    match convert_selection_from_text(state, &text) {
+        Ok(()) => ConvertOutcome::Ok,
+        Err(e) => ConvertOutcome::Err(e),
     }
 }
 
@@ -369,63 +372,10 @@ pub fn wait_shift_released(timeout_ms: u64) -> bool {
     false
 }
 
-/// RAII helper that restores clipboard Unicode text on drop, but only if it was changed.
-///
-/// The selection conversion pipeline uses clipboard for reading selection.
-/// This guard minimizes side effects by restoring only when the clipboard sequence number changed.
-struct ClipboardRestore {
-    before_seq: u32,
-    snapshot: Option<clip::ClipboardSnapshot>,
-}
-
-impl ClipboardRestore {
-    /// Captures current clipboard Unicode text and its sequence number.
-    fn capture() -> Self {
-        let before_seq = unsafe { GetClipboardSequenceNumber() };
-        Self {
-            before_seq,
-            snapshot: clip::snapshot(),
-        }
-    }
-
-    /// Returns the captured clipboard sequence number.
-    fn before_seq(&self) -> u32 {
-        self.before_seq
-    }
-}
-
-impl Drop for ClipboardRestore {
-    fn drop(&mut self) {
-        let after_seq = unsafe { GetClipboardSequenceNumber() };
-        if after_seq == self.before_seq {
-            return;
-        }
-
-        if let Some(snapshot) = self.snapshot.as_ref() {
-            let _ = clip::restore_snapshot(snapshot);
-        }
-    }
-}
-
-/// Copies current selection via Ctrl+C, reads Unicode text from clipboard, then restores clipboard.
-///
-/// Returns `None` when selection is empty, multiline, too long, or clipboard did not change.
-/// `max_chars` is counted in Unicode scalar values.
-fn copy_selection_text_with_clipboard_restore(max_chars: usize) -> Option<String> {
-    let restore = ClipboardRestore::capture();
-    let before_seq = restore.before_seq();
-
-    send_ctrl_combo(VK_C_KEY)
-        .then(|| clip::wait_change(before_seq, 10, 20))
-        .filter(|&changed| changed)
-        .and_then(|_| clip::get_unicode_text())
-        .filter(|s| is_convertible_selection(s, max_chars))
-}
-
-/// Checks whether clipboard text is eligible for selection conversion.
+/// Checks whether text is eligible for selection conversion.
 ///
 /// Optimization:
 /// `s.chars().nth(max_chars).is_none()` stops early for long strings, unlike `chars().count()`.
-fn is_convertible_selection(s: &str, max_chars: usize) -> bool {
+pub(super) fn is_convertible_selection(s: &str, max_chars: usize) -> bool {
     !s.is_empty() && !s.contains('\n') && !s.contains('\r') && s.chars().nth(max_chars).is_none()
 }
