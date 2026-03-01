@@ -12,10 +12,14 @@ fn xorshift64(seed: &mut u64) -> u64 {
 }
 
 fn gen_string(seed: &mut u64, alphabet: &[char], max_len: usize) -> String {
-    let len = (xorshift64(seed) as usize) % (max_len + 1);
+    let max_len_u64 = u64::try_from(max_len).unwrap_or(u64::MAX - 1);
+    let len_u64 = xorshift64(seed) % (max_len_u64 + 1);
+    let len = usize::try_from(len_u64).unwrap_or(max_len);
     let mut out = String::with_capacity(len);
     for _ in 0..len {
-        let idx = (xorshift64(seed) as usize) % alphabet.len();
+        let alphabet_len_u64 = u64::try_from(alphabet.len()).unwrap_or(u64::MAX);
+        let idx_u64 = xorshift64(seed) % alphabet_len_u64;
+        let idx = usize::try_from(idx_u64).unwrap_or(0);
         out.push(alphabet[idx]);
     }
     out

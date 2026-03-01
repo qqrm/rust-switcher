@@ -6,15 +6,15 @@ pub enum ConversionDirection {
     EnToRu,
 }
 
-fn is_latin_letter(ch: char) -> bool {
+const fn is_latin_letter(ch: char) -> bool {
     ch.is_ascii_alphabetic()
 }
 
-fn is_cyrillic_letter(ch: char) -> bool {
+const fn is_cyrillic_letter(ch: char) -> bool {
     matches!(ch, 'А'..='Я' | 'а'..='я' | 'Ё' | 'ё')
 }
 
-fn map_ru_to_en(ch: char) -> char {
+const fn map_ru_to_en(ch: char) -> char {
     match ch {
         // punctuation rules (for . , ? keys)
         ',' => '?',
@@ -98,7 +98,7 @@ fn map_ru_to_en(ch: char) -> char {
     }
 }
 
-fn map_en_to_ru(ch: char) -> char {
+const fn map_en_to_ru(ch: char) -> char {
     match ch {
         // letters / punctuation keys (EN -> RU)
         'q' => 'й',
@@ -201,6 +201,7 @@ fn letter_counts(text: &str) -> (usize, usize) {
 /// Returns a conversion direction based on letter balance.
 ///
 /// If the counts are tied (including zero letters), returns `None`.
+#[must_use]
 pub fn conversion_direction_for_text(text: &str) -> Option<ConversionDirection> {
     let (cyr, lat) = letter_counts(text);
     match cyr.cmp(&lat) {
@@ -211,6 +212,7 @@ pub fn conversion_direction_for_text(text: &str) -> Option<ConversionDirection> 
 }
 
 /// Converts text between English QWERTY and Russian ЙЦУКЕН keyboard layouts in the given direction.
+#[must_use]
 pub fn convert_ru_en_with_direction(text: &str, direction: ConversionDirection) -> String {
     let mut out = String::with_capacity(text.len());
     match direction {
@@ -228,8 +230,9 @@ pub fn convert_ru_en_with_direction(text: &str, direction: ConversionDirection) 
     out
 }
 
-/// Convenience wrapper: auto-detect direction (fallback to RuToEn on ties).
+/// Convenience wrapper: auto-detect direction (fallback to `RuToEn` on ties).
 /// This is intentionally a normal public API so downstream test crates can use it.
+#[must_use]
 pub fn convert_ru_en_bidirectional(text: &str) -> String {
     let direction = conversion_direction_for_text(text).unwrap_or(ConversionDirection::RuToEn);
     convert_ru_en_with_direction(text, direction)

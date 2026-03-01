@@ -1,3 +1,8 @@
+#![allow(
+    clippy::multiple_crate_versions,
+    reason = "The binary integrates Win32 and NLP crates that currently pull parallel transitive major versions."
+)]
+
 // Library target is intentionally minimal and cross-platform.
 //
 // The Windows application lives in `src/main.rs` and declares its own module tree.
