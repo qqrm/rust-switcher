@@ -17,7 +17,7 @@ Rust Switcher is a Windows 11 utility that helps convert text between RU and EN 
 ## Requirements
 
 - Windows 11
-- Rust nightly (see `rust-toolchain.toml`)
+- Rust 1.93.1 (pinned in `rust-toolchain.toml`; MSRV is 1.93)
 - MSVC toolchain (Visual Studio 2022 Build Tools)
 
 ## Install
@@ -66,7 +66,7 @@ What these jobs do:
 
 ```powershell
 $env:RUST_LOG="trace"
-cargo +nightly run -F debug-tracing
+cargo run -F debug-tracing
 ```
 
 ## License

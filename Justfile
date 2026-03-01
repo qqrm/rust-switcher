@@ -14,15 +14,15 @@ help:
 
 # Check formatting.
 fmt:
-	cargo fmt --check
+	cargo fmt --all -- --check
 
-# Run clippy with CI flags.
+# Run clippy with strict CI flags.
 clippy:
-	cargo clippy --all-targets --all-features --locked -- -D warnings
+	cargo clippy --workspace --all-targets --all-features --locked -- -D warnings -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo -W clippy::perf -A clippy::multiple_crate_versions
 
 # Run the test suite.
 test:
-	cargo test --locked
+	cargo test --workspace --all-features --all-targets --locked
 
 # Run all quality checks.
 check: fmt clippy test

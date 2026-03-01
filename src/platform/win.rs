@@ -16,6 +16,7 @@ pub(crate) mod tray;
 mod tray_dispatch;
 mod visuals;
 mod window;
+mod winutil;
 use std::sync::OnceLock;
 
 pub(crate) use hotkey_format::{format_hotkey, format_hotkey_sequence};

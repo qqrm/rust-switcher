@@ -12,6 +12,7 @@ use windows::{
     core::{PCWSTR, Result, w},
 };
 
+use super::winutil::make_int_resource;
 use crate::utils::helpers;
 
 pub(crate) fn register_main_class(class_name: PCWSTR, hinstance: HINSTANCE) -> Result<()> {
@@ -80,8 +81,7 @@ pub(crate) fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
     unsafe {
         let big = LoadImageW(
             Some(hinstance),
-            #[allow(clippy::manual_dangling_ptr)]
-            PCWSTR(1usize as *const u16),
+            make_int_resource(1),
             IMAGE_ICON,
             GetSystemMetrics(SM_CXICON),
             GetSystemMetrics(SM_CYICON),
@@ -93,8 +93,7 @@ pub(crate) fn set_window_icons(hwnd: HWND, hinstance: HINSTANCE) {
 
         let small = LoadImageW(
             Some(hinstance),
-            #[allow(clippy::manual_dangling_ptr)]
-            PCWSTR(1usize as *const u16),
+            make_int_resource(1),
             IMAGE_ICON,
             GetSystemMetrics(SM_CXSMICON),
             GetSystemMetrics(SM_CYSMICON),

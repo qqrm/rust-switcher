@@ -19,6 +19,8 @@ use windows::{
     core::{PCWSTR, Result},
 };
 
+use super::winutil::make_int_resource;
+
 pub enum TrayMenuAction {
     None,
     ToggleAutoConvert,
@@ -299,8 +301,7 @@ unsafe fn green_icon(hwnd: HWND) -> windows::core::Result<HICON> {
     let h = unsafe {
         LoadImageW(
             Some(hinst),
-            #[allow(clippy::manual_dangling_ptr)]
-            PCWSTR(2usize as *const u16),
+            make_int_resource(2),
             IMAGE_ICON,
             0,
             0,
@@ -317,8 +318,7 @@ unsafe fn default_icon(hwnd: HWND) -> windows::core::Result<HICON> {
     let h = unsafe {
         LoadImageW(
             Some(hinst),
-            #[allow(clippy::manual_dangling_ptr)]
-            PCWSTR(1usize as *const u16),
+            make_int_resource(1),
             IMAGE_ICON,
             0,
             0,

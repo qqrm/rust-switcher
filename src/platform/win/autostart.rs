@@ -98,6 +98,8 @@ fn startup_folder_path() -> windows::core::Result<PathBuf> {
 
 fn pwstr_to_string(p: windows::core::PWSTR) -> String {
     unsafe {
+        // Safety: `p` must point to a valid NUL-terminated UTF-16 string for the duration of this call.
+        // This is satisfied for Win32 APIs that return allocated strings (freed with `CoTaskMemFree`).
         let mut len = 0usize;
         while *p.0.add(len) != 0 {
             len += 1;
@@ -105,6 +107,13 @@ fn pwstr_to_string(p: windows::core::PWSTR) -> String {
         let slice = std::slice::from_raw_parts(p.0, len);
         String::from_utf16_lossy(slice)
     }
+}
+
+#[allow(clippy::permissions_set_readonly_false)]
+fn set_readonly_false(perm: &mut std::fs::Permissions) {
+    // Windows startup folder shortcuts sometimes become read-only (e.g. via external tools).
+    // We explicitly clear the flag before attempting removal.
+    perm.set_readonly(false);
 }
 
 fn cleanup_marked_shortcuts(dir: &Path) -> windows::core::Result<()> {
@@ -125,8 +134,7 @@ fn force_remove_file_or_error(path: &Path) -> windows::core::Result<()> {
 
     if meta.permissions().readonly() {
         let mut perm = meta.permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
-        perm.set_readonly(false);
+        set_readonly_false(&mut perm);
         let _ = std::fs::set_permissions(path, perm);
     }
 

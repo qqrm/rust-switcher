@@ -1,5 +1,4 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![feature(stmt_expr_attributes)]
 
 #[cfg(windows)]
 mod app;

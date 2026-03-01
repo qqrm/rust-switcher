@@ -10,25 +10,20 @@ env.RUST_LOG = "trace"
 command = ["powershell", "-NoProfile", "-Command", """
   $ErrorActionPreference = 'Stop'
 
-  cargo +nightly fmt --check
+  cargo fmt --all -- --check
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  cargo +nightly clippy --all-targets --all-features -- `
+  cargo clippy --workspace --all-targets --all-features -- `
     -D warnings `
-    -D clippy::all `
-    -D clippy::style `
-    -D clippy::complexity `
-    -D clippy::perf `
-    -D clippy::cargo `
-    -D clippy::unwrap_used `
-    -D clippy::expect_used `
-    -D clippy::todo `
-    -D clippy::unimplemented `
-    -D clippy::dbg_macro `
+    -W clippy::all `
+    -W clippy::pedantic `
+    -W clippy::nursery `
+    -W clippy::cargo `
+    -W clippy::perf `
     -A clippy::multiple_crate_versions
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  cargo +nightly build --features debug-tracing
+  cargo build --features debug-tracing
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   .\\target\\debug\\rust-switcher.exe
@@ -49,25 +44,20 @@ on_change_strategy = "kill_then_restart"
 command = ["powershell", "-NoProfile", "-Command", """
   $ErrorActionPreference = 'Stop'
 
-  cargo +nightly fmt --check
+  cargo fmt --all -- --check
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  cargo +nightly clippy --all-targets --all-features -- `
+  cargo clippy --workspace --all-targets --all-features -- `
     -D warnings `
-    -D clippy::all `
-    -D clippy::style `
-    -D clippy::complexity `
-    -D clippy::perf `
-    -D clippy::cargo `
-    -D clippy::unwrap_used `
-    -D clippy::expect_used `
-    -D clippy::todo `
-    -D clippy::unimplemented `
-    -D clippy::dbg_macro `
+    -W clippy::all `
+    -W clippy::pedantic `
+    -W clippy::nursery `
+    -W clippy::cargo `
+    -W clippy::perf `
     -A clippy::multiple_crate_versions
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  cargo +nightly build --release --locked
+  cargo build --release --locked
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   .\\target\\release\\rust-switcher.exe
@@ -88,25 +78,20 @@ env.RUST_TEST_NOCAPTURE = "1"
 command = ["powershell", "-NoProfile", "-Command", """
   $ErrorActionPreference = 'Stop'
 
-  cargo +nightly fmt --check
+  cargo fmt --all -- --check
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  cargo +nightly clippy --all-targets --all-features -- `
+  cargo clippy --workspace --all-targets --all-features -- `
     -D warnings `
-    -D clippy::all `
-    -D clippy::style `
-    -D clippy::complexity `
-    -D clippy::perf `
-    -D clippy::cargo `
-    -D clippy::unwrap_used `
-    -D clippy::expect_used `
-    -D clippy::todo `
-    -D clippy::unimplemented `
-    -D clippy::dbg_macro `
+    -W clippy::all `
+    -W clippy::pedantic `
+    -W clippy::nursery `
+    -W clippy::cargo `
+    -W clippy::perf `
     -A clippy::multiple_crate_versions
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  cargo +nightly test -- --nocapture
+  cargo test --workspace --all-features --all-targets -- --nocapture
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   """]
 need_stdout = true
@@ -118,23 +103,16 @@ on_change_strategy = "kill_then_restart"
 command = ["powershell", "-NoProfile", "-Command", """
   $ErrorActionPreference = 'Stop'
 
-  cargo +nightly fmt --check
+  cargo fmt --all -- --check
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  cargo +nightly clippy --all-targets --all-features -- `
+  cargo clippy --workspace --all-targets --all-features -- `
     -D warnings `
-    -D clippy::all `
-    -D clippy::style `
-    -D clippy::complexity `
-    -D clippy::perf `
-    -D clippy::cargo `
-    -D clippy::unwrap_used `
-    -D clippy::expect_used `
-    -D clippy::todo `
-    -D clippy::unimplemented `
-    -D clippy::dbg_macro `
-    -D clippy::pedantic `
-    -D clippy::panic `
+    -W clippy::all `
+    -W clippy::pedantic `
+    -W clippy::nursery `
+    -W clippy::cargo `
+    -W clippy::perf `
     -A clippy::multiple_crate_versions
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   """]
