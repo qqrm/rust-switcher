@@ -11,7 +11,9 @@ pub(crate) fn format_hotkey(hk: Option<config::Hotkey>) -> String {
 
     let chord = config::HotkeyChord {
         mods: hk.mods,
-        mods_vks: hk.mods_vks,
+        // Legacy `RegisterHotKey` chords encode only generic modifier masks.
+        // Side-specific modifier virtual-keys are sequence-only.
+        mods_vks: 0,
         vk: (hk.vk != 0).then_some(hk.vk),
     };
 

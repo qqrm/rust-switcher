@@ -13,6 +13,7 @@ It is intended as onboarding documentation and as a reference for expected runti
 
 - Convert text typed in the wrong keyboard layout (RU <-> EN) quickly and reliably.
 - Work without relying on clipboard paste for the main path.
+- Never send `Ctrl+C` to the foreground application (to avoid SIGINT / app-specific semantics).
 - Provide global hotkeys and a lightweight UI for configuration.
 
 ## Terminology
@@ -91,10 +92,12 @@ Behavior:
 
 ### Convert selection
 
-Algorithm (src/domain/text/convert.rs and clipboard helper module):
-- Copy selection text while restoring clipboard afterwards (best effort, clipboard snapshot restore).
+Algorithm (src/domain/text/convert.rs and selection probes):
+- Probe selection text from the focused control using UI Automation and/or Win32 (Edit/RichEdit) APIs.
+  - No synthetic input is sent.
+  - Clipboard is not touched.
 - Sleep for autoconvert_delay_ms before conversion and replacement.
-- Convert the copied text via mapping.
+- Convert the probed text via mapping.
 - Replace selection by:
   - Send Delete to remove the selection
   - Inject Unicode text via SendInput
