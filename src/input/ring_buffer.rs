@@ -65,7 +65,7 @@ struct InputJournal {
 }
 
 impl InputJournal {
-    fn new(cap_chars: usize) -> Self {
+    const fn new(cap_chars: usize) -> Self {
         Self {
             runs: VecDeque::new(),
             cap_chars,
@@ -360,6 +360,7 @@ pub fn mark_last_token_autoconverted() {
 }
 
 #[cfg(any(test, windows))]
+#[must_use]
 pub fn last_token_autoconverted() -> bool {
     journal()
         .lock()
@@ -521,10 +522,12 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
     output
 }
 
+#[must_use]
 pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
     journal().lock().ok()?.take_last_layout_run_with_suffix()
 }
 
+#[must_use]
 pub fn take_last_layout_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<InputRun>)> {
     journal()
         .lock()
@@ -581,6 +584,7 @@ pub fn invalidate() {
 }
 
 #[cfg(any(test, windows))]
+#[must_use]
 pub fn last_char_triggers_autoconvert() -> bool {
     let Ok(j) = journal().lock() else {
         return false;

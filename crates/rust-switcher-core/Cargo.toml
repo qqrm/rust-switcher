@@ -5,5 +5,8 @@ name = "rust-switcher-core"
 version = "1.0.4"
 edition = "2024"
 license = "MIT"
+readme = "../../README.md"
+keywords = ["windows", "keyboard", "layout", "text", "conversion"]
+categories = ["text-processing", "os::windows-apis"]
 
 [dependencies]
