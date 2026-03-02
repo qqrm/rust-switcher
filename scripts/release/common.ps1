@@ -191,8 +191,7 @@ function Update-DependencyVersionInCargoToml {
   $NewVersion = Assert-SemVer $NewVersion
 
   $toml = Get-Content -Path $Path -Raw -Encoding UTF8
-  $pattern = "(?m)^(\s*" + [regex]::Escape($DependencyName) + "\s*=\s*\{[^\n]*?\bversion\s*=\s*\")([^\"]+)(\"[^\n]*\})"
-  # .NET regex replacement uses $1/$2/... for capturing groups.
+  $pattern = "(?m)^(\s*" + [regex]::Escape($DependencyName) + "\s*=\s*\{[^\n]*?\bversion\s*=\s*`")([^\`"]+)(`"[^\n]*\})"
   $updated = [regex]::Replace($toml, $pattern, ('$1' + $NewVersion + '$3'), 1)
   if ($updated -ne $toml) {
     Set-Content -Path $Path -Value $updated -Encoding UTF8
