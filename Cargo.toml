@@ -3,7 +3,7 @@ members = ["crates/rust-switcher-core"]
 
 [package]
 name = "rust-switcher"
-version = "1.0.4"
+version = "1.0.6"
 edition = "2024"
 
 description = "Windows keyboard layout switcher and text conversion utility"
@@ -74,7 +74,7 @@ debug = 0
 incremental = false
 
 [dev-dependencies]
-tracing-test = "0.2.5"
+tracing-test = "0.2.6"
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.zip"
