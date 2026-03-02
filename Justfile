@@ -1,40 +1,40 @@
 set dotenv-load := true
 set shell := ["pwsh", "-NoLogo", "-NoProfile", "-Command"]
 
-# Show all available recipes.
 default: help
 
-# List all recipes with descriptions.
 help:
 	@just --list
 
-# -----------------------------
-# Quality gates
-# -----------------------------
-
-# Check formatting.
 fmt:
 	cargo fmt --all -- --check
 
-# Run clippy with CI flags.
 clippy:
 	cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-# Run the test suite.
 test:
 	cargo test --workspace --all-features --all-targets --locked
 
-# Run all quality checks.
 check: fmt clippy test
 
-# -----------------------------
-# Release helpers
-# -----------------------------
-
-# Bump Cargo.toml (and Cargo.lock) version and commit.
-bump VERSION:
+# bump VERSION?
+# - If VERSION omitted: bump patch automatically
+# - If VERSION provided: set exact semver
+bump VERSION='':
 	@pwsh -NoLogo -NoProfile -File scripts\release\bump.ps1 {{VERSION}}
 
-# Create and auto-merge a release PR from dev to main.
-publish:
-	@pwsh -NoLogo -NoProfile -File scripts\release\publish.ps1
+# github-release VERSION?
+# Build and upload Windows artifacts to a GitHub Release for vX.Y.Z.
+github-release VERSION='':
+	@pwsh -NoLogo -NoProfile -File scripts\release\github_release.ps1 {{VERSION}}
+
+# crates-release
+# Publish crates to crates.io in dependency order: core -> app
+crates-release:
+	@pwsh -NoLogo -NoProfile -File scripts\release\cargo_publish.ps1
+
+# release VERSION?
+# One-command production release from dev:
+# checks -> bump -> push -> immutable tag -> GH Release + assets -> crates.io publish
+release VERSION='':
+	@pwsh -NoLogo -NoProfile -File scripts\release\release.ps1 {{VERSION}}

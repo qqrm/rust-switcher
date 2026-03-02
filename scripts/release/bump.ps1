@@ -1,32 +1,56 @@
 param(
-  [Parameter(Mandatory=$true)]
-  [string] $Version
+  [Parameter(Mandatory = $false)]
+  [string]$Version = ''
 )
 
-$ErrorActionPreference = 'Stop'
-$PSNativeCommandUseErrorActionPreference = $true
+. "$PSScriptRoot\common.ps1"
 
-if ([string]::IsNullOrWhiteSpace($Version)) {
-  throw "VERSION is required (example: just bump 1.2.3)"
+Assert-Tool git
+Assert-Tool cargo
+
+$repoRoot = Get-RepoRoot
+Push-Location $repoRoot
+try {
+  Assert-CleanWorktree
+
+  $appCur  = Get-CargoPackageVersion 'rust-switcher'
+  $coreCur = Get-CargoPackageVersion 'rust-switcher-core'
+
+  $target = if ([string]::IsNullOrWhiteSpace($Version)) {
+    $base = Max-SemVer $appCur $coreCur
+    Bump-Patch $base
+  } else {
+    Assert-SemVer $Version
+  }
+
+  $changed = $false
+  $changed = (Update-CargoTomlPackageVersion -Path 'Cargo.toml' -NewVersion $target) -or $changed
+  $changed = (Update-CargoTomlPackageVersion -Path 'crates/rust-switcher-core/Cargo.toml' -NewVersion $target) -or $changed
+  $changed = (Update-DependencyVersionInCargoToml -Path 'Cargo.toml' -DependencyName 'rust-switcher-core' -NewVersion $target) -or $changed
+
+  if (-not $changed) {
+    Write-Host "No version changes required (already $target)."
+    Write-Output $target
+    return
+  }
+
+  # Update Cargo.lock deterministically for the new workspace versions.
+  Invoke-Checked cargo @('generate-lockfile') -Quiet
+
+  Invoke-Checked git @('add', 'Cargo.toml', 'Cargo.lock', 'crates/rust-switcher-core/Cargo.toml') -Quiet
+  $msg = "chore: bump version to $target"
+
+  $commit = Invoke-Checked git @('commit', '-m', $msg) -AllowFailure -Quiet
+  if ($commit.ExitCode -ne 0) {
+    if ($commit.Output -match 'nothing to commit') {
+      Write-Host "Nothing to commit (already at $target)."
+    } else {
+      throw "git commit failed: $($commit.Output)"
+    }
+  }
+
+  Write-Output $target
 }
-
-$toml = Get-Content .\Cargo.toml -Raw
-$updated = [regex]::Replace($toml, '(?m)^version\s*=\s*"[^"]+"', ('version = "' + $Version + '"'), 1)
-if ($toml -eq $updated) {
-  throw "Failed to update version in Cargo.toml"
+finally {
+  Pop-Location
 }
-Set-Content -NoNewline -Encoding UTF8 -Path .\Cargo.toml -Value $updated
-
-# Update Cargo.lock if it exists
-$PSNativeCommandUseErrorActionPreference = $false
-git ls-files --error-unmatch .\Cargo.lock 1>$null 2>$null
-$hasLock = ($LASTEXITCODE -eq 0)
-$PSNativeCommandUseErrorActionPreference = $true
-if ($hasLock) {
-  cargo update -p rust-switcher --precise $Version
-}
-
-git add .\Cargo.toml
-if ($hasLock) { git add .\Cargo.lock }
-
-git commit -m ("chore: bump version to " + $Version)
