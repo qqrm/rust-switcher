@@ -1,4 +1,3 @@
-pub mod clipboard;
 pub mod input;
 
 pub use crate::domain::text::{
