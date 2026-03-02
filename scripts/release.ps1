@@ -11,4 +11,4 @@ if (-not (Test-Path $script)) {
   throw "Expected release entrypoint not found: $script"
 }
 
-& pwsh -NoLogo -NoProfile -File $script $Version
+& pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File $script $Version

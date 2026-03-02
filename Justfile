@@ -21,20 +21,20 @@ check: fmt clippy test
 # - If VERSION omitted: bump patch automatically
 # - If VERSION provided: set exact semver
 bump VERSION='':
-	@pwsh -NoLogo -NoProfile -File scripts\release\bump.ps1 {{VERSION}}
+	@pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File scripts\release\bump.ps1 {{VERSION}}
 
 # github-release VERSION?
 # Build and upload Windows artifacts to a GitHub Release for vX.Y.Z.
 github-release VERSION='':
-	@pwsh -NoLogo -NoProfile -File scripts\release\github_release.ps1 {{VERSION}}
+	@pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File scripts\release\github_release.ps1 {{VERSION}}
 
 # crates-release
 # Publish crates to crates.io in dependency order: core -> app
 crates-release:
-	@pwsh -NoLogo -NoProfile -File scripts\release\cargo_publish.ps1
+	@pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File scripts\release\cargo_publish.ps1
 
 # release VERSION?
 # One-command production release from dev:
 # checks -> bump -> push -> immutable tag -> GH Release + assets -> crates.io publish
 release VERSION='':
-	@pwsh -NoLogo -NoProfile -File scripts\release\release.ps1 {{VERSION}}
+	@pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File scripts\release\release.ps1 {{VERSION}}

@@ -51,7 +51,7 @@ try {
   $didBump = $false
   if (-not $tagSha) {
     Write-Host "`n>> bumping version to $target"
-    $newV = & pwsh -NoLogo -NoProfile -File "$PSScriptRoot\bump.ps1" $target
+    $newV = & pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File "$PSScriptRoot\bump.ps1" $target
     $newV = ($newV | Select-Object -Last 1).Trim()
     if ($newV -ne $target) {
       throw "bump.ps1 returned '$newV' but expected '$target'"
@@ -137,7 +137,7 @@ try {
 
   # Publish to crates.io in dependency order.
   Write-Host "`n>> crates.io publish"
-  & pwsh -NoLogo -NoProfile -File "$PSScriptRoot\cargo_publish.ps1"
+  & pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File "$PSScriptRoot\cargo_publish.ps1"
 
   $releaseUrl = (Invoke-Checked gh @('release', 'view', $tag, '--json', 'url', '-q', '.url') -Quiet).Output.Trim()
   $sha = (Invoke-Checked git @('rev-parse', 'HEAD') -Quiet).Output.Trim()
