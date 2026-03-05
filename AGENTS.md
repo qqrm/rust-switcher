@@ -131,3 +131,11 @@ When making changes in this repository, always:
   - `cargo +nightly build --features debug-tracing`
   - `cargo +nightly test --locked`
 - Address and fix any findings from these checks before finalizing work.
+
+## Git Workflow
+
+- Do not push directly to `dev` or `main`.
+- Always create a feature branch (recommended prefix: `codex/`).
+- Open a Pull Request to `dev` (or `main` only for explicit release flow).
+- Merge only through PR after required checks pass.
+- Use `gh` CLI for PR creation and branch-protection operations when available.
