@@ -135,7 +135,8 @@ When making changes in this repository, always:
 ## Git Workflow
 
 - Do not push directly to `dev` or `main`.
-- Always create a feature branch (recommended prefix: `codex/`).
+- Always create a feature branch (recommended prefix: `codex/`).`r`n- `git push` must target the current feature branch only (never `dev`/`main`).
 - Open a Pull Request to `dev` (or `main` only for explicit release flow).
 - Merge only through PR after required checks pass.
 - Use `gh` CLI for PR creation and branch-protection operations when available.
+
