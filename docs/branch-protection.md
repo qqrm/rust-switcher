@@ -4,11 +4,14 @@ Recommended protected branches: `dev`, `main`.
 
 ## Required status checks
 
-Use these check names from `.github/workflows/ci.yml`:
+Use these check names from workflow runs:
 - `fmt`
 - `clippy-lib-tests`
 - `test-lib-tests`
 - `windows-full`
+- `actionlint`
+- `typos`
+- `zizmor`
 
 ## Apply protection (example)
 
@@ -17,7 +20,7 @@ Use these check names from `.github/workflows/ci.yml`:
 $payload = @{
   required_status_checks = @{
     strict   = $true
-    contexts = @('fmt', 'clippy-lib-tests', 'test-lib-tests', 'windows-full')
+    contexts = @('fmt', 'clippy-lib-tests', 'test-lib-tests', 'windows-full', 'actionlint', 'typos', 'zizmor')
   }
   enforce_admins = $false
   required_pull_request_reviews = @{

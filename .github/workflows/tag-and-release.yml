@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -38,9 +38,10 @@ jobs:
       - name: Create tag if missing
         env:
           RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ steps.version.outputs.tag }}"
+          tag="${RELEASE_TAG}"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "Tag ${tag} already exists."
             exit 0
@@ -50,9 +51,10 @@ jobs:
       - name: Create GitHub Release if missing
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ steps.version.outputs.tag }}"
+          tag="${RELEASE_TAG}"
           if gh release view "${tag}" >/dev/null 2>&1; then
             echo "Release ${tag} already exists."
             exit 0

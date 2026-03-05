@@ -6,19 +6,23 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   build-windows:
+    permissions:
+      contents: write
     runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
       - name: Build release
         run: cargo build --release
       - name: Package artifacts
@@ -36,14 +40,14 @@ jobs:
             throw 'Binary target not found in cargo metadata.'
           }
           $binName = $binTarget.name
-          $exePath = "target\\release\\$binName.exe"
+          $exePath = "target\release\$binName.exe"
           if (-not (Test-Path $exePath)) {
             throw "Executable not found at $exePath"
           }
           $artifactsDir = "artifacts"
           New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
           Copy-Item $exePath -Destination $artifactsDir
-          $zipPath = Join-Path $artifactsDir "$binName-${{ github.ref_name }}-windows-x64.zip"
+          $zipPath = Join-Path $artifactsDir "$binName-$env:RELEASE_TAG-windows-x64.zip"
           $zipItems = @($exePath)
           foreach ($item in @('README.md', 'LICENSE')) {
             if (Test-Path $item) {
@@ -66,28 +70,33 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $tag = "${{ github.ref_name }}"
+          $tag = $env:RELEASE_TAG
           gh release upload $tag artifacts\* --clobber
-
   publish-crates:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs: build-windows
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --locked
-
   sync-main-to-dev:
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     needs: publish-crates
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -106,3 +115,4 @@ jobs:
           fi
           pr=$(gh pr create --base dev --head main --title "$title" --body "Sync main back to dev for ${tag}.")
           gh pr merge "$pr" --auto --squash
+

@@ -135,8 +135,18 @@ When making changes in this repository, always:
 ## Git Workflow
 
 - Do not push directly to `dev` or `main`.
-- Always create a feature branch (recommended prefix: `codex/`).`r`n- `git push` must target the current feature branch only (never `dev`/`main`).
+- Always create a feature branch (recommended prefix: `codex/`).
+- `git push` must target the current feature branch only (never `dev`/`main`).
 - Open a Pull Request to `dev` (or `main` only for explicit release flow).
+- Before `git push`/`gh pr create`, run local checks:
+  - `cargo +nightly fmt --check`
+  - `cargo +nightly clippy --all-targets --all-features -- -D warnings`
+  - `cargo +nightly build --features debug-tracing`
+  - `cargo +nightly test --locked`
+  - `actionlint -color`
+  - `zizmor --min-severity medium .`
+- After creating/updating a PR, monitor checks and follow up:
+  - `gh pr checks <PR_NUMBER> --watch`
+  - then re-check after delay: `Start-Sleep -Seconds 300; gh pr checks <PR_NUMBER>`
 - Merge only through PR after required checks pass.
 - Use `gh` CLI for PR creation and branch-protection operations when available.
-
