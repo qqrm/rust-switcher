@@ -8,6 +8,7 @@ Use these check names from `.github/workflows/ci.yml`:
 - `fmt`
 - `clippy-lib-tests`
 - `test-lib-tests`
+- `windows-full`
 
 ## Apply protection (example)
 
@@ -16,7 +17,7 @@ Use these check names from `.github/workflows/ci.yml`:
 $payload = @{
   required_status_checks = @{
     strict   = $true
-    contexts = @('fmt', 'clippy-lib-tests', 'test-lib-tests')
+    contexts = @('fmt', 'clippy-lib-tests', 'test-lib-tests', 'windows-full')
   }
   enforce_admins = $false
   required_pull_request_reviews = @{

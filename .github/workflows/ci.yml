@@ -56,3 +56,24 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Cargo test (core lib/tests only)
         run: cargo +nightly test --lib --tests --locked
+
+  windows-full:
+    name: windows-full
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+      - name: Cargo fmt --check
+        run: cargo +nightly fmt --check
+      - name: Cargo clippy
+        run: cargo +nightly clippy --all-targets --all-features -- -D warnings
+      - name: Cargo build (debug-tracing)
+        run: cargo +nightly build --features debug-tracing
+      - name: Cargo test --locked
+        run: cargo +nightly test --locked
