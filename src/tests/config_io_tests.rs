@@ -1,19 +1,13 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL;
 
+use super::env_lock::lock_env;
 use crate::config::{self, Config, HotkeyChord, HotkeySequence};
-
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
-}
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     let ts = SystemTime::now()

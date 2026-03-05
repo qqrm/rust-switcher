@@ -254,6 +254,12 @@ macro_rules! startup_or_return0 {
             Err(e) => {
                 $crate::platform::ui::error_notifier::push($hwnd, $state, "", $text, &e);
                 on_app_error($hwnd);
+                // `on_create` stores a raw `AppState` pointer in GWLP_USERDATA before
+                // running startup steps. On early return, clear it to avoid leaving
+                // a dangling pointer after local `Box<AppState>` is dropped.
+                unsafe {
+                    SetWindowLongPtrW($hwnd, GWLP_USERDATA, 0);
+                }
                 return LRESULT(0);
             }
         }

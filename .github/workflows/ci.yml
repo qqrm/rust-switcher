@@ -9,20 +9,84 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  checks:
-    name: checks
+  fmt:
+    name: fmt
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain (latest nightly)
-        uses: dtolnay/rust-toolchain@nightly
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          components: rustfmt, clippy
+          persist-credentials: false
+      - name: Install Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       - name: Cargo fmt
-        run: cargo fmt --all -- --check
+        run: cargo +nightly fmt --all -- --check
+
+  clippy-lib-tests:
+    name: clippy-lib-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: nightly
+          components: clippy
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       - name: Cargo clippy (core lib/tests only)
-        run: cargo clippy --lib --tests -- -D warnings
+        run: cargo +nightly clippy --lib --tests -- -D warnings
+
+  test-lib-tests:
+    name: test-lib-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: nightly
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       - name: Cargo test (core lib/tests only)
-        run: cargo test --lib --tests
+        run: cargo +nightly test --lib --tests --locked
+
+  windows-full:
+    name: windows-full
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: nightly
+          components: rustfmt, clippy
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+      - name: Cargo fmt --check
+        run: cargo +nightly fmt --check
+      - name: Cargo clippy
+        run: cargo +nightly clippy --all-targets --all-features -- -D warnings
+      - name: Cargo build (debug-tracing)
+        run: cargo +nightly build --features debug-tracing
+      - name: Cargo test --locked
+        run: cargo +nightly test --locked

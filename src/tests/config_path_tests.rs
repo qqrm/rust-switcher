@@ -3,17 +3,11 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use super::env_lock::lock_env;
 use crate::config;
-
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
-}
 
 fn restore_appdata(old: Option<std::ffi::OsString>) {
     match old {
