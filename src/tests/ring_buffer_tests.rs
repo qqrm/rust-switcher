@@ -1,7 +1,17 @@
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
 use crate::input::ring_buffer::{self, InputRun, LayoutTag, RunKind, RunOrigin};
+
+fn test_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
 
 #[test]
 fn run_journal_merges_contiguous_same_metadata() {
+    let _guard = test_lock();
     ring_buffer::invalidate();
     ring_buffer::push_run(InputRun {
         text: "ab".to_string(),
@@ -23,6 +33,7 @@ fn run_journal_merges_contiguous_same_metadata() {
 
 #[test]
 fn run_journal_splits_on_layout_change() {
+    let _guard = test_lock();
     ring_buffer::invalidate();
     ring_buffer::push_run(InputRun {
         text: "ABC".to_string(),
@@ -45,6 +56,7 @@ fn run_journal_splits_on_layout_change() {
 
 #[test]
 fn take_last_layout_run_with_suffix_basic() {
+    let _guard = test_lock();
     ring_buffer::invalidate();
     ring_buffer::push_run(InputRun {
         text: "hello".to_string(),
@@ -67,6 +79,7 @@ fn take_last_layout_run_with_suffix_basic() {
 
 #[test]
 fn take_last_layout_run_with_suffix_returns_none_for_whitespace_only() {
+    let _guard = test_lock();
     ring_buffer::invalidate();
     ring_buffer::push_text("  \t\n");
     assert!(ring_buffer::take_last_layout_run_with_suffix().is_none());
@@ -74,6 +87,7 @@ fn take_last_layout_run_with_suffix_returns_none_for_whitespace_only() {
 
 #[test]
 fn legacy_push_text_segments_internally() {
+    let _guard = test_lock();
     ring_buffer::invalidate();
     ring_buffer::push_text("hello world   ");
 
@@ -87,6 +101,7 @@ fn legacy_push_text_segments_internally() {
 
 #[test]
 fn last_char_triggers_autoconvert_still_works_across_runs() {
+    let _guard = test_lock();
     ring_buffer::invalidate();
     ring_buffer::push_run(InputRun {
         text: "abc".to_string(),
@@ -113,6 +128,7 @@ fn last_char_triggers_autoconvert_still_works_across_runs() {
 
 #[test]
 fn backspace_removes_from_last_run_and_drops_empty_run() {
+    let _guard = test_lock();
     ring_buffer::invalidate();
     ring_buffer::push_text("a");
     ring_buffer::test_backspace();
@@ -121,6 +137,7 @@ fn backspace_removes_from_last_run_and_drops_empty_run() {
 
 #[test]
 fn foreground_invalidation_state_reset_via_invalidate() {
+    let _guard = test_lock();
     ring_buffer::invalidate();
     ring_buffer::push_text("abc");
     ring_buffer::mark_last_token_autoconverted();

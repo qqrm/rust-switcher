@@ -25,7 +25,6 @@ use crate::{
 
 const MAX_SELECTION_CHARS: usize = 512;
 
-
 /// Virtual key code for the Delete key.
 ///
 /// Used to remove the current selection before inserting converted text.
@@ -65,7 +64,6 @@ fn probe_convertible_selection(max_chars: usize) -> Option<String> {
         SelectionProbe::NoSelection | SelectionProbe::Unsupported => None,
     }
 }
-
 
 /// Converts the currently selected text, if there is any selection.
 ///
@@ -373,7 +371,6 @@ pub fn wait_shift_released(timeout_ms: u64) -> bool {
 
     false
 }
-
 
 /// Checks whether text is eligible for selection conversion.
 ///

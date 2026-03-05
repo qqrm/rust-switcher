@@ -18,7 +18,6 @@ const VK_RIGHT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x27);
 /// Used as a selection modifier.
 const VK_SHIFT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0x10);
 
-
 /// A small RAII helper that tracks pressed keys and releases them on drop.
 ///
 /// Intended for modifier keys (Ctrl, Shift, Alt). If `down` succeeds, the key is

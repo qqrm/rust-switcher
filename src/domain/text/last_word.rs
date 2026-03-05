@@ -690,10 +690,19 @@ fn repeat_tap(vk: VIRTUAL_KEY, count: usize, err_msg: &'static str) -> bool {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
     use lingua::{Language, LanguageDetectorBuilder};
 
     use super::*;
     use crate::input::ring_buffer;
+
+    fn test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
     fn detector_ru_en() -> lingua::LanguageDetector {
         LanguageDetectorBuilder::from_languages(&[Language::Russian, Language::English])
             .with_minimum_relative_distance(0.20)
@@ -701,20 +710,24 @@ mod tests {
     }
     #[test]
     fn ru_layout_punctuation_run_converts_ru_to_en() {
+        let _guard = test_lock();
         assert_eq!(convert_with_layout_fallback(",.", &LayoutTag::Ru), "?/");
     }
     #[test]
     fn en_layout_punctuation_run_converts_en_to_ru() {
+        let _guard = test_lock();
         assert_eq!(convert_with_layout_fallback(",.", &LayoutTag::En), "бю");
     }
     #[test]
     fn known_layout_overrides_text_heuristic() {
+        let _guard = test_lock();
         // Mixed punctuation has no letter heuristic signal, but known layout enforces direction.
         assert_eq!(convert_with_layout_fallback(".", &LayoutTag::Ru), "/");
         assert_eq!(convert_with_layout_fallback(".", &LayoutTag::En), "ю");
     }
     #[test]
     fn update_and_restore_preserve_run_metadata() {
+        let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
             InputRun {
@@ -750,6 +763,7 @@ mod tests {
     }
     #[test]
     fn convert_candidate_converts_entire_run_without_punct_peel() {
+        let _guard = test_lock();
         let payload = LastRunPayload {
             run: InputRun {
                 text: "ghbdtn,".to_string(),
@@ -769,6 +783,7 @@ mod tests {
     }
     #[test]
     fn autoconvert_does_not_touch_correct_russian_word() {
+        let _guard = test_lock();
         let detector = detector_ru_en();
         let word = "привет";
         let converted = convert_with_layout_fallback(word, &LayoutTag::Ru);
@@ -781,6 +796,7 @@ mod tests {
     }
     #[test]
     fn journal_restore_drop_restores_original_metadata() {
+        let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
             InputRun {
@@ -807,6 +823,7 @@ mod tests {
     }
     #[test]
     fn autoconvert_decision_accepts_trailing_convertible_punctuation() {
+        let _guard = test_lock();
         let detector = detector_ru_en();
         let word = "ghbdtn,";
         let converted = convert_with_layout_fallback(word, &LayoutTag::En);
@@ -815,6 +832,7 @@ mod tests {
     }
     #[test]
     fn last_sequence_payload_spans_whitespace_and_uses_single_layout() {
+        let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
             InputRun {
@@ -851,6 +869,7 @@ mod tests {
 
     #[test]
     fn manual_sequence_can_toggle_back_via_programmatic_origin() {
+        let _guard = test_lock();
         // Repro of the bug:
         // - First manual convert pushes Programmatic runs.
         // - Extractor must allow Programmatic-origin sequences, otherwise second convert cannot happen.
@@ -894,6 +913,7 @@ mod tests {
 
     #[test]
     fn manual_sequence_toggles_roundtrip_twice() {
+        let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
             InputRun {
@@ -932,6 +952,7 @@ mod tests {
 
     #[test]
     fn update_journal_sequence_preserves_whitespace_tokenization() {
+        let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
             InputRun {
@@ -973,6 +994,7 @@ mod tests {
 
     #[test]
     fn suffix_spaces_only_is_false_for_newline_suffix() {
+        let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
             InputRun {
@@ -994,6 +1016,7 @@ mod tests {
     }
     #[test]
     fn autoconvert_converts_mistyped_russian_layout_word() {
+        let _guard = test_lock();
         let detector = detector_ru_en();
         let word = "ghbdtn";
         let converted = convert_with_layout_fallback(word, &LayoutTag::En);

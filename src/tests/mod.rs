@@ -3,6 +3,7 @@
 pub mod config_io_tests;
 pub mod config_path_tests;
 pub mod config_validator_tests;
+pub mod env_lock;
 pub mod hotkey_format_tests;
 pub mod keyboard_sequence_tests;
 pub mod keyboard_vk_tests;
