@@ -25,6 +25,7 @@ jobs:
       - name: Install Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
+          toolchain: nightly
           components: rustfmt
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
@@ -42,6 +43,7 @@ jobs:
       - name: Install Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
+          toolchain: nightly
           components: clippy
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
@@ -58,6 +60,8 @@ jobs:
           persist-credentials: false
       - name: Install Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: nightly
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       - name: Cargo test (core lib/tests only)
@@ -74,6 +78,7 @@ jobs:
       - name: Install Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
+          toolchain: nightly
           components: rustfmt, clippy
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
