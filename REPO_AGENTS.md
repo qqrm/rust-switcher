@@ -125,12 +125,28 @@ Test modules cover: config I/O, config validation, hotkey formatting, keyboard s
 
 When making changes in this repository, always:
 
+- Use isolated task workspaces: parallel execution in a single working directory is forbidden.
+- Mandatory model: **1 task = 1 branch = 1 worktree = 1 pull request**.
+- Create a dedicated `git worktree` for each task before editing files.
+- Run edits, checks, commits, and pushes only from the assigned task worktree.
+- Keep the primary checkout for sync and integration only (`fetch`, `pull`, `merge`, worktree create/remove).
+- Remove task worktrees after merge and delete task branches when appropriate.
 - Run formatting, linting, build, and tests before reporting results:
   - `cargo +nightly fmt --check`
   - `cargo +nightly clippy --all-targets --all-features -- -D warnings`
   - `cargo +nightly build --features debug-tracing`
   - `cargo +nightly test --locked`
 - Address and fix any findings from these checks before finalizing work.
+
+## Rust Build Isolation
+
+When multiple task worktrees run concurrently, keep Rust build outputs isolated per worktree:
+
+```powershell
+$env:CARGO_TARGET_DIR = ".target"
+```
+
+Do not share a common `CARGO_TARGET_DIR` across concurrent task worktrees.
 
 ## Git Workflow
 
