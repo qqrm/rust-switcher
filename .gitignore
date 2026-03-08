@@ -23,3 +23,5 @@ target
 .secrets
 .actrc
 **.zip
+
+.codex/AGENTS.remote.md
