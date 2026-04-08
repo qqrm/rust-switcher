@@ -16,7 +16,7 @@ try {
   Assert-CleanWorktree
 
   # Ensure we see remote tags for immutability checks.
-  Invoke-Checked git @('fetch', 'origin', '--tags', '--prune') -Quiet
+  $null = Invoke-Checked git @('fetch', 'origin', '--tags', '--prune') -Quiet
 
   # Determine target version (for early tag immutability validation).
   $appCur  = Get-CargoPackageVersion 'rust-switcher'
@@ -52,7 +52,10 @@ try {
   if (-not $tagSha) {
     Write-Host "`n>> bumping version to $target"
     $newV = & pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File "$PSScriptRoot\bump.ps1" $target
-    $newV = ($newV | Select-Object -Last 1).Trim()
+    $newV = ($newV |
+      ForEach-Object { "$_".Trim() } |
+      Where-Object { $_ } |
+      Select-Object -Last 1)
     if ($newV -ne $target) {
       throw "bump.ps1 returned '$newV' but expected '$target'"
     }
@@ -73,7 +76,7 @@ try {
   Invoke-Checked git @('push', 'origin', 'dev')
 
   # Re-fetch tags to reduce race with concurrent tag creation.
-  Invoke-Checked git @('fetch', 'origin', '--tags', '--prune') -Quiet
+  $null = Invoke-Checked git @('fetch', 'origin', '--tags', '--prune') -Quiet
 
   # Create immutable tag at HEAD (or verify existing).
   $head = (Invoke-Checked git @('rev-parse', 'HEAD') -Quiet).Output.Trim()
@@ -96,7 +99,7 @@ try {
 
   # Create/update GitHub Release and upload assets.
   Write-Host "`n>> GitHub Release $tag (create/edit + upload assets)"
-  Invoke-Checked gh @('auth', 'status') -Quiet
+  $null = Invoke-Checked gh @('auth', 'status') -Quiet
 
   $notesFile = New-TemporaryFile
   try {
