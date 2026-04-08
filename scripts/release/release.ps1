@@ -18,23 +18,33 @@ try {
   # Ensure we see remote tags for immutability checks.
   $null = Invoke-Checked git @('fetch', 'origin', '--tags', '--prune') -Quiet
 
+  $sourceHead = (Invoke-Checked git @('rev-parse', 'HEAD') -Quiet).Output.Trim()
+  $existingTag = Find-ReleaseTagForSourceCommit $sourceHead
+
   # Determine target version (for early tag immutability validation).
   $appCur  = Get-CargoPackageVersion 'rust-switcher'
   $coreCur = Get-CargoPackageVersion 'rust-switcher-core'
 
-  $target = if ([string]::IsNullOrWhiteSpace($Version)) {
+  $target = if ($existingTag) {
+    Get-VersionFromTag $existingTag
+  } elseif ([string]::IsNullOrWhiteSpace($Version)) {
     $base = Max-SemVer $appCur $coreCur
+    $latestTag = Get-LatestVersionTag
+    if ($latestTag) {
+      $base = Max-SemVer $base (Get-VersionFromTag $latestTag)
+    }
     Bump-Patch $base
   } else {
     Assert-SemVer $Version
   }
 
   $tag = "v$target"
-  $headBefore = (Invoke-Checked git @('rev-parse', 'HEAD') -Quiet).Output.Trim()
-
   $tagSha = Get-TagSha $tag
-  if ($tagSha -and $tagSha -ne $headBefore) {
-    throw "Tag '$tag' already exists but points to $tagSha while HEAD is $headBefore. Refusing to continue."
+  if ($existingTag -and $existingTag -ne $tag) {
+    throw "Source commit $sourceHead already maps to tag '$existingTag', but current target is '$tag'. Refusing to continue."
+  }
+  if (-not $existingTag -and $tagSha) {
+    throw "Tag '$tag' already exists but is not associated with source commit $sourceHead. Refusing to continue."
   }
 
   # Checks (must pass before version bump / release).
@@ -47,11 +57,14 @@ try {
   Write-Host "`n>> cargo test --workspace --all-features --all-targets --locked"
   Invoke-Checked cargo @('test', '--workspace', '--all-features', '--all-targets', '--locked')
 
-  # If tag already exists at HEAD, we treat the bump step as already done.
   $didBump = $false
-  if (-not $tagSha) {
+  $created = $false
+  if ($existingTag) {
+    Write-Host "`n>> reusing existing release tag $tag for source $sourceHead"
+    Invoke-Checked git @('checkout', '--detach', $tag) | Out-Null
+  } else {
     Write-Host "`n>> bumping version to $target"
-    $newV = & pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File "$PSScriptRoot\bump.ps1" $target
+    $newV = & pwsh -ExecutionPolicy Bypass -NoLogo -NoProfile -File "$PSScriptRoot\bump.ps1" $target $sourceHead
     $newV = ($newV |
       ForEach-Object { "$_".Trim() } |
       Where-Object { $_ } |
@@ -60,30 +73,22 @@ try {
       throw "bump.ps1 returned '$newV' but expected '$target'"
     }
     $didBump = $true
-  } else {
-    # Sanity: tag points to HEAD; versions must match target.
-    $appNow  = Get-CargoPackageVersion 'rust-switcher'
-    $coreNow = Get-CargoPackageVersion 'rust-switcher-core'
-    if ($appNow -ne $target -or $coreNow -ne $target) {
-      throw "Tag '$tag' points to HEAD but Cargo.toml versions are app=$appNow core=$coreNow (expected $target). Refusing to proceed."
-    }
+
+    Assert-CleanWorktree
+
+    $head = (Invoke-Checked git @('rev-parse', 'HEAD') -Quiet).Output.Trim()
+    $created = Ensure-Tag-Immutable -Tag $tag -ExpectedSha $head
+
+    Write-Host "`n>> git push origin $tag"
+    Invoke-Checked git @('push', 'origin', $tag)
   }
 
-  Assert-CleanWorktree
-
-  # Push dev (normal push only).
-  Write-Host "`n>> git push origin dev"
-  Invoke-Checked git @('push', 'origin', 'dev')
-
-  # Re-fetch tags to reduce race with concurrent tag creation.
-  $null = Invoke-Checked git @('fetch', 'origin', '--tags', '--prune') -Quiet
-
-  # Create immutable tag at HEAD (or verify existing).
   $head = (Invoke-Checked git @('rev-parse', 'HEAD') -Quiet).Output.Trim()
-  $created = Ensure-Tag-Immutable -Tag $tag -ExpectedSha $head
-
-  Write-Host "`n>> git push origin $tag"
-  Invoke-Checked git @('push', 'origin', $tag)
+  $appNow  = Get-CargoPackageVersion 'rust-switcher'
+  $coreNow = Get-CargoPackageVersion 'rust-switcher-core'
+  if ($appNow -ne $target -or $coreNow -ne $target) {
+    throw "Release tree versions are app=$appNow core=$coreNow (expected $target). Refusing to proceed."
+  }
 
   # Build artifacts.
   Write-Host "`n>> cargo build --release"
@@ -126,9 +131,9 @@ try {
 
     $view = Invoke-Checked gh @('release', 'view', $tag) -AllowFailure -Quiet
     if ($view.ExitCode -ne 0) {
-      Invoke-Checked gh @('release', 'create', $tag, '--title', $tag, '--notes-file', $notesFile, '--target', 'dev', '--verify-tag')
+      Invoke-Checked gh @('release', 'create', $tag, '--title', $tag, '--notes-file', $notesFile, '--verify-tag')
     } else {
-      Invoke-Checked gh @('release', 'edit', $tag, '--title', $tag, '--notes-file', $notesFile, '--target', 'dev', '--verify-tag')
+      Invoke-Checked gh @('release', 'edit', $tag, '--title', $tag, '--notes-file', $notesFile)
     }
 
     $uploadArgs = @('release', 'upload', $tag) + $assets + @('--clobber')
@@ -150,7 +155,8 @@ try {
   Write-Host ("  tag:     {0}" -f $tag)
   Write-Host ("  head:    {0}" -f $sha)
   if ($releaseUrl) { Write-Host ("  release: {0}" -f $releaseUrl) }
-  if ($didBump) { Write-Host "  bump:    committed + pushed" }
+  if ($didBump) { Write-Host "  bump:    committed locally + tagged" }
+  if ($existingTag) { Write-Host "  retry:   reused existing release tag" }
   if ($created) { Write-Host "  tag:     created" } else { Write-Host "  tag:     already existed" }
 }
 finally {
