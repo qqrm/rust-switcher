@@ -1,0 +1,48 @@
+name: Auto merge
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: auto-merge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Enable auto-merge for open Dependabot PRs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t prs < <(
+            gh pr list \
+              --state open \
+              --limit 100 \
+              --json number,author,baseRefName,headRefName \
+              --jq '.[] | select(.baseRefName == "dev" and .author.login == "app/dependabot" and (.headRefName | startswith("dependabot/"))) | .number'
+          )
+
+          if [ "${#prs[@]}" -eq 0 ]; then
+            echo "No open Dependabot PRs found."
+            exit 0
+          fi
+
+          for pr in "${prs[@]}"; do
+            echo "Attempting to enable auto-merge for PR #$pr"
+            if gh pr merge "$pr" --auto --squash --delete-branch; then
+              echo "Auto-merge is enabled for PR #$pr"
+            else
+              echo "PR #$pr is not ready for auto-merge yet; leaving it open for the next scan."
+            fi
+          done
