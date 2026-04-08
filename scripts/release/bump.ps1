@@ -35,9 +35,9 @@ try {
   }
 
   # Update Cargo.lock deterministically for the new workspace versions.
-  Invoke-Checked cargo @('generate-lockfile') -Quiet
+  $null = Invoke-Checked cargo @('generate-lockfile') -Quiet
 
-  Invoke-Checked git @('add', 'Cargo.toml', 'Cargo.lock', 'crates/rust-switcher-core/Cargo.toml') -Quiet
+  $null = Invoke-Checked git @('add', 'Cargo.toml', 'Cargo.lock', 'crates/rust-switcher-core/Cargo.toml') -Quiet
   $msg = "chore: bump version to $target"
 
   $commit = Invoke-Checked git @('commit', '-m', $msg) -AllowFailure -Quiet
