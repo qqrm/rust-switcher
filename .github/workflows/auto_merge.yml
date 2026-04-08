@@ -29,8 +29,8 @@ jobs:
             gh pr list \
               --state open \
               --limit 100 \
-              --json number,author,baseRefName,headRefName \
-              --jq '.[] | select(.baseRefName == "dev" and .author.login == "app/dependabot" and (.headRefName | startswith("dependabot/"))) | .number'
+              --json number,author,baseRefName,headRefName,mergeStateStatus \
+              --jq '.[] | select(.baseRefName == "dev" and .author.login == "app/dependabot" and (.headRefName | startswith("dependabot/"))) | "\(.number) \(.mergeStateStatus)"'
           )
 
           if [ "${#prs[@]}" -eq 0 ]; then
@@ -38,8 +38,13 @@ jobs:
             exit 0
           fi
 
-          for pr in "${prs[@]}"; do
+          for entry in "${prs[@]}"; do
+            read -r pr merge_state <<<"$entry"
             echo "Attempting to enable auto-merge for PR #$pr"
+            if [ "$merge_state" = "BEHIND" ]; then
+              echo "PR #$pr is behind dev; updating branch first."
+              gh pr update-branch "$pr"
+            fi
             if gh pr merge "$pr" --auto --squash --delete-branch; then
               echo "Auto-merge is enabled for PR #$pr"
             else
