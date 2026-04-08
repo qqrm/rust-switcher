@@ -17,7 +17,7 @@ try {
 
     $t = $r.Output
     if ($t -match 'already uploaded|is already uploaded|already exists|is already in the index|has already been published|already published') {
-      Write-Host "cargo publish -p $Package: already published; treating as success."
+      Write-Host "cargo publish -p ${Package}: already published; treating as success."
       return
     }
     throw "cargo publish -p $Package failed.`n$t"
@@ -37,7 +37,7 @@ try {
 
       $t = $r.Output
       if ($t -match 'already uploaded|is already uploaded|already exists|is already in the index|has already been published|already published') {
-        Write-Host "cargo publish -p $Package: already published; treating as success."
+        Write-Host "cargo publish -p ${Package}: already published; treating as success."
         return
       }
 
