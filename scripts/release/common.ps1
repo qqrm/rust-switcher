@@ -17,8 +17,18 @@ function Invoke-Checked {
     [switch]$Quiet
   )
 
-  $out = & $Exe @Args 2>&1
-  $code = $LASTEXITCODE
+  $savedErrorActionPreference = $ErrorActionPreference
+  if ($AllowFailure) {
+    $ErrorActionPreference = 'Continue'
+  }
+
+  try {
+    $out = & $Exe @Args 2>&1
+    $code = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+  }
 
   if (-not $Quiet) {
     if ($out) { $out | ForEach-Object { Write-Host $_ } }
