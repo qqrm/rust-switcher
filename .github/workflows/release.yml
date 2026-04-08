@@ -117,7 +117,7 @@ jobs:
 
       - name: Rust cache
         if: steps.release_context.outputs.should_release == 'true'
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
 
       - name: Authenticate to crates.io with trusted publishing
         if: steps.release_context.outputs.should_release == 'true'

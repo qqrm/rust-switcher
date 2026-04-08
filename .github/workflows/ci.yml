@@ -28,7 +28,7 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - name: Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
       - name: Cargo fmt
         run: cargo +nightly fmt --all -- --check
 
@@ -46,7 +46,7 @@ jobs:
           toolchain: nightly
           components: clippy
       - name: Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
       - name: Cargo clippy (core lib/tests only)
         run: cargo +nightly clippy --lib --tests -- -D warnings
 
@@ -63,7 +63,7 @@ jobs:
         with:
           toolchain: nightly
       - name: Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
       - name: Cargo test (core lib/tests only)
         run: cargo +nightly test --lib --tests --locked
 
@@ -81,7 +81,7 @@ jobs:
           toolchain: nightly
           components: rustfmt, clippy
       - name: Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
       - name: Cargo fmt --check
         run: cargo +nightly fmt --check
       - name: Cargo clippy
