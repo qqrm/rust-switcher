@@ -28,7 +28,6 @@ jobs:
     env:
       CARGO_TERM_PROGRESS_WHEN: never
       GH_TOKEN: ${{ github.token }}
-      REPO_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
 
     steps:
       - name: Checkout dev
@@ -92,7 +91,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git remote set-url origin "https://x-access-token:${REPO_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Reattach local dev branch
         if: steps.release_context.outputs.should_release == 'true'

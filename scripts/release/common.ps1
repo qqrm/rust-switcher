@@ -118,6 +118,46 @@ function Bump-Patch {
   return ("{0}.{1}.{2}" -f $p[0], $p[1], ($p[2] + 1))
 }
 
+function Get-VersionFromTag {
+  param([Parameter(Mandatory = $true)][string]$Tag)
+
+  if ($Tag -notmatch '^v(\d+\.\d+\.\d+)$') {
+    throw "Tag '$Tag' is not a release tag in the form vX.Y.Z"
+  }
+
+  return (Assert-SemVer $Matches[1])
+}
+
+function Get-LatestVersionTag {
+  $tags = (Invoke-Checked git @('tag', '--list', 'v*', '--sort=-v:refname') -Quiet).Output.Split("`n") |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -match '^v\d+\.\d+\.\d+$' }
+
+  return ($tags | Select-Object -First 1)
+}
+
+function Find-ReleaseTagForSourceCommit {
+  param([Parameter(Mandatory = $true)][string]$SourceCommit)
+
+  $needle = $SourceCommit.Trim()
+  if (-not $needle) {
+    throw 'Source commit must not be empty.'
+  }
+
+  $tags = (Invoke-Checked git @('tag', '--list', 'v*', '--sort=-v:refname') -Quiet).Output.Split("`n") |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -match '^v\d+\.\d+\.\d+$' }
+
+  foreach ($tag in $tags) {
+    $body = (Invoke-Checked git @('log', '-1', '--format=%B', $tag) -Quiet).Output
+    if ($body -match ("(?m)^release-source:\s*" + [regex]::Escape($needle) + "\s*$")) {
+      return $tag
+    }
+  }
+
+  return $null
+}
+
 function Get-CargoPackageVersion {
   param([Parameter(Mandatory = $true)][string]$Package)
 

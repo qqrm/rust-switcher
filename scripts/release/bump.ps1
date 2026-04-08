@@ -1,6 +1,9 @@
 param(
   [Parameter(Mandatory = $false)]
-  [string]$Version = ''
+  [string]$Version = '',
+
+  [Parameter(Mandatory = $false)]
+  [string]$SourceCommit = ''
 )
 
 . "$PSScriptRoot\common.ps1"
@@ -38,7 +41,15 @@ try {
   $null = Invoke-Checked cargo @('generate-lockfile') -Quiet
 
   $null = Invoke-Checked git @('add', 'Cargo.toml', 'Cargo.lock', 'crates/rust-switcher-core/Cargo.toml') -Quiet
-  $msg = "chore: bump version to $target"
+  $msg = if ([string]::IsNullOrWhiteSpace($SourceCommit)) {
+    "chore: bump version to $target"
+  } else {
+    @(
+      "chore: release $target",
+      "",
+      "release-source: $($SourceCommit.Trim())"
+    ) -join "`n"
+  }
 
   $commit = Invoke-Checked git @('commit', '-m', $msg) -AllowFailure -Quiet
   if ($commit.ExitCode -ne 0) {
