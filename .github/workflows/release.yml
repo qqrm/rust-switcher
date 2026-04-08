@@ -49,66 +49,35 @@ jobs:
               return;
             }
 
-            const query = `
-              query($owner: String!, $repo: String!, $oid: GitObjectID!) {
-                repository(owner: $owner, name: $repo) {
-                  object(oid: $oid) {
-                    ... on Commit {
-                      associatedPullRequests(first: 10) {
-                        nodes {
-                          number
-                          merged
-                          baseRefName
-                          headRefName
-                          author {
-                            login
-                          }
-                          labels(first: 20) {
-                            nodes {
-                              name
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            `;
-
-            const result = await github.graphql(query, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              oid: context.sha,
-            });
-
-            const commit = result.repository.object;
-            if (!commit) {
+            const message = context.payload.head_commit?.message ?? '';
+            const subject = message.split('\n', 1)[0] ?? '';
+            const match = subject.match(/\(#(\d+)\)$/);
+            if (!match) {
               core.setOutput('should_release', 'false');
-              core.setOutput('reason', 'no-commit');
+              core.setOutput('reason', 'no-pr-number-in-subject');
               return;
             }
 
-            const prs = commit.associatedPullRequests.nodes;
-            const pr = prs.find((candidate) => {
-              const labels = candidate.labels.nodes.map((label) => label.name);
-              return (
-                candidate.merged &&
-                candidate.baseRefName === 'dev' &&
-                candidate.author?.login === 'dependabot[bot]' &&
-                candidate.headRefName.startsWith('dependabot/') &&
-                labels.includes('rust')
-              );
+            const prNumber = Number(match[1]);
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
             });
 
-            if (!pr) {
+            if (
+              !pr.merged ||
+              pr.base.ref !== 'dev' ||
+              pr.user.login !== 'dependabot[bot]' ||
+              !pr.head.ref.startsWith('dependabot/cargo/')
+            ) {
               core.setOutput('should_release', 'false');
               core.setOutput('reason', 'no-matching-pr');
               return;
             }
 
             core.setOutput('should_release', 'true');
-            core.setOutput('reason', `dependabot-pr-${pr.number}`);
+            core.setOutput('reason', `dependabot-pr-${prNumber}`);
 
       - name: Stop when this push is not a cargo Dependabot merge
         if: steps.release_context.outputs.should_release != 'true'
