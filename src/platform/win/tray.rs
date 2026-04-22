@@ -1,3 +1,5 @@
+use std::sync::{Mutex, OnceLock};
+
 use windows::{
     Win32::{
         Foundation::{HINSTANCE, HWND, POINT},
@@ -32,7 +34,7 @@ const ID_EXIT: u32 = 1001;
 const ID_SHOW_HIDE: u32 = 1002;
 const ID_AUTOCONVERT_TOGGLE: u32 = 1003;
 const ID_CHANGE_THEME: u32 = 1004;
-const TRAY_TOOLTIP: &str = "Rust Switcher";
+const DEFAULT_TRAY_TOOLTIP: &str = "Rust Switcher";
 
 unsafe fn show_popup_menu_at_cursor(hwnd: HWND, hmenu: HMENU) -> u32 {
     let mut pt = POINT { x: 0, y: 0 };
@@ -87,6 +89,31 @@ fn fill_wide(dst: &mut [u16], s: &str) {
     }
 }
 
+fn tray_tooltip_cache() -> &'static Mutex<String> {
+    static CACHE: OnceLock<Mutex<String>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(DEFAULT_TRAY_TOOLTIP.to_string()))
+}
+
+fn current_tray_tooltip() -> String {
+    match tray_tooltip_cache().lock() {
+        Ok(tooltip) => tooltip.clone(),
+        Err(_) => {
+            tracing::warn!(msg = "tray_tooltip_lock_poisoned_read");
+            DEFAULT_TRAY_TOOLTIP.to_string()
+        }
+    }
+}
+
+fn update_cached_tray_tooltip(tooltip: &str) {
+    match tray_tooltip_cache().lock() {
+        Ok(mut cached) => {
+            cached.clear();
+            cached.push_str(tooltip);
+        }
+        Err(_) => tracing::warn!(msg = "tray_tooltip_lock_poisoned_write"),
+    }
+}
+
 fn shell_notify(
     action: NOTIFY_ICON_MESSAGE,
     nid: &NOTIFYICONDATAW,
@@ -128,7 +155,7 @@ unsafe fn apply_tray_identity(nid: &mut NOTIFYICONDATAW, hwnd: HWND) -> windows:
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
 
     nid.hIcon = unsafe { default_icon(hwnd) }?;
-    fill_wide(&mut nid.szTip, TRAY_TOOLTIP);
+    fill_wide(&mut nid.szTip, &current_tray_tooltip());
 
     Ok(())
 }
@@ -266,6 +293,26 @@ pub fn balloon_info(hwnd: HWND, title: &str, text: &str) -> windows::core::Resul
     balloon_common(hwnd, title, text, NIIF_INFO.0, "balloon_info: NIM_MODIFY")
 }
 
+pub fn set_tooltip(hwnd: HWND, tooltip: &str) -> windows::core::Result<()> {
+    update_cached_tray_tooltip(tooltip);
+
+    let mut nid = NOTIFYICONDATAW {
+        cbSize: u32::try_from(core::mem::size_of::<NOTIFYICONDATAW>())?,
+        hWnd: hwnd,
+        uID: TRAY_UID,
+        ..Default::default()
+    };
+
+    nid.uFlags = NIF_TIP | NIF_SHOWTIP;
+    fill_wide(&mut nid.szTip, &current_tray_tooltip());
+
+    if unsafe { Shell_NotifyIconW(NIM_MODIFY, &raw const nid).as_bool() } {
+        return Ok(());
+    }
+
+    ensure_icon(hwnd)
+}
+
 pub fn switch_tray_icon(hwnd: HWND, use_green: bool) -> windows::core::Result<()> {
     unsafe {
         let icon = if use_green {
@@ -284,8 +331,14 @@ pub fn switch_tray_icon(hwnd: HWND, use_green: bool) -> windows::core::Result<()
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
         nid.uCallbackMessage = WM_APP_TRAY;
         nid.hIcon = icon;
-        fill_wide(&mut nid.szTip, TRAY_TOOLTIP);
+        fill_wide(&mut nid.szTip, &current_tray_tooltip());
 
+        if Shell_NotifyIconW(NIM_MODIFY, &raw const nid).as_bool() {
+            return Ok(());
+        }
+
+        remove_icon(hwnd);
+        ensure_icon(hwnd)?;
         shell_notify(NIM_MODIFY, &nid, "switch_tray_icon")
     }
 }
