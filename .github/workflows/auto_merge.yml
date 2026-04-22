@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -27,6 +28,7 @@ jobs:
           set -euo pipefail
           mapfile -t prs < <(
             gh pr list \
+              --repo "$GH_REPO" \
               --state open \
               --limit 100 \
               --json number,author,baseRefName,headRefName,mergeStateStatus \
@@ -43,9 +45,9 @@ jobs:
             echo "Attempting to enable auto-merge for PR #$pr"
             if [ "$merge_state" = "BEHIND" ]; then
               echo "PR #$pr is behind dev; updating branch first."
-              gh pr update-branch "$pr"
+              gh pr update-branch "$pr" --repo "$GH_REPO"
             fi
-            if gh pr merge "$pr" --auto --squash --delete-branch; then
+            if gh pr merge "$pr" --repo "$GH_REPO" --auto --squash --delete-branch; then
               echo "Auto-merge is enabled for PR #$pr"
             else
               echo "PR #$pr is not ready for auto-merge yet; leaving it open for the next scan."
