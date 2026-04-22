@@ -26,13 +26,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          should_auto_merge() {
+            local head_ref="$1"
+            local title="$2"
+
+            if [[ "$head_ref" == dependabot/cargo/* ]]; then
+              return 0
+            fi
+
+            if [[ "$head_ref" != dependabot/github_actions/* ]]; then
+              return 1
+            fi
+
+            if [[ "$title" =~ from[[:space:]]v?([0-9]+)(\.[^[:space:]]*)?[[:space:]]to[[:space:]]v?([0-9]+)(\.[^[:space:]]*)?$ ]]; then
+              if [[ "${BASH_REMATCH[1]}" != "${BASH_REMATCH[3]}" ]]; then
+                return 1
+              fi
+            fi
+
+            return 0
+          }
+
           mapfile -t prs < <(
             gh pr list \
               --repo "$GH_REPO" \
               --state open \
               --limit 100 \
-              --json number,author,baseRefName,headRefName,mergeStateStatus \
-              --jq '.[] | select(.baseRefName == "dev" and .author.login == "app/dependabot" and (.headRefName | startswith("dependabot/"))) | "\(.number) \(.mergeStateStatus)"'
+              --json number,title,author,baseRefName,headRefName,mergeStateStatus \
+              --jq '.[] | select(.baseRefName == "dev" and .author.login == "app/dependabot" and (.headRefName | startswith("dependabot/"))) | [.number, .mergeStateStatus, .headRefName, (.title | @base64)] | @tsv'
           )
 
           if [ "${#prs[@]}" -eq 0 ]; then
@@ -41,8 +63,15 @@ jobs:
           fi
 
           for entry in "${prs[@]}"; do
-            read -r pr merge_state <<<"$entry"
-            echo "Attempting to enable auto-merge for PR #$pr"
+            IFS=$'\t' read -r pr merge_state head_ref title_b64 <<<"$entry"
+            title="$(printf '%s' "$title_b64" | base64 --decode)"
+
+            if ! should_auto_merge "$head_ref" "$title"; then
+              echo "Skipping PR #$pr ($title): auto-merge policy requires cargo updates or non-major GitHub Actions bumps."
+              continue
+            fi
+
+            echo "Attempting to enable auto-merge for PR #$pr ($title)"
             if [ "$merge_state" = "BEHIND" ]; then
               echo "PR #$pr is behind dev; updating branch first."
               gh pr update-branch "$pr" --repo "$GH_REPO"
