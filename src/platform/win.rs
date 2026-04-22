@@ -104,6 +104,36 @@ pub(crate) fn apply_theme_from_tray(hwnd: HWND, dark: bool) {
     }
 }
 
+fn tray_toggle_hotkey_text(state: &AppState) -> String {
+    let hotkey = if state.hotkey_sequence_values.pause.is_some() {
+        format_hotkey_sequence(state.hotkey_sequence_values.pause)
+    } else {
+        format_hotkey(state.hotkey_values.pause)
+    };
+
+    if hotkey == "None" {
+        "not set".to_string()
+    } else {
+        hotkey
+    }
+}
+
+fn refresh_tray_tooltip(hwnd: HWND, state: &AppState) {
+    let status = if state.autoconvert_enabled {
+        "ON"
+    } else {
+        "OFF"
+    };
+    let tooltip = format!(
+        "AutoConvert: {status}\r\nToggle hotkey: {}\r\nClick: show/hide",
+        tray_toggle_hotkey_text(state)
+    );
+
+    if let Err(e) = crate::platform::win::tray::set_tooltip(hwnd, &tooltip) {
+        tracing::warn!(error = ?e, "tray set_tooltip failed");
+    }
+}
+
 pub fn refresh_autostart_checkbox(state: &mut AppState) -> windows::core::Result<()> {
     let enabled = crate::platform::win::autostart::is_enabled()?;
     crate::utils::helpers::set_checkbox(state.checkboxes.autostart, enabled);
@@ -231,6 +261,8 @@ fn apply_config_runtime(
             );
         }
     }
+
+    refresh_tray_tooltip(hwnd, state);
 
     Ok(())
 }
@@ -770,15 +802,13 @@ fn set_autoconvert_enabled_from_tray(
         tracing::warn!(error = ?e, "switch_tray_icon failed");
     }
 
+    refresh_tray_tooltip(hwnd, state);
+
     if !show_balloon {
         return;
     }
 
-    let hotkey_text = if state.hotkey_sequence_values.pause.is_some() {
-        crate::platform::win::format_hotkey_sequence(state.hotkey_sequence_values.pause)
-    } else {
-        crate::platform::win::format_hotkey(state.hotkey_values.pause)
-    };
+    let hotkey_text = tray_toggle_hotkey_text(state);
 
     let body = if enabled {
         format!("Status: active.\nAuto convert: ON.\nToggle: {hotkey_text}")
