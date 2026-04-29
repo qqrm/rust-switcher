@@ -6,9 +6,10 @@ use std::{
 #[cfg(windows)]
 use windows::Win32::UI::{
     Input::KeyboardAndMouse::{
-        GetAsyncKeyState, GetKeyboardLayout, GetKeyboardState, HKL, ToUnicodeEx, VIRTUAL_KEY,
-        VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_LSHIFT,
-        VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_SHIFT, VK_TAB, VK_UP,
+        GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, HKL, ToUnicodeEx,
+        VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME,
+        VK_INSERT, VK_LEFT, VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_SHIFT,
+        VK_TAB, VK_UP,
     },
     WindowsAndMessaging::{
         GetForegroundWindow, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
@@ -352,6 +353,15 @@ struct DecodedText {
 }
 
 #[cfg(windows)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct KeyboardStateOverrides {
+    shift_down: bool,
+    left_shift_down: bool,
+    right_shift_down: bool,
+    caps_lock_on: bool,
+}
+
+#[cfg(windows)]
 pub fn layout_tag_from_hkl(hkl: HKL) -> LayoutTag {
     let hkl_raw = hkl.0 as usize;
 
@@ -401,6 +411,67 @@ fn mods_ctrl_or_alt_down() -> bool {
 }
 
 #[cfg(windows)]
+fn key_is_down(vk: VIRTUAL_KEY) -> bool {
+    let value = unsafe { GetAsyncKeyState(i32::from(vk.0)) }.cast_unsigned();
+    (value & 0x8000) != 0
+}
+
+#[cfg(windows)]
+fn key_is_toggled(vk: VIRTUAL_KEY) -> bool {
+    let value = unsafe { GetKeyState(i32::from(vk.0)) }.cast_unsigned();
+    (value & 0x0001) != 0
+}
+
+#[cfg(windows)]
+fn set_key_down_state(state: &mut [u8; 256], vk: VIRTUAL_KEY, is_down: bool) {
+    let idx = usize::from(vk.0);
+    if idx >= state.len() {
+        return;
+    }
+
+    if is_down {
+        state[idx] |= 0x80;
+    } else {
+        state[idx] &= !0x80;
+    }
+}
+
+#[cfg(windows)]
+fn set_key_toggle_state(state: &mut [u8; 256], vk: VIRTUAL_KEY, is_toggled: bool) {
+    let idx = usize::from(vk.0);
+    if idx >= state.len() {
+        return;
+    }
+
+    if is_toggled {
+        state[idx] |= 0x01;
+    } else {
+        state[idx] &= !0x01;
+    }
+}
+
+#[cfg(windows)]
+fn current_keyboard_state_overrides() -> KeyboardStateOverrides {
+    KeyboardStateOverrides {
+        shift_down: key_is_down(VK_SHIFT),
+        left_shift_down: key_is_down(VK_LSHIFT),
+        right_shift_down: key_is_down(VK_RSHIFT),
+        caps_lock_on: key_is_toggled(VK_CAPITAL),
+    }
+}
+
+#[cfg(windows)]
+fn apply_keyboard_state_overrides(state: &mut [u8; 256], overrides: KeyboardStateOverrides) {
+    // LL-hook decoding runs before the target thread's keyboard state is fully reflected in our
+    // thread-local `GetKeyboardState` snapshot. Patch in the physical modifier/toggle state that
+    // affects character case before calling `ToUnicodeEx`.
+    set_key_down_state(state, VK_SHIFT, overrides.shift_down);
+    set_key_down_state(state, VK_LSHIFT, overrides.left_shift_down);
+    set_key_down_state(state, VK_RSHIFT, overrides.right_shift_down);
+    set_key_toggle_state(state, VK_CAPITAL, overrides.caps_lock_on);
+}
+
+#[cfg(windows)]
 fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<DecodedText> {
     let fg = unsafe { GetForegroundWindow() };
     if fg.0.is_null() {
@@ -416,27 +487,7 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<DecodedTex
         return None;
     }
 
-    let async_down = |vk: VIRTUAL_KEY| -> bool {
-        let v = unsafe { GetAsyncKeyState(i32::from(vk.0)) }.cast_unsigned();
-        (v & 0x8000) != 0
-    };
-
-    let apply_async_key = |state: &mut [u8; 256], vk: VIRTUAL_KEY| {
-        let idx = usize::from(vk.0);
-        if idx >= state.len() {
-            return;
-        }
-
-        if async_down(vk) {
-            state[idx] |= 0x80;
-        } else {
-            state[idx] &= !0x80;
-        }
-    };
-
-    apply_async_key(&mut state, VK_SHIFT);
-    apply_async_key(&mut state, VK_LSHIFT);
-    apply_async_key(&mut state, VK_RSHIFT);
+    apply_keyboard_state_overrides(&mut state, current_keyboard_state_overrides());
 
     let mut buf = [0u16; 8];
     let rc = unsafe { ToUnicodeEx(u32::from(vk.0), kb.scanCode, &state, &mut buf, 0, Some(hkl)) };
@@ -610,4 +661,46 @@ pub fn last_char_triggers_autoconvert() -> bool {
 
         false
     })
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_state_overrides_apply_caps_lock_toggle_without_touching_high_bit() {
+        let mut state = [0u8; 256];
+        apply_keyboard_state_overrides(
+            &mut state,
+            KeyboardStateOverrides {
+                shift_down: false,
+                left_shift_down: false,
+                right_shift_down: false,
+                caps_lock_on: true,
+            },
+        );
+
+        let caps = state[usize::from(VK_CAPITAL.0)];
+        assert_eq!(caps & 0x01, 0x01);
+        assert_eq!(caps & 0x80, 0x00);
+    }
+
+    #[test]
+    fn keyboard_state_overrides_preserve_shift_and_caps_lock_combination() {
+        let mut state = [0u8; 256];
+        apply_keyboard_state_overrides(
+            &mut state,
+            KeyboardStateOverrides {
+                shift_down: true,
+                left_shift_down: true,
+                right_shift_down: false,
+                caps_lock_on: true,
+            },
+        );
+
+        assert_eq!(state[usize::from(VK_SHIFT.0)] & 0x80, 0x80);
+        assert_eq!(state[usize::from(VK_LSHIFT.0)] & 0x80, 0x80);
+        assert_eq!(state[usize::from(VK_RSHIFT.0)] & 0x80, 0x00);
+        assert_eq!(state[usize::from(VK_CAPITAL.0)] & 0x01, 0x01);
+    }
 }
