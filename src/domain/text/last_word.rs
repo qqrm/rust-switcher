@@ -951,6 +951,64 @@ mod tests {
     }
 
     #[test]
+    fn manual_sequence_toggles_roundtrip_for_capslock_style_uppercase_text() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_run(InputRun {
+            text: "GHBDTN".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        });
+
+        let p1 = take_last_sequence_payload().expect("first sequence payload expected");
+        assert_eq!(p1.seq_text, "GHBDTN");
+        let c1 = convert_with_layout_fallback(&p1.seq_text, &p1.layout);
+        assert_eq!(c1, "ПРИВЕТ");
+        update_journal_sequence(&p1, &c1);
+
+        let p2 = take_last_sequence_payload().expect("second sequence payload expected");
+        assert_eq!(p2.layout, LayoutTag::Ru);
+        assert_eq!(p2.seq_text, "ПРИВЕТ");
+        let c2 = convert_with_layout_fallback(&p2.seq_text, &p2.layout);
+        assert_eq!(c2, "GHBDTN");
+        update_journal_sequence(&p2, &c2);
+
+        let p3 = take_last_sequence_payload().expect("third sequence payload expected");
+        assert_eq!(p3.layout, LayoutTag::En);
+        assert_eq!(p3.seq_text, "GHBDTN");
+    }
+
+    #[test]
+    fn manual_sequence_toggles_roundtrip_for_shifted_capslock_style_lowercase_text() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_run(InputRun {
+            text: "ghbdtn".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        });
+
+        let p1 = take_last_sequence_payload().expect("first sequence payload expected");
+        assert_eq!(p1.seq_text, "ghbdtn");
+        let c1 = convert_with_layout_fallback(&p1.seq_text, &p1.layout);
+        assert_eq!(c1, "привет");
+        update_journal_sequence(&p1, &c1);
+
+        let p2 = take_last_sequence_payload().expect("second sequence payload expected");
+        assert_eq!(p2.layout, LayoutTag::Ru);
+        assert_eq!(p2.seq_text, "привет");
+        let c2 = convert_with_layout_fallback(&p2.seq_text, &p2.layout);
+        assert_eq!(c2, "ghbdtn");
+        update_journal_sequence(&p2, &c2);
+
+        let p3 = take_last_sequence_payload().expect("third sequence payload expected");
+        assert_eq!(p3.layout, LayoutTag::En);
+        assert_eq!(p3.seq_text, "ghbdtn");
+    }
+
+    #[test]
     fn update_journal_sequence_preserves_whitespace_tokenization() {
         let _guard = test_lock();
         ring_buffer::invalidate();
