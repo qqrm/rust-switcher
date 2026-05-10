@@ -2,7 +2,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIF
 
 use crate::config::{
     Config, HotkeyChord, HotkeySequence,
-    constants::{CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT},
+    constants::{
+        CONVERT_LAST_SEQUENCE, CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT,
+    },
 };
 
 fn chord(mods: u32, mods_vks: u32, vk: u32) -> HotkeyChord {
@@ -47,12 +49,14 @@ fn seq2(mods1: u32, vk1: u32, mods2: u32, vk2: u32, max_gap_ms: u32) -> HotkeySe
 
 fn mk_cfg(
     last_word: Option<HotkeySequence>,
+    last_sequence: Option<HotkeySequence>,
     pause: Option<HotkeySequence>,
     selection: Option<HotkeySequence>,
     layout: Option<HotkeySequence>,
 ) -> Config {
     Config {
         hotkey_convert_last_word_sequence: last_word,
+        hotkey_convert_last_sequence_sequence: last_sequence,
         hotkey_pause_sequence: pause,
         hotkey_convert_selection_sequence: selection,
         hotkey_switch_layout_sequence: layout,
@@ -86,13 +90,14 @@ fn assert_has_common_error_shape(err: &str) {
 
 #[test]
 fn no_sequences_ok() {
-    assert_ok(mk_cfg(None, None, None, None));
+    assert_ok(mk_cfg(None, None, None, None, None));
 }
 
 #[test]
 fn only_one_sequence_ok() {
     assert_ok(mk_cfg(
         Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
+        None,
         None,
         None,
         None,
@@ -106,6 +111,7 @@ fn no_duplicates_ok() {
         Some(seq1(MOD_ALT.0, u32::from(b'B'))),
         Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
         Some(seq1(MOD_WIN.0, u32::from(b'D'))),
+        Some(seq1(MOD_CONTROL.0 | MOD_SHIFT.0, u32::from(b'E'))),
     ));
 }
 
@@ -115,9 +121,27 @@ fn allowed_duplicate_last_word_and_selection_ok() {
     assert_ok(mk_cfg(
         Some(same),
         Some(seq1(MOD_ALT.0, u32::from(b'B'))),
-        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
         Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
+        Some(seq1(MOD_WIN.0, u32::from(b'D'))),
     ));
+}
+
+#[test]
+fn duplicate_last_word_and_last_sequence_err() {
+    let dup = seq1(MOD_CONTROL.0, u32::from(b'A'));
+
+    let err = assert_err(mk_cfg(Some(dup), Some(dup), None, None, None));
+
+    assert_has_common_error_shape(&err);
+    assert!(err.contains(CONVERT_LAST_WORD), "{err}");
+    assert!(err.contains(CONVERT_LAST_SEQUENCE), "{err}");
+    assert!(
+        err.contains(&format!(
+            "• '{CONVERT_LAST_WORD}' and '{CONVERT_LAST_SEQUENCE}'\n"
+        )),
+        "{err}"
+    );
 }
 
 #[test]
@@ -126,6 +150,7 @@ fn duplicate_pause_and_layout_err() {
 
     let err = assert_err(mk_cfg(
         Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'X'))),
         Some(dup),
         Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
         Some(seq1(MOD_ALT.0, u32::from(b'B'))),
@@ -141,31 +166,12 @@ fn duplicate_pause_and_layout_err() {
 }
 
 #[test]
-fn duplicate_last_word_and_pause_err() {
-    let dup = seq1(MOD_CONTROL.0, u32::from(b'A'));
-
-    let err = assert_err(mk_cfg(
-        Some(dup),
-        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
-        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
-        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
-    ));
-
-    assert_has_common_error_shape(&err);
-    assert!(err.contains(CONVERT_LAST_WORD), "{err}");
-    assert!(err.contains(PAUSE), "{err}");
-    assert!(
-        err.contains(&format!("• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n")),
-        "{err}"
-    );
-}
-
-#[test]
 fn duplicate_selection_and_pause_err() {
     let dup = seq1(MOD_CONTROL.0, u32::from(b'A'));
 
     let err = assert_err(mk_cfg(
-        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'W'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'X'))),
         Some(dup),
         Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
         Some(seq1(MOD_ALT.0, u32::from(b'B'))),
@@ -181,29 +187,6 @@ fn duplicate_selection_and_pause_err() {
 }
 
 #[test]
-fn allowed_duplicate_pair_but_third_action_same_still_err_lists_two_pairs() {
-    let same = seq1(MOD_CONTROL.0, u32::from(b'X'));
-
-    let err = assert_err(mk_cfg(
-        Some(same),
-        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
-        Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
-        None,
-    ));
-
-    assert_has_common_error_shape(&err);
-
-    let expected_1 = format!("• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n");
-    let expected_2 = format!("• '{PAUSE}' and '{CONVERT_SELECTION}'\n");
-
-    assert!(err.contains(&expected_1), "{err}");
-    assert!(err.contains(&expected_2), "{err}");
-
-    let forbidden = format!("• '{CONVERT_LAST_WORD}' and '{CONVERT_SELECTION}'\n");
-    assert!(!err.contains(&forbidden), "{err}");
-}
-
-#[test]
 fn two_independent_duplicate_pairs_err_lists_both_in_stable_order() {
     let a = seq1(MOD_CONTROL.0, u32::from(b'A'));
     let b = seq1(MOD_ALT.0, u32::from(b'B'));
@@ -211,6 +194,7 @@ fn two_independent_duplicate_pairs_err_lists_both_in_stable_order() {
     let err = assert_err(mk_cfg(
         Some(a),
         Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
         Some(b),
         Some(seq1(MOD_ALT.0, u32::from(b'B'))),
     ));
@@ -218,7 +202,7 @@ fn two_independent_duplicate_pairs_err_lists_both_in_stable_order() {
     assert_has_common_error_shape(&err);
 
     let expected = format!(
-        "Duplicate hotkey sequences found:\n\n• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n• '{CONVERT_SELECTION}' and '{SWITCH_LAYOUT}'\n\nEach action must have a unique hotkey sequence."
+        "Duplicate hotkey sequences found:\n\n• '{CONVERT_LAST_WORD}' and '{CONVERT_LAST_SEQUENCE}'\n• '{CONVERT_SELECTION}' and '{SWITCH_LAYOUT}'\n\nEach action must have a unique hotkey sequence."
     );
 
     assert_eq!(err, expected);
@@ -232,6 +216,7 @@ fn duplicates_across_non_adjacent_actions_err() {
         Some(dup),
         None,
         Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
         Some(seq1(MOD_SHIFT.0, u32::from(b'Z'))),
     ));
 
@@ -247,7 +232,7 @@ fn different_max_gap_is_not_duplicate_current_behavior() {
     let s1 = seq1_gap(MOD_CONTROL.0, u32::from(b'K'), 200);
     let s2 = seq1_gap(MOD_CONTROL.0, u32::from(b'K'), 400);
 
-    assert_ok(mk_cfg(Some(s1), Some(s2), None, None));
+    assert_ok(mk_cfg(Some(s1), Some(s2), None, None, None));
 }
 
 #[test]
@@ -255,7 +240,7 @@ fn different_mods_vks_is_not_duplicate_current_behavior() {
     let s1 = seq1_modsvks(MOD_CONTROL.0, 0, u32::from(b'K'));
     let s2 = seq1_modsvks(MOD_CONTROL.0, 1, u32::from(b'K'));
 
-    assert_ok(mk_cfg(Some(s1), Some(s2), None, None));
+    assert_ok(mk_cfg(Some(s1), Some(s2), None, None, None));
 }
 
 #[test]
@@ -275,7 +260,7 @@ fn different_second_chord_is_not_duplicate_current_behavior() {
         250,
     );
 
-    assert_ok(mk_cfg(Some(s1), Some(s2), None, None));
+    assert_ok(mk_cfg(Some(s1), Some(s2), None, None, None));
 }
 
 #[test]
@@ -299,11 +284,14 @@ fn same_two_chord_sequence_is_duplicate_err() {
         )),
         None,
         None,
+        None,
     ));
 
     assert_has_common_error_shape(&err);
     assert!(
-        err.contains(&format!("• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n")),
+        err.contains(&format!(
+            "• '{CONVERT_LAST_WORD}' and '{CONVERT_LAST_SEQUENCE}'\n"
+        )),
         "{err}"
     );
 }
@@ -313,6 +301,7 @@ fn none_values_are_ignored_when_searching_duplicates() {
     let dup = seq1(MOD_ALT.0, u32::from(b'Q'));
 
     let err = assert_err(mk_cfg(
+        None,
         None,
         Some(dup),
         None,
@@ -333,13 +322,14 @@ fn error_message_includes_only_unique_pairs_once() {
         Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
         Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
         None,
+        None,
     ));
 
     let bullets: Vec<&str> = err.lines().filter(|l| l.starts_with("• '")).collect();
 
     assert_eq!(
         bullets.len(),
-        2,
-        "expected exactly 2 bullet lines, got {bullets:?}\n{err}"
+        3,
+        "expected exactly 3 bullet lines, got {bullets:?}\n{err}"
     );
 }

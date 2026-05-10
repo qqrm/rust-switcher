@@ -2,21 +2,26 @@ use std::fmt::Write as _;
 
 use crate::config::{
     Config,
-    constants::{CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT},
+    constants::{
+        CONVERT_LAST_SEQUENCE, CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT,
+    },
 };
 
 pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
     let sequences = [
         (CONVERT_LAST_WORD, &config.hotkey_convert_last_word_sequence),
+        (
+            CONVERT_LAST_SEQUENCE,
+            &config.hotkey_convert_last_sequence_sequence,
+        ),
         (PAUSE, &config.hotkey_pause_sequence),
         (CONVERT_SELECTION, &config.hotkey_convert_selection_sequence),
         (SWITCH_LAYOUT, &config.hotkey_switch_layout_sequence),
     ];
 
-    // Allowed duplicates (bidirectional check)
     let is_allowed_duplicate = |a: &str, b: &str| {
-        (a == CONVERT_SELECTION && b == CONVERT_LAST_WORD)
-            || (a == CONVERT_LAST_WORD && b == CONVERT_SELECTION)
+        (a == CONVERT_LAST_WORD && b == CONVERT_SELECTION)
+            || (a == CONVERT_SELECTION && b == CONVERT_LAST_WORD)
     };
 
     let duplicates: Vec<_> = sequences

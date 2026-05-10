@@ -11,6 +11,7 @@ use crate::config;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HotkeyAction {
     ConvertLastWord,
+    ConvertLastSequence,
     PauseToggle,
     ConvertSelection,
     SwitchLayout,
@@ -20,13 +21,15 @@ pub enum HotkeyAction {
 const HK_ID_BASE: i32 = 20000;
 
 pub const HK_CONVERT_LAST_WORD_ID: i32 = HK_ID_BASE + 1;
-pub const HK_PAUSE_TOGGLE_ID: i32 = HK_ID_BASE + 2;
-pub const HK_CONVERT_SELECTION_ID: i32 = HK_ID_BASE + 3;
-pub const HK_SWITCH_LAYOUT_ID: i32 = HK_ID_BASE + 4;
+pub const HK_CONVERT_LAST_SEQUENCE_ID: i32 = HK_ID_BASE + 2;
+pub const HK_PAUSE_TOGGLE_ID: i32 = HK_ID_BASE + 3;
+pub const HK_CONVERT_SELECTION_ID: i32 = HK_ID_BASE + 4;
+pub const HK_SWITCH_LAYOUT_ID: i32 = HK_ID_BASE + 5;
 
 pub fn action_from_id(id: i32) -> Option<HotkeyAction> {
     match id {
         HK_CONVERT_LAST_WORD_ID => Some(HotkeyAction::ConvertLastWord),
+        HK_CONVERT_LAST_SEQUENCE_ID => Some(HotkeyAction::ConvertLastSequence),
         HK_PAUSE_TOGGLE_ID => Some(HotkeyAction::PauseToggle),
         HK_CONVERT_SELECTION_ID => Some(HotkeyAction::ConvertSelection),
         HK_SWITCH_LAYOUT_ID => Some(HotkeyAction::SwitchLayout),
@@ -46,6 +49,7 @@ fn unregister_one_quiet(hwnd: HWND, id: i32) -> windows::core::Result<()> {
 pub fn unregister_all(hwnd: HWND) -> windows::core::Result<()> {
     for id in [
         HK_CONVERT_LAST_WORD_ID,
+        HK_CONVERT_LAST_SEQUENCE_ID,
         HK_PAUSE_TOGGLE_ID,
         HK_CONVERT_SELECTION_ID,
         HK_SWITCH_LAYOUT_ID,
@@ -92,6 +96,11 @@ pub fn register_from_config(hwnd: HWND, cfg: &config::Config) -> windows::core::
     unregister_all(hwnd)?;
 
     register_one(hwnd, HK_CONVERT_LAST_WORD_ID, cfg.hotkey_convert_last_word)?;
+    register_one(
+        hwnd,
+        HK_CONVERT_LAST_SEQUENCE_ID,
+        cfg.hotkey_convert_last_sequence,
+    )?;
     register_one(hwnd, HK_PAUSE_TOGGLE_ID, cfg.hotkey_pause)?;
     register_one(hwnd, HK_CONVERT_SELECTION_ID, cfg.hotkey_convert_selection)?;
     register_one(hwnd, HK_SWITCH_LAYOUT_ID, cfg.hotkey_switch_layout)?;

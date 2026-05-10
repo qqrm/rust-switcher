@@ -40,18 +40,25 @@ pub(crate) fn handle_keydown_in_state(
     let chord = chord_from_vk(vk);
 
     if state.hotkey_capture.active {
-        return handle_keydown_capture(state, chord, is_mod, now_ms);
+        return handle_keydown_capture(hwnd, state, vk, chord, is_mod, now_ms);
     }
 
     handle_keydown_runtime(hwnd, state, chord, is_mod, now_ms)
 }
 
 pub(crate) fn handle_keydown_capture(
+    hwnd: HWND,
     state: &mut crate::app::AppState,
+    vk: u32,
     chord: config::HotkeyChord,
     is_mod: bool,
     now_ms: u64,
 ) -> windows::core::Result<HookDecision> {
+    if matches!(vk, 0x0D | 0x1B) {
+        crate::platform::win::stop_hotkey_capture_ui(hwnd, state);
+        return Ok(HookDecision::Swallow);
+    }
+
     let Some(slot) = state.hotkey_capture.slot else {
         return Ok(HookDecision::Pass);
     };
@@ -103,4 +110,46 @@ pub(crate) fn handle_keydown_runtime(
     } else {
         HookDecision::Pass
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{app::HotkeySlot, config};
+
+    fn chord() -> config::HotkeyChord {
+        config::HotkeyChord {
+            mods: 0,
+            mods_vks: 0,
+            vk: Some(u32::from(b'A')),
+        }
+    }
+
+    #[test]
+    fn enter_stops_hotkey_capture() {
+        let mut state = crate::app::AppState::default();
+        state.hotkey_capture.start(HotkeySlot::LastWord);
+
+        let decision =
+            handle_keydown_capture(HWND::default(), &mut state, 0x0D, chord(), false, 100)
+                .expect("capture should succeed");
+
+        assert_eq!(decision, HookDecision::Swallow);
+        assert!(!state.hotkey_capture.active);
+        assert_eq!(state.hotkey_capture.slot, None);
+    }
+
+    #[test]
+    fn escape_stops_hotkey_capture() {
+        let mut state = crate::app::AppState::default();
+        state.hotkey_capture.start(HotkeySlot::LastSequence);
+
+        let decision =
+            handle_keydown_capture(HWND::default(), &mut state, 0x1B, chord(), false, 100)
+                .expect("capture should succeed");
+
+        assert_eq!(decision, HookDecision::Swallow);
+        assert!(!state.hotkey_capture.active);
+        assert_eq!(state.hotkey_capture.slot, None);
+    }
 }

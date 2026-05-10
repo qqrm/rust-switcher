@@ -128,3 +128,89 @@ pub(crate) fn handle_keyup_runtime(
         HookDecision::Pass
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT;
+
+    use super::*;
+    use crate::{
+        app::{AppState, HotkeySequenceValues},
+        config::{HotkeyChord, HotkeySequence, MODVK_LALT},
+        platform::win::keyboard::{
+            keydown::handle_keydown_in_state,
+            mods::{reset_mods_state, update_mods_down_press, update_mods_down_release},
+        },
+    };
+
+    const VK_LALT: u32 = 0xA4;
+
+    fn double_left_alt_sequence() -> HotkeySequence {
+        let chord = HotkeyChord {
+            mods: MOD_ALT.0,
+            mods_vks: MODVK_LALT,
+            vk: None,
+        };
+
+        HotkeySequence {
+            first: chord,
+            second: Some(chord),
+            max_gap_ms: 1000,
+        }
+    }
+
+    #[test]
+    fn modifier_only_last_sequence_advances_on_first_left_alt_release() {
+        reset_mods_state();
+
+        let mut state = AppState {
+            active_hotkey_sequences: HotkeySequenceValues {
+                last_sequence: Some(double_left_alt_sequence()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        update_mods_down_press(VK_LALT);
+        let down = handle_keydown_in_state(HWND::default(), &mut state, VK_LALT, true, 100)
+            .expect("keydown should succeed");
+        update_mods_down_release(VK_LALT);
+        let up = handle_keyup_in_state(HWND::default(), &mut state, VK_LALT, true, 150)
+            .expect("keyup should succeed");
+
+        assert_eq!(down, HookDecision::Pass);
+        assert_eq!(up, HookDecision::Swallow);
+        assert!(state.hotkey_sequence_progress.last_sequence.waiting_second);
+
+        reset_mods_state();
+    }
+
+    #[test]
+    fn modifier_only_last_sequence_triggers_on_second_left_alt_release() {
+        reset_mods_state();
+
+        let mut state = AppState {
+            active_hotkey_sequences: HotkeySequenceValues {
+                last_sequence: Some(double_left_alt_sequence()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        for (down_ms, up_ms) in [(100_u64, 150_u64), (250_u64, 300_u64)] {
+            update_mods_down_press(VK_LALT);
+            let down = handle_keydown_in_state(HWND::default(), &mut state, VK_LALT, true, down_ms)
+                .expect("keydown should succeed");
+            update_mods_down_release(VK_LALT);
+            let up = handle_keyup_in_state(HWND::default(), &mut state, VK_LALT, true, up_ms)
+                .expect("keyup should succeed");
+
+            assert_eq!(down, HookDecision::Pass);
+            assert_eq!(up, HookDecision::Swallow);
+        }
+
+        assert!(!state.hotkey_sequence_progress.last_sequence.waiting_second);
+
+        reset_mods_state();
+    }
+}
