@@ -66,6 +66,7 @@ pub(crate) fn store_captured_hotkey(
 pub(crate) fn ui_hotkey_target(state: &crate::app::AppState, slot: crate::app::HotkeySlot) -> HWND {
     match slot {
         crate::app::HotkeySlot::LastWord => state.hotkeys.last_word,
+        crate::app::HotkeySlot::LastSequence => state.hotkeys.last_sequence,
         crate::app::HotkeySlot::Pause => state.hotkeys.pause,
         crate::app::HotkeySlot::Selection => state.hotkeys.selection,
         crate::app::HotkeySlot::SwitchLayout => state.hotkeys.switch_layout,

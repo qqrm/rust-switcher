@@ -45,3 +45,9 @@ pub(crate) fn chord_from_vk(vk: u32) -> config::HotkeyChord {
 pub(crate) fn mods_now() -> u32 {
     MODS_DOWN.load(Ordering::Relaxed)
 }
+
+#[cfg(test)]
+pub(crate) fn reset_mods_state() {
+    MODS_DOWN.store(0, Ordering::Relaxed);
+    MODVKS_DOWN.store(0, Ordering::Relaxed);
+}

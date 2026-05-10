@@ -69,6 +69,7 @@ fn probe_convertible_selection(max_chars: usize) -> Option<String> {
 ///
 /// Returns `true` if a non empty eligible selection was found (conversion attempted),
 /// otherwise `false`.
+#[allow(dead_code)]
 #[tracing::instrument(level = "trace", skip(state))]
 pub fn convert_selection_if_any(state: &mut AppState) -> bool {
     match convert_selection_outcome(state, MAX_SELECTION_CHARS) {

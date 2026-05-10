@@ -30,6 +30,7 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
 
     let slot = match cid {
         ControlId::HotkeyLastWord => crate::app::HotkeySlot::LastWord,
+        ControlId::HotkeyLastSequence => crate::app::HotkeySlot::LastSequence,
         ControlId::HotkeyPause => crate::app::HotkeySlot::Pause,
         ControlId::HotkeySelection => crate::app::HotkeySlot::Selection,
         ControlId::HotkeySwitchLayout => crate::app::HotkeySlot::SwitchLayout,
@@ -39,13 +40,7 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
     match notif {
         EN_SETFOCUS => {
             with_state_mut_do(hwnd, |state| {
-                state.hotkey_capture.active = true;
-                state.hotkey_capture.slot = Some(slot);
-                state.hotkey_capture.pending_mods_vks = 0;
-                state.hotkey_capture.pending_mods = 0;
-                state.hotkey_capture.pending_mods_valid = false;
-                state.hotkey_capture.saw_non_mod = false;
-                state.hotkey_capture.last_input_tick_ms = 0;
+                state.hotkey_capture.start(slot);
 
                 #[cfg(debug_assertions)]
                 tracing::debug!(slot = ?slot, "hotkey.capture.start");
@@ -55,7 +50,7 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
 
         EN_KILLFOCUS => {
             with_state_mut_do(hwnd, |state| {
-                state.hotkey_capture.active = false;
+                super::stop_hotkey_capture_ui(hwnd, state);
 
                 #[cfg(debug_assertions)]
                 tracing::debug!(slot = ?slot, "hotkey.capture.stop");

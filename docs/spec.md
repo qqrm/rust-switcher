@@ -74,21 +74,20 @@ Notes:
 - Hotkey sequences are validated on save.
 
 Default bindings (current defaults in code):
-- Convert smart: double tap Left Shift within 1000 ms
-- Autoconvert toggle: press Left Shift + Right Shift together
+- Convert last word: double tap Left Shift within 1000 ms
+- Convert last sequence: double tap Left Alt within 1000 ms
+- Convert selection: double tap Left Shift within 1000 ms
+- Autoconvert toggle: double tap Right Ctrl within 1000 ms
 - Switch keyboard layout: CapsLock
-- Convert selection: configured but by default it is the same double tap Left Shift.
-  Since sequence matching checks Convert smart earlier, Convert selection is effectively shadowed unless rebound to a different sequence.
 
 ## Actions and behavior
 
-### Convert smart
-
-This is the primary conversion action.
+### Convert last word
 
 Behavior:
-- If there is a non empty selection, it converts the selection.
-- Otherwise it converts last sequence using the input journal.
+- Converts the last token captured by the input journal.
+- Sleeps for autoconvert_delay_ms before replacement.
+- Replaces only the final run, preserving trailing suffix text.
 
 ### Convert selection
 
@@ -142,9 +141,10 @@ Native Win32 UI with a single window and two group sections (custom painted fram
 
 ### Hotkeys group
 - Read only displays for:
-  - Convert smart (sequence)
+  - Convert last word
+  - Convert last sequence
   - Convert selection (sequence)
-  - Autoconvert toggle (sequence)
+  - Autoconvert pause
   - Switch layout (sequence)
 
 Buttons:
@@ -203,5 +203,4 @@ How it is gated:
 
 ## Known issues (current behavior)
 
-- Convert selection default sequence duplicates Convert smart and is shadowed unless user rebinds it.
 - Autostart depends on a shortcut pointing to the current exe path, so relocating the exe breaks autostart.

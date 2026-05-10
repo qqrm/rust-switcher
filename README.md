@@ -40,8 +40,10 @@ The config file is stored at:
 
 Default hotkey sequences:
 
-* Convert smart: double tap Left Shift
-* Autoconvert toggle: Left Shift + Right Shift
+* Convert last word: double tap Left Shift
+* Convert last sequence: double tap Left Alt
+* Convert selection: double tap Left Shift
+* Autoconvert toggle: double tap Right Ctrl
 * Switch layout: CapsLock
 
 ## Development

@@ -4,10 +4,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL;
+use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIFT};
 
 use super::env_lock::lock_env;
-use crate::config::{self, Config, HotkeyChord, HotkeySequence};
+use crate::config::{
+    self, Config, HotkeyChord, HotkeySequence, MODVK_LALT, MODVK_LSHIFT, MODVK_RCTRL,
+};
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     let ts = SystemTime::now()
@@ -90,4 +92,67 @@ fn config_save_rejects_invalid_sequences() {
     let err = config::save(&cfg).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("unique hotkey sequence"));
+}
+
+#[test]
+fn default_hotkey_sequences_keep_last_word_on_double_left_shift() {
+    let cfg = Config::default();
+    let seq = cfg
+        .hotkey_convert_last_word_sequence
+        .expect("default last-word hotkey");
+
+    assert_eq!(seq.first.mods, MOD_SHIFT.0);
+    assert_eq!(seq.first.mods_vks, MODVK_LSHIFT);
+    assert_eq!(seq.first.vk, None);
+    assert_eq!(seq.second, Some(seq.first));
+}
+
+#[test]
+fn default_hotkey_sequences_use_double_left_alt_for_last_sequence() {
+    let cfg = Config::default();
+    let seq = cfg
+        .hotkey_convert_last_sequence_sequence
+        .expect("default last-sequence hotkey");
+
+    assert_eq!(seq.first.mods, MOD_ALT.0);
+    assert_eq!(seq.first.mods_vks, MODVK_LALT);
+    assert_eq!(seq.first.vk, None);
+    assert_eq!(seq.second, Some(seq.first));
+}
+
+#[test]
+fn default_hotkey_sequences_keep_switch_layout_on_capslock() {
+    let cfg = Config::default();
+    let seq = cfg
+        .hotkey_switch_layout_sequence
+        .expect("default switch-layout hotkey");
+
+    assert_eq!(seq.first.mods, 0);
+    assert_eq!(seq.first.mods_vks, 0);
+    assert_eq!(seq.first.vk, Some(20));
+    assert_eq!(seq.second, None);
+}
+
+#[test]
+fn default_hotkey_sequences_use_double_right_ctrl_for_pause() {
+    let cfg = Config::default();
+    let seq = cfg.hotkey_pause_sequence.expect("default pause hotkey");
+
+    assert_eq!(seq.first.mods, MOD_CONTROL.0);
+    assert_eq!(seq.first.mods_vks, MODVK_RCTRL);
+    assert_eq!(seq.first.vk, None);
+    assert_eq!(seq.second, Some(seq.first));
+}
+
+#[test]
+fn default_hotkey_sequences_keep_convert_selection_on_double_left_shift() {
+    let cfg = Config::default();
+    let seq = cfg
+        .hotkey_convert_selection_sequence
+        .expect("default selection hotkey");
+
+    assert_eq!(seq.first.mods, MOD_SHIFT.0);
+    assert_eq!(seq.first.mods_vks, MODVK_LSHIFT);
+    assert_eq!(seq.first.vk, None);
+    assert_eq!(seq.second, Some(seq.first));
 }

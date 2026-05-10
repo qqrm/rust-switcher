@@ -324,19 +324,19 @@ fn create_hotkey_rows(
         hy,
         g.w_label,
         g.w_edit,
-        w!("Convert last sequence:"),
+        w!("Convert last word:"),
         Some(ControlId::HotkeyLastWord.hmenu()),
     )?;
     hy += 28;
 
-    state.hotkeys.pause = create_hotkey_row(
+    state.hotkeys.last_sequence = create_hotkey_row(
         hwnd,
         g.hx,
         hy,
         g.w_label,
         g.w_edit,
-        w!("Autoconvert pause:"),
-        Some(ControlId::HotkeyPause.hmenu()),
+        w!("Convert last sequence:"),
+        Some(ControlId::HotkeyLastSequence.hmenu()),
     )?;
     hy += 28;
 
@@ -348,6 +348,17 @@ fn create_hotkey_rows(
         g.w_edit,
         w!("Convert selection:"),
         Some(ControlId::HotkeySelection.hmenu()),
+    )?;
+    hy += 28;
+
+    state.hotkeys.pause = create_hotkey_row(
+        hwnd,
+        g.hx,
+        hy,
+        g.w_label,
+        g.w_edit,
+        w!("Autoconvert pause:"),
+        Some(ControlId::HotkeyPause.hmenu()),
     )?;
     hy += 28;
 
