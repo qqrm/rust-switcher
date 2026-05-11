@@ -110,7 +110,7 @@ jobs:
 
       - name: Install Rust toolchain (nightly)
         if: steps.release_context.outputs.should_release == 'true'
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: nightly
           components: rustfmt, clippy
