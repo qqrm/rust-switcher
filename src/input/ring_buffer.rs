@@ -85,6 +85,7 @@ struct InputJournal {
     runs: VecDeque<InputRun>,
     cap_chars: usize,
     total_chars: usize,
+    caret_from_end: usize,
     last_token_autoconverted: bool,
     #[cfg(windows)]
     last_fg_hwnd: isize,
@@ -96,6 +97,7 @@ impl InputJournal {
             runs: VecDeque::new(),
             cap_chars,
             total_chars: 0,
+            caret_from_end: 0,
             last_token_autoconverted: false,
             #[cfg(windows)]
             last_fg_hwnd: 0,
@@ -106,10 +108,17 @@ impl InputJournal {
     fn clear(&mut self) {
         self.runs.clear();
         self.total_chars = 0;
+        self.caret_from_end = 0;
         self.last_token_autoconverted = false;
     }
 
-    fn append_segment(&mut self, text: &str, layout: LayoutTag, origin: RunOrigin, kind: RunKind) {
+    fn append_segment_end(
+        &mut self,
+        text: &str,
+        layout: LayoutTag,
+        origin: RunOrigin,
+        kind: RunKind,
+    ) {
         if text.is_empty() {
             return;
         }
@@ -133,6 +142,28 @@ impl InputJournal {
             kind,
         });
         self.enforce_cap_chars();
+    }
+
+    fn insert_run_before_caret(&mut self, run: InputRun) {
+        if run.text.is_empty() {
+            return;
+        }
+
+        let caret_from_end = self.caret_from_end.min(self.total_chars);
+        let suffix_runs = self.detach_suffix(caret_from_end);
+
+        self.append_segment_end(&run.text, run.layout, run.origin, run.kind);
+        self.restore_suffix_after_caret(suffix_runs);
+    }
+
+    fn restore_suffix_after_caret(&mut self, suffix_runs: Vec<InputRun>) {
+        let suffix_len = suffix_runs.iter().map(|run| run.text.chars().count()).sum();
+
+        for run in suffix_runs {
+            self.append_segment_end(&run.text, run.layout, run.origin, run.kind);
+        }
+
+        self.caret_from_end = suffix_len;
     }
 
     #[cfg(any(test, windows))]
@@ -161,7 +192,12 @@ impl InputJournal {
                 }
                 Some(k) if k == kind => {}
                 Some(k) => {
-                    self.append_segment(&text[start..i], layout, origin, k);
+                    self.insert_run_before_caret(InputRun {
+                        text: text[start..i].to_string(),
+                        layout,
+                        origin,
+                        kind: k,
+                    });
                     start = i;
                     current_kind = Some(kind);
                 }
@@ -169,12 +205,17 @@ impl InputJournal {
         }
 
         if let Some(kind) = current_kind {
-            self.append_segment(&text[start..], layout, origin, kind);
+            self.insert_run_before_caret(InputRun {
+                text: text[start..].to_string(),
+                layout,
+                origin,
+                kind,
+            });
         }
     }
 
     fn push_run(&mut self, run: InputRun) {
-        self.append_segment(&run.text, run.layout, run.origin, run.kind);
+        self.insert_run_before_caret(run);
     }
 
     fn push_runs(&mut self, runs: impl IntoIterator<Item = InputRun>) {
@@ -208,10 +249,14 @@ impl InputJournal {
                 let _ = self.runs.pop_front();
             }
         }
+
+        self.caret_from_end = self.caret_from_end.min(self.total_chars);
     }
 
     #[cfg(any(test, windows))]
     fn backspace(&mut self) {
+        let caret_from_end = self.caret_from_end.min(self.total_chars);
+        let suffix_runs = self.detach_suffix(caret_from_end);
         let mut pop_last = false;
 
         if let Some(last) = self.runs.back_mut()
@@ -227,6 +272,63 @@ impl InputJournal {
         if pop_last {
             let _ = self.runs.pop_back();
         }
+
+        self.restore_suffix_after_caret(suffix_runs);
+    }
+
+    #[cfg(any(test, windows))]
+    fn move_caret_left(&mut self) {
+        self.caret_from_end = self.caret_from_end.saturating_add(1).min(self.total_chars);
+    }
+
+    #[cfg(any(test, windows))]
+    fn move_caret_right(&mut self) {
+        self.caret_from_end = self.caret_from_end.saturating_sub(1);
+    }
+
+    #[cfg(windows)]
+    fn move_caret_end(&mut self) {
+        self.caret_from_end = 0;
+    }
+
+    fn detach_suffix(&mut self, count: usize) -> Vec<InputRun> {
+        let mut remaining = count.min(self.total_chars);
+        let mut suffix_rev = Vec::new();
+
+        while remaining > 0 {
+            let Some(mut run) = self.runs.pop_back() else {
+                self.total_chars = 0;
+                break;
+            };
+
+            let run_len = run.text.chars().count();
+            if run_len <= remaining {
+                self.total_chars = self.total_chars.saturating_sub(run_len);
+                remaining -= run_len;
+                suffix_rev.push(run);
+                continue;
+            }
+
+            let split_chars = run_len - remaining;
+            let Some((split_idx, _)) = run.text.char_indices().nth(split_chars) else {
+                self.runs.push_back(run);
+                break;
+            };
+            let suffix_text = run.text.split_off(split_idx);
+            let suffix_run = InputRun {
+                text: suffix_text,
+                layout: run.layout,
+                origin: run.origin,
+                kind: run.kind,
+            };
+            self.runs.push_back(run);
+            self.total_chars = self.total_chars.saturating_sub(remaining);
+            suffix_rev.push(suffix_run);
+            remaining = 0;
+        }
+
+        suffix_rev.reverse();
+        suffix_rev
     }
 
     #[cfg(windows)]
@@ -252,106 +354,134 @@ impl InputJournal {
 
     #[cfg(any(test, windows))]
     fn last_char(&self) -> Option<char> {
-        self.runs.back()?.text.chars().last()
+        self.chars_before_caret_rev().next()
     }
 
     #[cfg(any(test, windows))]
     fn prev_char_before_last(&self) -> Option<char> {
-        let mut runs_it = self.runs.iter().rev();
-        let last_run = runs_it.next()?;
+        self.chars_before_caret_rev().nth(1)
+    }
 
-        let mut chars = last_run.text.chars().rev();
-        let _ = chars.next()?;
-        if let Some(prev) = chars.next() {
-            return Some(prev);
-        }
-
-        for run in runs_it {
-            if let Some(ch) = run.text.chars().last() {
-                return Some(ch);
-            }
-        }
-
-        None
+    #[cfg(any(test, windows))]
+    fn chars_before_caret_rev(&self) -> impl Iterator<Item = char> + '_ {
+        let prefix_len = self.total_chars.saturating_sub(self.caret_from_end);
+        self.runs
+            .iter()
+            .flat_map(|run| run.text.chars())
+            .take(prefix_len)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
     }
 
     fn take_last_layout_run_with_suffix(&mut self) -> Option<(InputRun, Vec<InputRun>)> {
+        let caret_from_end = self.caret_from_end.min(self.total_chars);
+        let suffix_after_caret = self.detach_suffix(caret_from_end);
+        self.caret_from_end = 0;
+
         let mut suffix_runs = self.pop_suffix_whitespace();
 
-        if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
+        let result = if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
             self.restore_suffix(&mut suffix_runs);
-            return None;
-        }
+            None
+        } else if let Some(run) = self.runs.pop_back() {
+            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+            suffix_runs.reverse();
+            Some((run, suffix_runs))
+        } else {
+            self.restore_suffix(&mut suffix_runs);
+            None
+        };
 
-        let run = self.runs.pop_back()?;
-        self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
-        suffix_runs.reverse();
-        Some((run, suffix_runs))
+        self.restore_suffix_after_caret(suffix_after_caret);
+        result
     }
 
     fn take_last_layout_sequence_with_suffix(&mut self) -> Option<(Vec<InputRun>, Vec<InputRun>)> {
+        let caret_from_end = self.caret_from_end.min(self.total_chars);
+        let suffix_after_caret = self.detach_suffix(caret_from_end);
+        self.caret_from_end = 0;
+
         let mut suffix_runs = self.pop_suffix_whitespace();
 
-        if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
+        let result = if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
             self.restore_suffix(&mut suffix_runs);
-            return None;
-        }
-
-        let last = self.runs.back()?;
-        let target_layout = last.layout;
-        let target_origin = last.origin;
-        let mut seq_rev: Vec<InputRun> = Vec::new();
-        while let Some(run) = self.runs.back() {
-            if run.layout != target_layout || run.origin != target_origin {
-                break;
+            None
+        } else {
+            let Some(last) = self.runs.back() else {
+                self.restore_suffix(&mut suffix_runs);
+                self.restore_suffix_after_caret(suffix_after_caret);
+                return None;
+            };
+            let target_layout = last.layout;
+            let target_origin = last.origin;
+            let mut seq_rev: Vec<InputRun> = Vec::new();
+            while let Some(run) = self.runs.back() {
+                if run.layout != target_layout || run.origin != target_origin {
+                    break;
+                }
+                let Some(run) = self.runs.pop_back() else {
+                    break;
+                };
+                self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+                seq_rev.push(run);
             }
-            let run = self.runs.pop_back()?;
-            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
-            seq_rev.push(run);
-        }
 
-        if seq_rev.is_empty() {
-            self.restore_suffix(&mut suffix_runs);
-            return None;
-        }
+            if seq_rev.is_empty() {
+                self.restore_suffix(&mut suffix_runs);
+                None
+            } else {
+                seq_rev.reverse();
+                suffix_runs.reverse();
+                Some((seq_rev, suffix_runs))
+            }
+        };
 
-        seq_rev.reverse();
-        suffix_runs.reverse();
-        Some((seq_rev, suffix_runs))
+        self.restore_suffix_after_caret(suffix_after_caret);
+        result
     }
 
     fn take_last_programmatic_sequence_with_suffix(
         &mut self,
     ) -> Option<(Vec<InputRun>, Vec<InputRun>)> {
+        let caret_from_end = self.caret_from_end.min(self.total_chars);
+        let suffix_after_caret = self.detach_suffix(caret_from_end);
+        self.caret_from_end = 0;
+
         let mut suffix_runs = self.pop_suffix_whitespace();
 
-        if self
+        let result = if self
             .runs
             .back()
             .is_none_or(|run| run.origin != RunOrigin::Programmatic)
         {
             self.restore_suffix(&mut suffix_runs);
-            return None;
-        }
-
-        let mut seq_rev: Vec<InputRun> = Vec::new();
-        while let Some(run) = self.runs.back() {
-            if run.origin != RunOrigin::Programmatic {
-                break;
+            None
+        } else {
+            let mut seq_rev: Vec<InputRun> = Vec::new();
+            while let Some(run) = self.runs.back() {
+                if run.origin != RunOrigin::Programmatic {
+                    break;
+                }
+                let Some(run) = self.runs.pop_back() else {
+                    break;
+                };
+                self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+                seq_rev.push(run);
             }
-            let run = self.runs.pop_back()?;
-            self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
-            seq_rev.push(run);
-        }
 
-        if seq_rev.is_empty() {
-            self.restore_suffix(&mut suffix_runs);
-            return None;
-        }
+            if seq_rev.is_empty() {
+                self.restore_suffix(&mut suffix_runs);
+                None
+            } else {
+                seq_rev.reverse();
+                suffix_runs.reverse();
+                Some((seq_rev, suffix_runs))
+            }
+        };
 
-        seq_rev.reverse();
-        suffix_runs.reverse();
-        Some((seq_rev, suffix_runs))
+        self.restore_suffix_after_caret(suffix_after_caret);
+        result
     }
 
     fn pop_suffix_whitespace(&mut self) -> Vec<InputRun> {
@@ -568,6 +698,9 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
     enum JournalAction {
         Clear,
         Backspace,
+        MoveCaretLeft,
+        MoveCaretRight,
+        MoveCaretEnd,
         PushText {
             text: String,
             layout: LayoutTag,
@@ -579,8 +712,12 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
     let mut output: Option<String> = None;
 
     match vk {
-        VK_ESCAPE | VK_DELETE | VK_INSERT | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_HOME
-        | VK_END | VK_PRIOR | VK_NEXT => action = Some(JournalAction::Clear),
+        VK_ESCAPE | VK_DELETE | VK_INSERT | VK_UP | VK_DOWN | VK_HOME | VK_PRIOR | VK_NEXT => {
+            action = Some(JournalAction::Clear);
+        }
+        VK_LEFT => action = Some(JournalAction::MoveCaretLeft),
+        VK_RIGHT => action = Some(JournalAction::MoveCaretRight),
+        VK_END => action = Some(JournalAction::MoveCaretEnd),
         VK_BACK => action = Some(JournalAction::Backspace),
         VK_RETURN => {
             let layout = current_foreground_layout_tag();
@@ -623,6 +760,9 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
             match action {
                 JournalAction::Clear => j.clear(),
                 JournalAction::Backspace => j.backspace(),
+                JournalAction::MoveCaretLeft => j.move_caret_left(),
+                JournalAction::MoveCaretRight => j.move_caret_right(),
+                JournalAction::MoveCaretEnd => j.move_caret_end(),
                 JournalAction::PushText {
                     text,
                     layout,
@@ -671,6 +811,24 @@ pub fn push_runs(runs: impl IntoIterator<Item = InputRun>) {
 #[cfg(test)]
 pub fn test_backspace() {
     with_journal_mut(|j| j.backspace());
+}
+
+#[cfg(test)]
+pub fn test_move_caret_left(count: usize) {
+    with_journal_mut(|j| {
+        for _ in 0..count {
+            j.move_caret_left();
+        }
+    });
+}
+
+#[cfg(test)]
+pub fn test_move_caret_right(count: usize) {
+    with_journal_mut(|j| {
+        for _ in 0..count {
+            j.move_caret_right();
+        }
+    });
 }
 
 #[cfg(test)]
