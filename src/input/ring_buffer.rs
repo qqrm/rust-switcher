@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::sync::MutexGuard;
 use std::{
     collections::VecDeque,
     sync::{Mutex, OnceLock},
@@ -18,8 +20,19 @@ use windows::Win32::UI::{
 
 static JOURNAL: OnceLock<Mutex<InputJournal>> = OnceLock::new();
 
+#[cfg(test)]
+static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
 fn journal() -> &'static Mutex<InputJournal> {
     JOURNAL.get_or_init(|| Mutex::new(InputJournal::new(100)))
+}
+
+#[cfg(test)]
+pub fn test_guard() -> MutexGuard<'static, ()> {
+    TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 fn with_journal_mut<R>(f: impl FnOnce(&mut InputJournal) -> R) -> R {
@@ -397,6 +410,7 @@ impl InputJournal {
         result
     }
 
+    #[cfg(test)]
     fn take_last_layout_sequence_with_suffix(&mut self) -> Option<(Vec<InputRun>, Vec<InputRun>)> {
         let caret_from_end = self.caret_from_end.min(self.total_chars);
         let suffix_after_caret = self.detach_suffix(caret_from_end);
@@ -441,6 +455,7 @@ impl InputJournal {
         result
     }
 
+    #[cfg(test)]
     fn take_last_programmatic_sequence_with_suffix(
         &mut self,
     ) -> Option<(Vec<InputRun>, Vec<InputRun>)> {
@@ -482,6 +497,69 @@ impl InputJournal {
 
         self.restore_suffix_after_caret(suffix_after_caret);
         result
+    }
+
+    fn take_last_sequence_with_suffix(&mut self) -> Option<(Vec<InputRun>, Vec<InputRun>)> {
+        let mut suffix_runs = self.pop_suffix_whitespace();
+
+        if self.runs.back().is_none_or(|run| run.kind != RunKind::Text) {
+            self.restore_suffix(&mut suffix_runs);
+            return None;
+        }
+
+        let mut seq_rev = Vec::new();
+        let last = self.runs.back()?;
+
+        if last.origin == RunOrigin::Programmatic {
+            while self
+                .runs
+                .back()
+                .is_some_and(|run| run.origin == RunOrigin::Programmatic)
+            {
+                let run = self.runs.pop_back()?;
+                self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+                seq_rev.push(run);
+            }
+
+            let prefix_layout = self
+                .runs
+                .iter()
+                .rev()
+                .find(|run| run.origin == RunOrigin::Physical && run.kind == RunKind::Text)
+                .map(|run| run.layout);
+
+            if let Some(layout) = prefix_layout {
+                while self
+                    .runs
+                    .back()
+                    .is_some_and(|run| run.origin == RunOrigin::Physical && run.layout == layout)
+                {
+                    let run = self.runs.pop_back()?;
+                    self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+                    seq_rev.push(run);
+                }
+            }
+        } else {
+            let target_layout = last.layout;
+            let target_origin = last.origin;
+            while let Some(run) = self.runs.back() {
+                if run.layout != target_layout || run.origin != target_origin {
+                    break;
+                }
+                let run = self.runs.pop_back()?;
+                self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+                seq_rev.push(run);
+            }
+        }
+
+        if seq_rev.is_empty() {
+            self.restore_suffix(&mut suffix_runs);
+            return None;
+        }
+
+        seq_rev.reverse();
+        suffix_runs.reverse();
+        Some((seq_rev, suffix_runs))
     }
 
     fn pop_suffix_whitespace(&mut self) -> Vec<InputRun> {
@@ -785,14 +863,21 @@ pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
     with_journal_mut(|j| j.take_last_layout_run_with_suffix())
 }
 
+#[cfg(test)]
 #[must_use]
 pub fn take_last_layout_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<InputRun>)> {
     with_journal_mut(|j| j.take_last_layout_sequence_with_suffix())
 }
 
+#[cfg(test)]
 #[must_use]
 pub fn take_last_programmatic_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<InputRun>)> {
     with_journal_mut(|j| j.take_last_programmatic_sequence_with_suffix())
+}
+
+#[must_use]
+pub fn take_last_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<InputRun>)> {
+    with_journal_mut(|j| j.take_last_sequence_with_suffix())
 }
 
 #[cfg(test)]

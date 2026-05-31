@@ -1,12 +1,9 @@
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::MutexGuard;
 
 use crate::input::ring_buffer::{self, InputRun, LayoutTag, RunKind, RunOrigin};
 
 fn test_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    ring_buffer::test_guard()
 }
 
 fn journal_text() -> String {
@@ -104,6 +101,98 @@ fn legacy_push_text_segments_internally() {
         suffix.iter().map(|r| r.text.as_str()).collect::<String>(),
         "   "
     );
+}
+
+#[test]
+fn take_last_layout_sequence_with_suffix_spans_same_origin_layout() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_runs([
+        InputRun {
+            text: "hello".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        },
+        InputRun {
+            text: " ".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Whitespace,
+        },
+        InputRun {
+            text: "world".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        },
+        InputRun {
+            text: "  ".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Whitespace,
+        },
+    ]);
+
+    let (runs, suffix) = ring_buffer::take_last_layout_sequence_with_suffix().expect("sequence");
+    assert_eq!(
+        runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+        "hello world"
+    );
+    assert_eq!(
+        suffix
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>(),
+        "  "
+    );
+}
+
+#[test]
+fn take_last_sequence_keeps_physical_prefix_before_programmatic_tail() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_runs([
+        InputRun {
+            text: "hfp".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        },
+        InputRun {
+            text: " ".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Whitespace,
+        },
+        InputRun {
+            text: "ldf".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        },
+        InputRun {
+            text: " ".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Whitespace,
+        },
+        InputRun {
+            text: "три".to_string(),
+            layout: LayoutTag::Ru,
+            origin: RunOrigin::Programmatic,
+            kind: RunKind::Text,
+        },
+    ]);
+
+    let (runs, suffix) = ring_buffer::take_last_sequence_with_suffix().expect("sequence");
+    assert!(suffix.is_empty());
+    assert_eq!(
+        runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+        "hfp ldf три"
+    );
+    assert_eq!(runs[0].origin, RunOrigin::Physical);
+    assert_eq!(runs[4].origin, RunOrigin::Programmatic);
 }
 
 #[test]
