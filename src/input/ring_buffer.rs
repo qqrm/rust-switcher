@@ -276,14 +276,17 @@ impl InputJournal {
         self.restore_suffix_after_caret(suffix_runs);
     }
 
+    #[cfg(any(test, windows))]
     fn move_caret_left(&mut self) {
         self.caret_from_end = self.caret_from_end.saturating_add(1).min(self.total_chars);
     }
 
+    #[cfg(any(test, windows))]
     fn move_caret_right(&mut self) {
         self.caret_from_end = self.caret_from_end.saturating_sub(1);
     }
 
+    #[cfg(windows)]
     fn move_caret_end(&mut self) {
         self.caret_from_end = 0;
     }
