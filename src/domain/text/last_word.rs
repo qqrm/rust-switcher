@@ -40,11 +40,14 @@ fn convert_with_layout_fallback(text: &str, layout: &LayoutTag) -> String {
     convert_ru_en_with_direction(text, direction)
 }
 
-fn convert_sequence_runs(runs: &[InputRun]) -> String {
+fn convert_sequence_runs(runs: &[InputRun], keep_programmatic_text: bool) -> String {
     let mut out = String::new();
 
     for run in runs {
         match run.kind {
+            RunKind::Text if keep_programmatic_text && run.origin == RunOrigin::Programmatic => {
+                out.push_str(&run.text);
+            }
             RunKind::Text => out.push_str(&convert_with_layout_fallback(&run.text, &run.layout)),
             RunKind::Whitespace => out.push_str(&run.text),
         }
@@ -506,7 +509,7 @@ fn convert_last_sequence_impl(state: &mut AppState, switch_layout: bool) {
         tracing::trace!("newline present, skipping convert_last_sequence");
         return;
     }
-    let converted = convert_sequence_runs(&payload.runs);
+    let converted = convert_sequence_runs(&payload.runs, payload.keep_programmatic_text);
     tracing::trace!(%converted, "converted");
     if apply_last_sequence_conversion(&payload, &converted) {
         update_journal_sequence(&payload, &converted);
@@ -555,6 +558,7 @@ struct LastSequencePayload {
     suffix_spaces_only: bool,
     suffix_has_newline: bool,
     seq_has_newline: bool,
+    keep_programmatic_text: bool,
 }
 fn suffix_text_and_meta(suffix_runs: &[InputRun]) -> (String, usize, bool, bool) {
     let text: String = suffix_runs.iter().map(|run| run.text.as_str()).collect();
@@ -597,9 +601,7 @@ fn join_runs_text(runs: &[InputRun]) -> String {
 }
 
 fn take_last_sequence_payload() -> Option<LastSequencePayload> {
-    let (runs, suffix_runs) =
-        crate::input_journal::take_last_programmatic_sequence_with_suffix()
-            .or_else(crate::input_journal::take_last_layout_sequence_with_suffix)?;
+    let (runs, suffix_runs) = crate::input_journal::take_last_sequence_with_suffix()?;
     let last = runs.last()?;
     if last.kind != RunKind::Text {
         return None;
@@ -613,6 +615,9 @@ fn take_last_sequence_payload() -> Option<LastSequencePayload> {
         suffix_text_and_meta(&suffix_runs);
     let seq_len = seq_text.chars().count();
     let seq_has_newline = seq_text.contains('\n') || seq_text.contains('\r');
+    let has_physical = runs.iter().any(|run| run.origin == RunOrigin::Physical);
+    let has_programmatic = runs.iter().any(|run| run.origin == RunOrigin::Programmatic);
+    let keep_programmatic_text = has_physical && has_programmatic;
 
     tracing::trace!(
         seq_text = %seq_text,
@@ -623,6 +628,7 @@ fn take_last_sequence_payload() -> Option<LastSequencePayload> {
         suffix_spaces_only,
         suffix_has_newline,
         seq_has_newline,
+        keep_programmatic_text,
         "journal extracted sequence"
     );
 
@@ -638,6 +644,7 @@ fn take_last_sequence_payload() -> Option<LastSequencePayload> {
         suffix_spaces_only,
         suffix_has_newline,
         seq_has_newline,
+        keep_programmatic_text,
     })
 }
 
@@ -706,6 +713,9 @@ fn update_journal_sequence(p: &LastSequencePayload, converted: &str) {
     crate::input_journal::push_runs(p.runs.iter().map(|run| {
         let text = match run.kind {
             RunKind::Whitespace => run.text.clone(),
+            RunKind::Text if p.keep_programmatic_text && run.origin == RunOrigin::Programmatic => {
+                run.text.clone()
+            }
             RunKind::Text => convert_with_layout_fallback(&run.text, &run.layout),
         };
 
@@ -761,7 +771,7 @@ fn repeat_tap(vk: VIRTUAL_KEY, count: usize, err_msg: &'static str) -> bool {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::sync::MutexGuard;
 
     use lingua::{Language, LanguageDetectorBuilder};
 
@@ -769,10 +779,7 @@ mod tests {
     use crate::input::ring_buffer;
 
     fn test_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        ring_buffer::test_guard()
     }
     fn detector_ru_en() -> lingua::LanguageDetector {
         LanguageDetectorBuilder::from_languages(&[Language::Russian, Language::English])
@@ -1050,7 +1057,7 @@ mod tests {
         assert_eq!(p1.seq_text, "ghbdtn rjynhjkm");
 
         // Simulate manual conversion journal update (programmatic RU)
-        let c1 = convert_sequence_runs(&p1.runs);
+        let c1 = convert_sequence_runs(&p1.runs, p1.keep_programmatic_text);
         update_journal_sequence(&p1, &c1);
 
         // Second extraction must succeed (programmatic RU), enabling toggle-back.
@@ -1088,12 +1095,12 @@ mod tests {
         ]);
 
         let p1 = take_last_sequence_payload().expect("first sequence payload expected");
-        let c1 = convert_sequence_runs(&p1.runs);
+        let c1 = convert_sequence_runs(&p1.runs, p1.keep_programmatic_text);
         assert_ne!(c1, p1.seq_text);
         update_journal_sequence(&p1, &c1);
 
         let p2 = take_last_sequence_payload().expect("second sequence payload expected");
-        let c2 = convert_sequence_runs(&p2.runs);
+        let c2 = convert_sequence_runs(&p2.runs, p2.keep_programmatic_text);
         update_journal_sequence(&p2, &c2);
 
         let p3 = take_last_sequence_payload().expect("third sequence payload expected");
@@ -1217,7 +1224,7 @@ mod tests {
 
         let payload = take_last_sequence_payload().expect("sequence payload expected");
         assert_eq!(payload.suffix_text, "  ");
-        let converted = convert_sequence_runs(&payload.runs);
+        let converted = convert_sequence_runs(&payload.runs, payload.keep_programmatic_text);
         update_journal_sequence(&payload, &converted);
 
         let next = take_last_sequence_payload().expect("sequence payload after update expected");
@@ -1252,7 +1259,7 @@ mod tests {
         ]);
 
         let payload = take_last_sequence_payload().expect("sequence payload expected");
-        let converted = convert_sequence_runs(&payload.runs);
+        let converted = convert_sequence_runs(&payload.runs, payload.keep_programmatic_text);
         update_journal_sequence(&payload, &converted);
 
         let (runs, suffix) =
@@ -1465,7 +1472,7 @@ mod tests {
         ]);
 
         let seq = take_last_sequence_payload().expect("sequence payload expected");
-        let converted = convert_sequence_runs(&seq.runs);
+        let converted = convert_sequence_runs(&seq.runs, seq.keep_programmatic_text);
         update_journal_sequence(&seq, &converted);
 
         let word = take_last_word_payload().expect("word payload expected");
@@ -1475,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn last_sequence_after_last_word_update_targets_only_last_programmatic_word() {
+    fn last_sequence_after_last_word_update_preserves_full_phrase_buffer() {
         let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
@@ -1504,8 +1511,13 @@ mod tests {
         update_journal(&word, &converted);
 
         let seq = take_last_sequence_payload().expect("sequence payload expected");
-        assert_eq!(seq.seq_text, "контроль");
+        assert_eq!(seq.seq_text, "ghbdtn контроль");
         assert_eq!(seq.layout, LayoutTag::Ru);
+        assert!(seq.keep_programmatic_text);
+        assert_eq!(
+            convert_sequence_runs(&seq.runs, seq.keep_programmatic_text),
+            "привет контроль"
+        );
         assert!(seq.prefix_runs.is_empty());
     }
 
@@ -1535,7 +1547,7 @@ mod tests {
         ]);
 
         let seq = take_last_sequence_payload().expect("sequence payload expected");
-        let converted = convert_sequence_runs(&seq.runs);
+        let converted = convert_sequence_runs(&seq.runs, seq.keep_programmatic_text);
         update_journal_sequence(&seq, &converted);
 
         ring_buffer::push_run(InputRun {
@@ -1590,7 +1602,61 @@ mod tests {
 
         let payload = take_last_sequence_payload().expect("sequence payload expected");
         assert_eq!(payload.seq_text, "hfp ldf nhb");
-        assert_eq!(convert_sequence_runs(&payload.runs), "раз два три");
+        assert_eq!(
+            convert_sequence_runs(&payload.runs, payload.keep_programmatic_text),
+            "раз два три"
+        );
+    }
+
+    #[test]
+    fn exact_phrase_hfp_ldf_nhb_stays_full_sequence_after_last_word_update() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "hfp".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "ldf".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "nhb".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let word = take_last_word_payload().expect("word payload expected");
+        let converted_word = convert_with_layout_fallback(&word.run.text, &word.run.layout);
+        assert_eq!(converted_word, "три");
+        update_journal(&word, &converted_word);
+
+        let payload = take_last_sequence_payload().expect("sequence payload expected");
+        assert_eq!(payload.seq_text, "hfp ldf три");
+        assert!(payload.keep_programmatic_text);
+        assert_eq!(
+            convert_sequence_runs(&payload.runs, payload.keep_programmatic_text),
+            "раз два три"
+        );
     }
 
     #[test]
