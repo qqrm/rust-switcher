@@ -438,6 +438,49 @@ impl InputJournal {
         result
     }
 
+    fn take_last_programmatic_sequence_with_suffix(
+        &mut self,
+    ) -> Option<(Vec<InputRun>, Vec<InputRun>)> {
+        let caret_from_end = self.caret_from_end.min(self.total_chars);
+        let suffix_after_caret = self.detach_suffix(caret_from_end);
+        self.caret_from_end = 0;
+
+        let mut suffix_runs = self.pop_suffix_whitespace();
+
+        let result = if self
+            .runs
+            .back()
+            .is_none_or(|run| run.origin != RunOrigin::Programmatic)
+        {
+            self.restore_suffix(&mut suffix_runs);
+            None
+        } else {
+            let mut seq_rev: Vec<InputRun> = Vec::new();
+            while let Some(run) = self.runs.back() {
+                if run.origin != RunOrigin::Programmatic {
+                    break;
+                }
+                let Some(run) = self.runs.pop_back() else {
+                    break;
+                };
+                self.total_chars = self.total_chars.saturating_sub(run.text.chars().count());
+                seq_rev.push(run);
+            }
+
+            if seq_rev.is_empty() {
+                self.restore_suffix(&mut suffix_runs);
+                None
+            } else {
+                seq_rev.reverse();
+                suffix_runs.reverse();
+                Some((seq_rev, suffix_runs))
+            }
+        };
+
+        self.restore_suffix_after_caret(suffix_after_caret);
+        result
+    }
+
     fn pop_suffix_whitespace(&mut self) -> Vec<InputRun> {
         let mut suffix_runs: Vec<InputRun> = Vec::new();
         while self
@@ -526,6 +569,16 @@ fn mods_ctrl_or_alt_down() -> bool {
     let ctrl = unsafe { GetAsyncKeyState(0x11) }.cast_unsigned();
     let alt = unsafe { GetAsyncKeyState(0x12) }.cast_unsigned();
     (ctrl & 0x8000) != 0 || (alt & 0x8000) != 0
+}
+
+#[cfg(windows)]
+fn is_modifier_vk(vk: VIRTUAL_KEY) -> bool {
+    matches!(vk.0, 0xA0..=0xA5 | 0x5B | 0x5C)
+}
+
+#[cfg(windows)]
+fn should_clear_for_ctrl_alt_combo(vk: VIRTUAL_KEY, ctrl_or_alt_down: bool) -> bool {
+    ctrl_or_alt_down && !is_modifier_vk(vk)
 }
 
 #[cfg(windows)]
@@ -684,7 +737,7 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
         _ => {}
     }
 
-    if mods_ctrl_or_alt_down() {
+    if should_clear_for_ctrl_alt_combo(vk, mods_ctrl_or_alt_down()) {
         action = Some(JournalAction::Clear);
     }
 
@@ -734,6 +787,11 @@ pub fn take_last_layout_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<Inp
     with_journal_mut(|j| j.take_last_layout_sequence_with_suffix())
 }
 
+#[must_use]
+pub fn take_last_programmatic_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<InputRun>)> {
+    with_journal_mut(|j| j.take_last_programmatic_sequence_with_suffix())
+}
+
 #[cfg(test)]
 pub fn push_text(s: &str) {
     with_journal_mut(|j| j.push_text_internal(s, LayoutTag::Unknown, RunOrigin::Programmatic));
@@ -745,11 +803,6 @@ pub fn push_run(run: InputRun) {
 
 pub fn push_runs(runs: impl IntoIterator<Item = InputRun>) {
     with_journal_mut(|j| j.push_runs(runs));
-}
-
-#[cfg(any(test, windows))]
-pub fn push_text_with_meta(text: &str, layout: LayoutTag, origin: RunOrigin) {
-    with_journal_mut(|j| j.push_text_internal(text, layout, origin));
 }
 
 #[cfg(test)]
@@ -812,6 +865,27 @@ pub fn last_char_triggers_autoconvert() -> bool {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ctrl_or_alt_combo_preserves_modifier_only_layout_switch_chords() {
+        assert!(!should_clear_for_ctrl_alt_combo(VK_LSHIFT, true));
+        assert!(!should_clear_for_ctrl_alt_combo(VK_RSHIFT, true));
+        assert!(!should_clear_for_ctrl_alt_combo(VIRTUAL_KEY(0xA4), true));
+        assert!(!should_clear_for_ctrl_alt_combo(VIRTUAL_KEY(0xA5), true));
+    }
+
+    #[test]
+    fn ctrl_or_alt_combo_still_clears_non_modifier_keys() {
+        assert!(should_clear_for_ctrl_alt_combo(
+            VIRTUAL_KEY(u16::from(b'A')),
+            true
+        ));
+        assert!(should_clear_for_ctrl_alt_combo(VK_TAB, true));
+        assert!(!should_clear_for_ctrl_alt_combo(
+            VIRTUAL_KEY(u16::from(b'A')),
+            false
+        ));
+    }
 
     #[test]
     fn keyboard_state_overrides_apply_caps_lock_toggle_without_touching_high_bit() {

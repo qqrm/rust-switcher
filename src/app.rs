@@ -13,7 +13,13 @@ use windows::Win32::{
     UI::WindowsAndMessaging::HMENU,
 };
 
-use crate::config;
+use crate::{config, input::hotkeys::HotkeyAction};
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum RuntimeCommand {
+    Hotkey(HotkeyAction),
+    AutoconvertLastWord,
+}
 
 #[derive(Debug, Clone)]
 pub struct UiError {
@@ -25,6 +31,7 @@ pub struct UiError {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum HotkeySlot {
     LastWord,
+    LastSequence,
     Pause,
     Selection,
     SwitchLayout,
@@ -33,6 +40,7 @@ pub enum HotkeySlot {
 #[derive(Debug, Default, Clone)]
 pub struct HotkeyValues {
     pub last_word: Option<config::Hotkey>,
+    pub last_sequence: Option<config::Hotkey>,
     pub pause: Option<config::Hotkey>,
     pub selection: Option<config::Hotkey>,
     pub switch_layout: Option<config::Hotkey>,
@@ -42,6 +50,7 @@ impl HotkeyValues {
     pub fn from_config(cfg: &config::Config) -> Self {
         Self {
             last_word: cfg.hotkey_convert_last_word,
+            last_sequence: cfg.hotkey_convert_last_sequence,
             pause: cfg.hotkey_pause,
             selection: cfg.hotkey_convert_selection,
             switch_layout: cfg.hotkey_switch_layout,
@@ -52,6 +61,7 @@ impl HotkeyValues {
     pub fn get(&self, slot: HotkeySlot) -> Option<config::Hotkey> {
         match slot {
             HotkeySlot::LastWord => self.last_word,
+            HotkeySlot::LastSequence => self.last_sequence,
             HotkeySlot::Pause => self.pause,
             HotkeySlot::Selection => self.selection,
             HotkeySlot::SwitchLayout => self.switch_layout,
@@ -61,6 +71,7 @@ impl HotkeyValues {
     pub fn set(&mut self, slot: HotkeySlot, hk: Option<config::Hotkey>) {
         match slot {
             HotkeySlot::LastWord => self.last_word = hk,
+            HotkeySlot::LastSequence => self.last_sequence = hk,
             HotkeySlot::Pause => self.pause = hk,
             HotkeySlot::Selection => self.selection = hk,
             HotkeySlot::SwitchLayout => self.switch_layout = hk,
@@ -71,6 +82,7 @@ impl HotkeyValues {
 #[derive(Debug, Default, Clone)]
 pub struct HotkeySequenceValues {
     pub last_word: Option<config::HotkeySequence>,
+    pub last_sequence: Option<config::HotkeySequence>,
     pub pause: Option<config::HotkeySequence>,
     pub selection: Option<config::HotkeySequence>,
     pub switch_layout: Option<config::HotkeySequence>,
@@ -80,6 +92,7 @@ impl HotkeySequenceValues {
     pub fn from_config(cfg: &config::Config) -> Self {
         Self {
             last_word: cfg.hotkey_convert_last_word_sequence,
+            last_sequence: cfg.hotkey_convert_last_sequence_sequence,
             pause: cfg.hotkey_pause_sequence,
             selection: cfg.hotkey_convert_selection_sequence,
             switch_layout: cfg.hotkey_switch_layout_sequence,
@@ -89,6 +102,7 @@ impl HotkeySequenceValues {
     pub fn get(&self, slot: HotkeySlot) -> Option<config::HotkeySequence> {
         match slot {
             HotkeySlot::LastWord => self.last_word,
+            HotkeySlot::LastSequence => self.last_sequence,
             HotkeySlot::Pause => self.pause,
             HotkeySlot::Selection => self.selection,
             HotkeySlot::SwitchLayout => self.switch_layout,
@@ -98,6 +112,7 @@ impl HotkeySequenceValues {
     pub fn set(&mut self, slot: HotkeySlot, seq: Option<config::HotkeySequence>) {
         match slot {
             HotkeySlot::LastWord => self.last_word = seq,
+            HotkeySlot::LastSequence => self.last_sequence = seq,
             HotkeySlot::Pause => self.pause = seq,
             HotkeySlot::Selection => self.selection = seq,
             HotkeySlot::SwitchLayout => self.switch_layout = seq,
@@ -120,6 +135,28 @@ pub struct HotkeyCaptureUi {
     pub last_input_tick_ms: u64,
 }
 
+impl HotkeyCaptureUi {
+    pub fn start(&mut self, slot: HotkeySlot) {
+        self.active = true;
+        self.slot = Some(slot);
+        self.pending_mods_vks = 0;
+        self.pending_mods = 0;
+        self.pending_mods_valid = false;
+        self.saw_non_mod = false;
+        self.last_input_tick_ms = 0;
+    }
+
+    pub fn stop(&mut self) {
+        self.active = false;
+        self.slot = None;
+        self.pending_mods_vks = 0;
+        self.pending_mods = 0;
+        self.pending_mods_valid = false;
+        self.saw_non_mod = false;
+        self.last_input_tick_ms = 0;
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct RuntimeChordCapture {
     pub pending_mods_vks: u32,
@@ -137,6 +174,7 @@ pub struct SequenceProgress {
 #[derive(Debug, Default)]
 pub struct HotkeySequenceProgress {
     pub last_word: SequenceProgress,
+    pub last_sequence: SequenceProgress,
     pub pause: SequenceProgress,
     pub selection: SequenceProgress,
     pub switch_layout: SequenceProgress,
@@ -175,6 +213,10 @@ pub struct AppState {
     /// Runtime state for chord sequence progress.
     pub hotkey_sequence_progress: HotkeySequenceProgress,
 
+    /// Serialized runtime commands triggered by hotkeys/autoconvert.
+    pub pending_runtime_commands: VecDeque<RuntimeCommand>,
+    pub runtime_command_running: bool,
+
     pub active_switch_layout_sequence: Option<config::HotkeySequence>,
     pub switch_layout_waiting_second: bool,
     pub switch_layout_first_tick_ms: u64,
@@ -201,6 +243,7 @@ pub struct Edits {
 #[derive(Debug, Default)]
 pub struct HotkeyEdits {
     pub last_word: HWND,
+    pub last_sequence: HWND,
     pub pause: HWND,
     pub selection: HWND,
     pub switch_layout: HWND,
@@ -224,9 +267,10 @@ pub enum ControlId {
     DarkTheme = 1005,
 
     HotkeyLastWord = 1201,
-    HotkeyPause = 1202,
-    HotkeySelection = 1203,
-    HotkeySwitchLayout = 1204,
+    HotkeyLastSequence = 1202,
+    HotkeyPause = 1203,
+    HotkeySelection = 1204,
+    HotkeySwitchLayout = 1205,
 
     Apply = 1101,
     Cancel = 1102,
@@ -244,9 +288,10 @@ impl ControlId {
             1005 => Some(Self::DarkTheme),
 
             1201 => Some(Self::HotkeyLastWord),
-            1202 => Some(Self::HotkeyPause),
-            1203 => Some(Self::HotkeySelection),
-            1204 => Some(Self::HotkeySwitchLayout),
+            1202 => Some(Self::HotkeyLastSequence),
+            1203 => Some(Self::HotkeyPause),
+            1204 => Some(Self::HotkeySelection),
+            1205 => Some(Self::HotkeySwitchLayout),
 
             1101 => Some(Self::Apply),
             1102 => Some(Self::Cancel),

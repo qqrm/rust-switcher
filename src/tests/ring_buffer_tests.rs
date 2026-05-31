@@ -182,6 +182,45 @@ fn caret_left_keeps_last_sequence_before_caret_available() {
 }
 
 #[test]
+fn caret_left_keeps_programmatic_sequence_before_caret_available() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_runs([
+        InputRun {
+            text: "привет".to_string(),
+            layout: LayoutTag::Ru,
+            origin: RunOrigin::Programmatic,
+            kind: RunKind::Text,
+        },
+        InputRun {
+            text: " ".to_string(),
+            layout: LayoutTag::Ru,
+            origin: RunOrigin::Programmatic,
+            kind: RunKind::Whitespace,
+        },
+        InputRun {
+            text: "world".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        },
+    ]);
+
+    ring_buffer::test_move_caret_left(5);
+
+    let (runs, suffix) =
+        ring_buffer::take_last_programmatic_sequence_with_suffix().expect("payload");
+    assert_eq!(
+        runs.iter().map(|r| r.text.as_str()).collect::<String>(),
+        "привет"
+    );
+    assert_eq!(
+        suffix.iter().map(|r| r.text.as_str()).collect::<String>(),
+        " "
+    );
+}
+
+#[test]
 fn caret_right_moves_back_toward_journal_end() {
     let _guard = test_lock();
     ring_buffer::invalidate();

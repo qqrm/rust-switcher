@@ -39,15 +39,27 @@ fn convert_with_layout_fallback(text: &str, layout: &LayoutTag) -> String {
     .unwrap_or(ConversionDirection::RuToEn);
     convert_ru_en_with_direction(text, direction)
 }
+
+fn convert_sequence_runs(runs: &[InputRun]) -> String {
+    let mut out = String::new();
+
+    for run in runs {
+        match run.kind {
+            RunKind::Text => out.push_str(&convert_with_layout_fallback(&run.text, &run.layout)),
+            RunKind::Whitespace => out.push_str(&run.text),
+        }
+    }
+
+    out
+}
+pub fn convert_last_word(state: &mut AppState) {
+    convert_last_word_impl(state, true);
+}
+
 pub fn convert_last_sequence(state: &mut AppState) {
     convert_last_sequence_impl(state, true);
 }
 
-/// Backwards-compatible alias.
-#[allow(dead_code)]
-pub fn convert_last_word(state: &mut AppState) {
-    convert_last_sequence(state);
-}
 pub fn autoconvert_last_word(state: &mut AppState) {
     if !foreground_window_alive() {
         tracing::warn!("foreground window is null");
@@ -437,6 +449,43 @@ fn apply_last_word_replacement(p: &LastRunPayload, converted: &str) -> Result<()
         Err(ApplyError::KeyInjectionFailed)
     }
 }
+
+#[tracing::instrument(level = "trace", skip(state))]
+fn convert_last_word_impl(state: &mut AppState, switch_layout: bool) {
+    if !foreground_window_alive() {
+        tracing::warn!("foreground window is null");
+        return;
+    }
+    if switch_layout && !wait_shift_released(150) {
+        tracing::info!("wait_shift_released returned false");
+        return;
+    }
+    sleep_before_convert(state);
+    let Some(payload) = take_last_word_payload() else {
+        tracing::info!("journal: no last word");
+        return;
+    };
+    let mut restore = JournalRestore::new(&payload);
+    if payload.suffix_has_newline {
+        tracing::trace!("newline present, skipping convert_last_word");
+        return;
+    }
+    let converted = convert_with_layout_fallback(&payload.run.text, &payload.run.layout);
+    tracing::trace!(%converted, "converted");
+    if apply_last_word_conversion(&payload, &converted) {
+        update_journal(&payload, &converted);
+        restore.commit();
+        if switch_layout {
+            match switch_keyboard_layout() {
+                Ok(()) => tracing::trace!("layout switched"),
+                Err(e) => tracing::warn!(error = ?e, "layout switch failed"),
+            }
+        }
+    } else {
+        tracing::warn!("convert apply failed");
+    }
+}
+
 #[tracing::instrument(level = "trace", skip(state))]
 fn convert_last_sequence_impl(state: &mut AppState, switch_layout: bool) {
     if !foreground_window_alive() {
@@ -457,7 +506,7 @@ fn convert_last_sequence_impl(state: &mut AppState, switch_layout: bool) {
         tracing::trace!("newline present, skipping convert_last_sequence");
         return;
     }
-    let converted = convert_with_layout_fallback(&payload.seq_text, &payload.layout);
+    let converted = convert_sequence_runs(&payload.runs);
     tracing::trace!(%converted, "converted");
     if apply_last_sequence_conversion(&payload, &converted) {
         update_journal_sequence(&payload, &converted);
@@ -495,9 +544,11 @@ struct LastRunPayload {
 struct LastSequencePayload {
     prefix_runs: Vec<InputRun>,
     runs: Vec<InputRun>,
+    #[cfg_attr(not(test), allow(dead_code))]
     layout: LayoutTag,
     suffix_runs: Vec<InputRun>,
     suffix_text: String,
+    #[cfg_attr(not(test), allow(dead_code))]
     seq_text: String,
     seq_len: usize,
     suffix_len: usize,
@@ -545,55 +596,10 @@ fn join_runs_text(runs: &[InputRun]) -> String {
     runs.iter().map(|run| run.text.as_str()).collect()
 }
 
-fn split_sequence_runs_for_conversion(
-    runs: Vec<InputRun>,
-    detector: &lingua::LanguageDetector,
-) -> (Vec<InputRun>, Vec<InputRun>) {
-    let Some(last_idx) = runs.iter().rposition(|run| run.kind == RunKind::Text) else {
-        return (Vec::new(), runs);
-    };
-
-    if runs[last_idx].origin == RunOrigin::Programmatic {
-        return (Vec::new(), runs);
-    }
-
-    let layout = runs[last_idx].layout;
-    let mut selected_start = last_idx;
-
-    for idx in (0..last_idx).rev() {
-        let run = &runs[idx];
-        if run.kind != RunKind::Text {
-            continue;
-        }
-        if should_include_previous_sequence_run(run, layout, detector) {
-            selected_start = idx;
-            continue;
-        }
-        break;
-    }
-
-    let mut runs = runs;
-    let selected_runs = runs.split_off(selected_start);
-    (runs, selected_runs)
-}
-
-fn should_include_previous_sequence_run(
-    run: &InputRun,
-    layout: LayoutTag,
-    detector: &lingua::LanguageDetector,
-) -> bool {
-    if !matches!(layout, LayoutTag::En | LayoutTag::Ru) {
-        return false;
-    }
-
-    let converted = convert_with_layout_fallback(&run.text, &layout);
-    should_autoconvert_word(detector, &run.text, &converted).is_ok()
-}
-
 fn take_last_sequence_payload() -> Option<LastSequencePayload> {
-    let (raw_runs, suffix_runs) = crate::input_journal::take_last_layout_sequence_with_suffix()?;
-    let detector = language_detector();
-    let (prefix_runs, runs) = split_sequence_runs_for_conversion(raw_runs, detector);
+    let (runs, suffix_runs) =
+        crate::input_journal::take_last_programmatic_sequence_with_suffix()
+            .or_else(crate::input_journal::take_last_layout_sequence_with_suffix)?;
     let last = runs.last()?;
     if last.kind != RunKind::Text {
         return None;
@@ -621,7 +627,7 @@ fn take_last_sequence_payload() -> Option<LastSequencePayload> {
     );
 
     Some(LastSequencePayload {
-        prefix_runs,
+        prefix_runs: Vec::new(),
         runs,
         layout,
         suffix_runs,
@@ -697,13 +703,27 @@ fn restore_journal_original_sequence(p: &LastSequencePayload) {
 
 fn update_journal_sequence(p: &LastSequencePayload, converted: &str) {
     crate::input_journal::push_runs(p.prefix_runs.iter().cloned());
-    crate::input_journal::push_text_with_meta(
-        converted,
-        flipped_layout(p.layout),
-        RunOrigin::Programmatic,
-    );
+    crate::input_journal::push_runs(p.runs.iter().map(|run| {
+        let text = match run.kind {
+            RunKind::Whitespace => run.text.clone(),
+            RunKind::Text => convert_with_layout_fallback(&run.text, &run.layout),
+        };
+
+        let layout = if run.kind == RunKind::Text && text != run.text {
+            flipped_layout(run.layout)
+        } else {
+            run.layout
+        };
+
+        InputRun {
+            text,
+            layout,
+            origin: RunOrigin::Programmatic,
+            kind: run.kind,
+        }
+    }));
     crate::input_journal::push_runs(p.suffix_runs.iter().cloned());
-    tracing::trace!("journal updated (sequence)");
+    tracing::trace!(%converted, "journal updated (sequence)");
 }
 fn restore_journal_original(p: &LastRunPayload) {
     crate::input_journal::push_run(p.run.clone());
@@ -881,6 +901,83 @@ mod tests {
         assert_eq!(converted, "приветб");
         assert!(should_autoconvert_word(&detector, word, &converted).is_ok());
     }
+
+    #[test]
+    fn last_word_payload_extracts_only_final_text_run() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: "  ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+        ]);
+
+        let payload = take_last_word_payload().expect("payload expected");
+        assert_eq!(payload.run.text, "rjynhjkm");
+        assert_eq!(payload.suffix_text, "  ");
+        assert_eq!(payload.run.layout, LayoutTag::En);
+    }
+
+    #[test]
+    fn update_journal_for_last_word_keeps_prefix_runs() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let payload = take_last_word_payload().expect("payload expected");
+        update_journal(&payload, "школа");
+
+        let runs = ring_buffer::runs_snapshot();
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0].text, "ghbdtn");
+        assert_eq!(runs[0].layout, LayoutTag::En);
+        assert_eq!(runs[1].text, " ");
+        assert_eq!(runs[1].kind, RunKind::Whitespace);
+        assert_eq!(runs[2].text, "школа");
+        assert_eq!(runs[2].layout, LayoutTag::Ru);
+        assert_eq!(runs[2].origin, RunOrigin::Programmatic);
+    }
+
     #[test]
     fn last_sequence_payload_spans_whitespace_and_uses_single_layout() {
         let _guard = test_lock();
@@ -953,13 +1050,14 @@ mod tests {
         assert_eq!(p1.seq_text, "ghbdtn rjynhjkm");
 
         // Simulate manual conversion journal update (programmatic RU)
-        update_journal_sequence(&p1, "привет школа");
+        let c1 = convert_sequence_runs(&p1.runs);
+        update_journal_sequence(&p1, &c1);
 
         // Second extraction must succeed (programmatic RU), enabling toggle-back.
         let p2 = take_last_sequence_payload()
             .expect("sequence payload after programmatic update expected");
         assert_eq!(p2.layout, LayoutTag::Ru);
-        assert_eq!(p2.seq_text, "привет школа");
+        assert_eq!(p2.seq_text, "привет контроль");
         assert!(p2.suffix_text.is_empty());
         assert!(p2.prefix_runs.is_empty());
     }
@@ -990,17 +1088,42 @@ mod tests {
         ]);
 
         let p1 = take_last_sequence_payload().expect("first sequence payload expected");
-        let c1 = convert_with_layout_fallback(&p1.seq_text, &p1.layout);
+        let c1 = convert_sequence_runs(&p1.runs);
         assert_ne!(c1, p1.seq_text);
         update_journal_sequence(&p1, &c1);
 
         let p2 = take_last_sequence_payload().expect("second sequence payload expected");
-        let c2 = convert_with_layout_fallback(&p2.seq_text, &p2.layout);
+        let c2 = convert_sequence_runs(&p2.runs);
         update_journal_sequence(&p2, &c2);
 
         let p3 = take_last_sequence_payload().expect("third sequence payload expected");
         assert_eq!(p3.layout, LayoutTag::En);
         assert_eq!(p3.seq_text, p1.seq_text);
+    }
+
+    #[test]
+    fn last_sequence_payload_stops_on_layout_change_without_whitespace() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: "руддщ".to_string(),
+                layout: LayoutTag::Ru,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let payload = take_last_sequence_payload().expect("sequence payload expected");
+        assert!(payload.prefix_runs.is_empty());
+        assert_eq!(payload.seq_text, "руддщ");
+        assert_eq!(payload.layout, LayoutTag::Ru);
     }
 
     #[test]
@@ -1062,6 +1185,48 @@ mod tests {
     }
 
     #[test]
+    fn manual_sequence_preserves_suffix_after_programmatic_roundtrip() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: "  ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+        ]);
+
+        let payload = take_last_sequence_payload().expect("sequence payload expected");
+        assert_eq!(payload.suffix_text, "  ");
+        let converted = convert_sequence_runs(&payload.runs);
+        update_journal_sequence(&payload, &converted);
+
+        let next = take_last_sequence_payload().expect("sequence payload after update expected");
+        assert_eq!(next.layout, LayoutTag::Ru);
+        assert_eq!(next.seq_text, "привет контроль");
+        assert_eq!(next.suffix_text, "  ");
+    }
+
+    #[test]
     fn update_journal_sequence_preserves_whitespace_tokenization() {
         let _guard = test_lock();
         ring_buffer::invalidate();
@@ -1087,10 +1252,11 @@ mod tests {
         ]);
 
         let payload = take_last_sequence_payload().expect("sequence payload expected");
-        update_journal_sequence(&payload, "привет школа");
+        let converted = convert_sequence_runs(&payload.runs);
+        update_journal_sequence(&payload, &converted);
 
         let (runs, suffix) =
-            ring_buffer::take_last_layout_sequence_with_suffix().expect("seq expected");
+            ring_buffer::take_last_programmatic_sequence_with_suffix().expect("seq expected");
         assert!(suffix.is_empty());
         assert_eq!(runs.len(), 3);
         assert_eq!(runs[0].text, "привет");
@@ -1099,12 +1265,12 @@ mod tests {
         assert_eq!(runs[0].layout, LayoutTag::Ru);
         assert_eq!(runs[1].text, " ");
         assert_eq!(runs[1].kind, RunKind::Whitespace);
-        assert_eq!(runs[2].text, "школа");
+        assert_eq!(runs[2].text, "контроль");
         assert_eq!(runs[2].kind, RunKind::Text);
     }
 
     #[test]
-    fn last_sequence_payload_stops_before_previous_correct_english_word() {
+    fn last_sequence_payload_includes_previous_english_word_in_same_sequence() {
         let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
@@ -1129,15 +1295,13 @@ mod tests {
         ]);
 
         let payload = take_last_sequence_payload().expect("sequence payload expected");
-        assert_eq!(payload.prefix_runs.len(), 2);
-        assert_eq!(payload.prefix_runs[0].text, "hello");
-        assert_eq!(payload.prefix_runs[1].text, " ");
-        assert_eq!(payload.seq_text, "ghbdtn");
+        assert!(payload.prefix_runs.is_empty());
+        assert_eq!(payload.seq_text, "hello ghbdtn");
         assert_eq!(payload.layout, LayoutTag::En);
     }
 
     #[test]
-    fn last_sequence_payload_stops_before_previous_correct_russian_word() {
+    fn last_sequence_payload_includes_previous_russian_word_in_same_sequence() {
         let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
@@ -1162,15 +1326,13 @@ mod tests {
         ]);
 
         let payload = take_last_sequence_payload().expect("sequence payload expected");
-        assert_eq!(payload.prefix_runs.len(), 2);
-        assert_eq!(payload.prefix_runs[0].text, "привет");
-        assert_eq!(payload.prefix_runs[1].text, " ");
-        assert_eq!(payload.seq_text, "руддщ");
+        assert!(payload.prefix_runs.is_empty());
+        assert_eq!(payload.seq_text, "привет руддщ");
         assert_eq!(payload.layout, LayoutTag::Ru);
     }
 
     #[test]
-    fn update_journal_sequence_keeps_unconverted_prefix_runs() {
+    fn update_journal_sequence_converts_full_same_layout_sequence() {
         let _guard = test_lock();
         ring_buffer::invalidate();
         ring_buffer::push_runs([
@@ -1195,17 +1357,240 @@ mod tests {
         ]);
 
         let payload = take_last_sequence_payload().expect("sequence payload expected");
-        update_journal_sequence(&payload, "привет");
+        update_journal_sequence(&payload, "руддщ привет");
 
         let runs = ring_buffer::runs_snapshot();
         assert_eq!(runs.len(), 3);
-        assert_eq!(runs[0].text, "hello");
-        assert_eq!(runs[0].layout, LayoutTag::En);
+        assert_eq!(runs[0].text, "руддщ");
+        assert_eq!(runs[0].layout, LayoutTag::Ru);
+        assert_eq!(runs[0].origin, RunOrigin::Programmatic);
         assert_eq!(runs[1].text, " ");
         assert_eq!(runs[1].kind, RunKind::Whitespace);
         assert_eq!(runs[2].text, "привет");
         assert_eq!(runs[2].layout, LayoutTag::Ru);
         assert_eq!(runs[2].origin, RunOrigin::Programmatic);
+    }
+
+    #[test]
+    fn last_sequence_payload_keeps_multiple_words_in_single_layout_sequence() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "руддщ".to_string(),
+                layout: LayoutTag::Ru,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::Ru,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "вапр".to_string(),
+                layout: LayoutTag::Ru,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::Ru,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "dfgdfgh".to_string(),
+                layout: LayoutTag::Ru,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let payload = take_last_sequence_payload().expect("sequence payload expected");
+        assert_eq!(payload.layout, LayoutTag::Ru);
+        assert_eq!(payload.seq_text, "руддщ вапр dfgdfgh");
+        assert!(payload.prefix_runs.is_empty());
+    }
+
+    #[test]
+    fn mixed_script_sequence_roundtrip_current_behavior_is_explicit() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_run(InputRun {
+            text: "fdghdrfghdfgh dfgh dfgh dfgh вапвапр".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        });
+
+        let p1 = take_last_sequence_payload().expect("first sequence payload expected");
+        assert_eq!(p1.seq_text, "fdghdrfghdfgh dfgh dfgh dfgh вапвапр");
+        assert_eq!(p1.layout, LayoutTag::En);
+        let c1 = convert_with_layout_fallback(&p1.seq_text, &p1.layout);
+        assert_eq!(c1, "авпрвкапрвапр вапр вапр вапр вапвапр");
+        update_journal_sequence(&p1, &c1);
+
+        let p2 = take_last_sequence_payload().expect("second sequence payload expected");
+        assert_eq!(p2.seq_text, "авпрвкапрвапр вапр вапр вапр вапвапр");
+        assert_eq!(p2.layout, LayoutTag::Ru);
+        let c2 = convert_with_layout_fallback(&p2.seq_text, &p2.layout);
+        assert_eq!(c2, "fdghdrfghdfgh dfgh dfgh dfgh dfgdfgh");
+    }
+
+    #[test]
+    fn last_word_after_sequence_update_targets_only_final_programmatic_word() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let seq = take_last_sequence_payload().expect("sequence payload expected");
+        let converted = convert_sequence_runs(&seq.runs);
+        update_journal_sequence(&seq, &converted);
+
+        let word = take_last_word_payload().expect("word payload expected");
+        assert_eq!(word.run.text, "контроль");
+        assert_eq!(word.run.layout, LayoutTag::Ru);
+        assert_eq!(word.run.origin, RunOrigin::Programmatic);
+    }
+
+    #[test]
+    fn last_sequence_after_last_word_update_targets_only_last_programmatic_word() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let word = take_last_word_payload().expect("word payload expected");
+        let converted = convert_with_layout_fallback(&word.run.text, &word.run.layout);
+        update_journal(&word, &converted);
+
+        let seq = take_last_sequence_payload().expect("sequence payload expected");
+        assert_eq!(seq.seq_text, "контроль");
+        assert_eq!(seq.layout, LayoutTag::Ru);
+        assert!(seq.prefix_runs.is_empty());
+    }
+
+    #[test]
+    fn new_physical_tail_after_sequence_update_does_not_read_back_into_previous_sequence() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "ghbdtn".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "rjynhjkm".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let seq = take_last_sequence_payload().expect("sequence payload expected");
+        let converted = convert_sequence_runs(&seq.runs);
+        update_journal_sequence(&seq, &converted);
+
+        ring_buffer::push_run(InputRun {
+            text: "asdf".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        });
+
+        let tail = take_last_sequence_payload().expect("tail payload expected");
+        assert_eq!(tail.seq_text, "asdf");
+        assert_eq!(tail.layout, LayoutTag::En);
+        assert!(tail.prefix_runs.is_empty());
+    }
+
+    #[test]
+    fn exact_phrase_hfp_ldf_nhb_converts_as_full_last_sequence() {
+        let _guard = test_lock();
+        ring_buffer::invalidate();
+        ring_buffer::push_runs([
+            InputRun {
+                text: "hfp".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "ldf".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+            InputRun {
+                text: " ".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Whitespace,
+            },
+            InputRun {
+                text: "nhb".to_string(),
+                layout: LayoutTag::En,
+                origin: RunOrigin::Physical,
+                kind: RunKind::Text,
+            },
+        ]);
+
+        let payload = take_last_sequence_payload().expect("sequence payload expected");
+        assert_eq!(payload.seq_text, "hfp ldf nhb");
+        assert_eq!(convert_sequence_runs(&payload.runs), "раз два три");
     }
 
     #[test]

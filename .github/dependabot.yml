@@ -1,4 +1,5 @@
 version: 2
+# Touching this file triggers an immediate Dependabot version update check after merge.
 updates:
   - package-ecosystem: "cargo"
     directory: "/"

@@ -7,6 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIFT};
 
 const APP_DIR: &str = "RustSwitcher";
 const CONFIG_FILE: &str = "config.json";
@@ -52,18 +53,42 @@ pub struct Config {
     pub theme_dark: bool,
 
     pub hotkey_convert_last_word: Option<Hotkey>,
+    #[serde(default)]
+    pub hotkey_convert_last_sequence: Option<Hotkey>,
     pub hotkey_convert_selection: Option<Hotkey>,
     pub hotkey_switch_layout: Option<Hotkey>,
     pub hotkey_pause: Option<Hotkey>,
 
     #[serde(default)]
     pub hotkey_convert_last_word_sequence: Option<HotkeySequence>,
+    #[serde(default = "default_hotkey_convert_last_sequence_sequence")]
+    pub hotkey_convert_last_sequence_sequence: Option<HotkeySequence>,
     #[serde(default)]
     pub hotkey_pause_sequence: Option<HotkeySequence>,
     #[serde(default)]
     pub hotkey_convert_selection_sequence: Option<HotkeySequence>,
     #[serde(default)]
     pub hotkey_switch_layout_sequence: Option<HotkeySequence>,
+}
+
+fn modifier_only_chord(mods: u32, mods_vks: u32) -> HotkeyChord {
+    HotkeyChord {
+        mods,
+        mods_vks,
+        vk: None,
+    }
+}
+
+fn double_modifier_sequence(mods: u32, mods_vks: u32) -> HotkeySequence {
+    HotkeySequence {
+        first: modifier_only_chord(mods, mods_vks),
+        second: Some(modifier_only_chord(mods, mods_vks)),
+        max_gap_ms: 1000,
+    }
+}
+
+fn default_hotkey_convert_last_sequence_sequence() -> Option<HotkeySequence> {
+    Some(double_modifier_sequence(MOD_ALT.0, MODVK_LALT))
 }
 impl Default for Config {
     fn default() -> Self {
@@ -75,46 +100,20 @@ impl Default for Config {
             hotkey_switch_layout: None,
             hotkey_pause: None,
             hotkey_convert_last_word: None,
+            hotkey_convert_last_sequence: None,
             hotkey_convert_selection: None,
 
-            hotkey_convert_last_word_sequence: Some(HotkeySequence {
-                first: HotkeyChord {
-                    mods: 4,
-                    mods_vks: 4,
-                    vk: None,
-                },
-                second: Some(HotkeyChord {
-                    mods: 4,
-                    mods_vks: 4,
-                    vk: None,
-                }),
-                max_gap_ms: 1000,
-            }),
+            hotkey_convert_last_word_sequence: Some(double_modifier_sequence(
+                MOD_SHIFT.0,
+                MODVK_LSHIFT,
+            )),
+            hotkey_convert_last_sequence_sequence: default_hotkey_convert_last_sequence_sequence(),
 
-            hotkey_pause_sequence: Some(HotkeySequence {
-                first: HotkeyChord {
-                    mods: 4,
-                    mods_vks: 12,
-                    vk: None,
-                },
-                second: None,
-                max_gap_ms: 1000,
-            }),
-
-            hotkey_convert_selection_sequence: Some(HotkeySequence {
-                first: HotkeyChord {
-                    mods: 4,
-                    mods_vks: 4,
-                    vk: None,
-                },
-                second: Some(HotkeyChord {
-                    mods: 4,
-                    mods_vks: 4,
-                    vk: None,
-                }),
-                max_gap_ms: 1000,
-            }),
-
+            hotkey_pause_sequence: Some(double_modifier_sequence(MOD_CONTROL.0, MODVK_RCTRL)),
+            hotkey_convert_selection_sequence: Some(double_modifier_sequence(
+                MOD_SHIFT.0,
+                MODVK_LSHIFT,
+            )),
             hotkey_switch_layout_sequence: Some(HotkeySequence {
                 first: HotkeyChord {
                     mods: 0,

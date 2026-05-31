@@ -25,13 +25,18 @@ use windows::{
         Foundation::{HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Gdi::{DeleteObject, HFONT, HGDIOBJ, UpdateWindow},
         System::LibraryLoader::GetModuleHandleW,
-        UI::WindowsAndMessaging::{
-            DefWindowProcW, FindWindowW, GWLP_USERDATA, GetWindowLongPtrW, IsWindowVisible,
-            PostMessageW, PostQuitMessage, RegisterWindowMessageW, SC_CLOSE, SC_MINIMIZE,
-            SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SetForegroundWindow,
-            SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
-            WM_CTLCOLORDLG, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_PAINT,
-            WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+        UI::{
+            Input::KeyboardAndMouse::SetFocus,
+            WindowsAndMessaging::{
+                DefWindowProcW, FindWindowW, GWLP_USERDATA, GetWindowLongPtrW, IsWindow,
+                IsWindowVisible, PostMessageW, PostQuitMessage, RegisterWindowMessageW, SC_CLOSE,
+                SC_MINIMIZE, SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL,
+                SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE, WM_COMMAND,
+                WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC, WM_DESTROY,
+                WM_DRAWITEM, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_PAINT, WM_PARENTNOTIFY,
+                WM_RBUTTONDOWN, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX,
+                WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+            },
         },
     },
     core::{PCWSTR, Result, w},
@@ -48,7 +53,7 @@ pub(crate) const AUTOSTART_ARG: &str = "--autostart";
 use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLOREDIT, WM_ERASEBKGND};
 
 use crate::{
-    app::AppState,
+    app::{AppState, RuntimeCommand},
     config,
     domain::text::{last_word::autoconvert_last_word, switch_keyboard_layout},
     input::hotkeys::{HotkeyAction, action_from_id},
@@ -69,6 +74,7 @@ use crate::{
 };
 
 const WM_APP_APPLY_THEME: u32 = WM_APP + 1;
+const WM_APP_RUN_RUNTIME_COMMAND: u32 = WM_APP + 2;
 
 #[rustfmt::skip]
 #[cfg(debug_assertions)]
@@ -134,6 +140,30 @@ fn refresh_tray_tooltip(hwnd: HWND, state: &AppState) {
     }
 }
 
+fn hotkey_capture_focus_fallback(hwnd: HWND, state: &AppState) -> HWND {
+    if !state.buttons.apply.0.is_null() {
+        state.buttons.apply
+    } else {
+        hwnd
+    }
+}
+
+pub(crate) fn stop_hotkey_capture_ui(hwnd: HWND, state: &mut AppState) {
+    let was_active = state.hotkey_capture.active;
+    state.hotkey_capture.stop();
+
+    if was_active && !hwnd.0.is_null() {
+        let target = hotkey_capture_focus_fallback(hwnd, state);
+        unsafe {
+            if IsWindow(Some(target)).as_bool() {
+                let _ = SetFocus(Some(target));
+            } else if IsWindow(Some(hwnd)).as_bool() {
+                let _ = SetFocus(Some(hwnd));
+            }
+        }
+    }
+}
+
 pub fn refresh_autostart_checkbox(state: &mut AppState) -> windows::core::Result<()> {
     let enabled = crate::platform::win::autostart::is_enabled()?;
     crate::utils::helpers::set_checkbox(state.checkboxes.autostart, enabled);
@@ -156,6 +186,13 @@ fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::co
         format_hotkey(cfg.hotkey_convert_last_word)
     };
     set_hwnd_text(state.hotkeys.last_word, &last_word_text)?;
+
+    let last_sequence_text = if cfg.hotkey_convert_last_sequence_sequence.is_some() {
+        format_hotkey_sequence(cfg.hotkey_convert_last_sequence_sequence)
+    } else {
+        format_hotkey(cfg.hotkey_convert_last_sequence)
+    };
+    set_hwnd_text(state.hotkeys.last_sequence, &last_sequence_text)?;
 
     let pause_text = if cfg.hotkey_pause_sequence.is_some() {
         format_hotkey_sequence(cfg.hotkey_pause_sequence)
@@ -188,6 +225,7 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
     cfg.theme_dark = helpers::get_checkbox(state.checkboxes.theme_dark);
 
     cfg.hotkey_convert_last_word_sequence = state.hotkey_sequence_values.last_word;
+    cfg.hotkey_convert_last_sequence_sequence = state.hotkey_sequence_values.last_sequence;
     cfg.hotkey_pause_sequence = state.hotkey_sequence_values.pause;
     cfg.hotkey_convert_selection_sequence = state.hotkey_sequence_values.selection;
     cfg.hotkey_switch_layout_sequence = state.hotkey_sequence_values.switch_layout;
@@ -205,6 +243,10 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
     cfg.hotkey_convert_last_word = hk_or_none_if_double(
         cfg.hotkey_convert_last_word_sequence,
         state.hotkey_values.last_word,
+    );
+    cfg.hotkey_convert_last_sequence = hk_or_none_if_double(
+        cfg.hotkey_convert_last_sequence_sequence,
+        state.hotkey_values.last_sequence,
     );
     cfg.hotkey_pause = hk_or_none_if_double(cfg.hotkey_pause_sequence, state.hotkey_values.pause);
     cfg.hotkey_convert_selection = hk_or_none_if_double(
@@ -453,6 +495,14 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
         WM_HOTKEY => on_hotkey(hwnd, wparam),
         WM_TIMER => on_timer(hwnd, wparam, lparam),
         WM_PAINT => crate::platform::ui::themes::on_paint(hwnd, wparam, lparam),
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
+            with_state_mut_do(hwnd, |state| stop_hotkey_capture_ui(hwnd, state));
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+        WM_PARENTNOTIFY => {
+            with_state_mut_do(hwnd, |state| stop_hotkey_capture_ui(hwnd, state));
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
 
         //Purpose: Customize the background color of a dialog box itself.
         //When sent: When the dialog box background is about to be painted.
@@ -524,11 +574,16 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
             }
 
             with_state_mut_do(hwnd, |state| {
-                if state.autoconvert_enabled {
-                    autoconvert_last_word(state);
-                }
+                enqueue_runtime_command(hwnd, state, RuntimeCommand::AutoconvertLastWord);
             });
 
+            LRESULT(0)
+        }
+
+        WM_APP_RUN_RUNTIME_COMMAND => {
+            with_state_mut_do(hwnd, |state| {
+                process_next_runtime_command(hwnd, state);
+            });
             LRESULT(0)
         }
 
@@ -713,11 +768,74 @@ fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
     set_autoconvert_enabled_from_tray(hwnd, state, enabled, true);
 }
 
-fn handle_convert_smart(state: &mut AppState) {
-    if crate::conversion::convert_selection_if_any(state) {
+fn last_word_hotkey_should_try_selection_first(state: &AppState) -> bool {
+    let last_word = state.active_hotkey_sequences.last_word;
+    let selection = state.active_hotkey_sequences.selection;
+    last_word.is_some() && last_word == selection
+}
+
+fn handle_convert_last_word_hotkey(state: &mut AppState) {
+    if last_word_hotkey_should_try_selection_first(state)
+        && crate::domain::text::convert::convert_selection_if_any(state)
+    {
         return;
     }
-    crate::conversion::convert_last_sequence(state);
+
+    crate::conversion::convert_last_word(state);
+}
+
+fn execute_runtime_command(hwnd: HWND, state: &mut AppState, command: RuntimeCommand) {
+    match command {
+        RuntimeCommand::AutoconvertLastWord => {
+            if state.autoconvert_enabled {
+                autoconvert_last_word(state);
+            }
+        }
+        RuntimeCommand::Hotkey(action) => match action {
+            HotkeyAction::PauseToggle => {
+                tracing::warn!(msg = "autoconvert_toggle", source = "hotkey_pause_toggle");
+                handle_pause_toggle(hwnd, state);
+            }
+            HotkeyAction::ConvertLastWord => handle_convert_last_word_hotkey(state),
+            HotkeyAction::ConvertLastSequence => crate::conversion::convert_last_sequence(state),
+            HotkeyAction::ConvertSelection => crate::conversion::convert_selection(state),
+            HotkeyAction::SwitchLayout => {
+                let _ = switch_keyboard_layout();
+            }
+        },
+    }
+}
+
+fn enqueue_runtime_command(hwnd: HWND, state: &mut AppState, command: RuntimeCommand) {
+    state.pending_runtime_commands.push_back(command);
+
+    if state.runtime_command_running || state.pending_runtime_commands.len() != 1 {
+        return;
+    }
+
+    unsafe {
+        let _ = PostMessageW(Some(hwnd), WM_APP_RUN_RUNTIME_COMMAND, WPARAM(0), LPARAM(0));
+    }
+}
+
+fn process_next_runtime_command(hwnd: HWND, state: &mut AppState) {
+    if state.runtime_command_running {
+        return;
+    }
+
+    let Some(command) = state.pending_runtime_commands.pop_front() else {
+        return;
+    };
+
+    state.runtime_command_running = true;
+    execute_runtime_command(hwnd, state, command);
+    state.runtime_command_running = false;
+
+    if !state.pending_runtime_commands.is_empty() {
+        unsafe {
+            let _ = PostMessageW(Some(hwnd), WM_APP_RUN_RUNTIME_COMMAND, WPARAM(0), LPARAM(0));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -742,16 +860,8 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
         return LRESULT(0);
     };
 
-    with_state_mut(hwnd, |state| match action {
-        HotkeyAction::PauseToggle => {
-            tracing::warn!(msg = "autoconvert_toggle", source = "hotkey_pause_toggle");
-            handle_pause_toggle(hwnd, state)
-        }
-        HotkeyAction::ConvertLastWord => handle_convert_smart(state),
-        HotkeyAction::ConvertSelection => crate::conversion::convert_selection(state),
-        HotkeyAction::SwitchLayout => {
-            let _ = switch_keyboard_layout();
-        }
+    with_state_mut(hwnd, |state| {
+        enqueue_runtime_command(hwnd, state, RuntimeCommand::Hotkey(action));
     });
 
     LRESULT(0)
@@ -818,5 +928,146 @@ fn set_autoconvert_enabled_from_tray(
 
     if let Err(e) = crate::platform::win::tray::balloon_info(hwnd, "Rust Switcher", &body) {
         tracing::warn!(error = ?e, "tray balloon failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ptr;
+
+    use super::*;
+    use crate::{app::HotkeySequenceValues, config};
+
+    fn seq(vk: u32) -> config::HotkeySequence {
+        config::HotkeySequence {
+            first: config::HotkeyChord {
+                mods: 0,
+                mods_vks: 0,
+                vk: Some(vk),
+            },
+            second: None,
+            max_gap_ms: 250,
+        }
+    }
+
+    #[test]
+    fn last_word_hotkey_tries_selection_first_when_sequences_match() {
+        let state = AppState {
+            active_hotkey_sequences: HotkeySequenceValues {
+                last_word: Some(seq(u32::from(b'A'))),
+                selection: Some(seq(u32::from(b'A'))),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(last_word_hotkey_should_try_selection_first(&state));
+    }
+
+    #[test]
+    fn last_word_hotkey_does_not_try_selection_when_sequences_differ() {
+        let state = AppState {
+            active_hotkey_sequences: HotkeySequenceValues {
+                last_word: Some(seq(u32::from(b'A'))),
+                selection: Some(seq(u32::from(b'B'))),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(!last_word_hotkey_should_try_selection_first(&state));
+    }
+
+    #[test]
+    fn stop_hotkey_capture_clears_active_capture_state() {
+        let mut state = AppState::default();
+        state
+            .hotkey_capture
+            .start(crate::app::HotkeySlot::LastSequence);
+        assert!(state.hotkey_capture.active);
+
+        stop_hotkey_capture_ui(HWND::default(), &mut state);
+
+        assert!(!state.hotkey_capture.active);
+        assert_eq!(state.hotkey_capture.slot, None);
+        assert_eq!(state.hotkey_capture.pending_mods, 0);
+        assert_eq!(state.hotkey_capture.pending_mods_vks, 0);
+    }
+
+    #[test]
+    fn hotkey_capture_focus_fallback_prefers_apply_button() {
+        let mut state = AppState::default();
+        state.buttons.apply = HWND(ptr::dangling_mut());
+
+        let target = hotkey_capture_focus_fallback(HWND(ptr::dangling_mut()), &state);
+        assert_eq!(target, state.buttons.apply);
+    }
+
+    #[test]
+    fn hotkey_capture_focus_fallback_uses_window_when_apply_missing() {
+        let state = AppState::default();
+        let hwnd = HWND(ptr::dangling_mut());
+
+        let target = hotkey_capture_focus_fallback(hwnd, &state);
+        assert_eq!(target, hwnd);
+    }
+
+    #[test]
+    fn enqueue_runtime_command_records_fifo_series() {
+        let mut state = AppState::default();
+
+        enqueue_runtime_command(
+            HWND::default(),
+            &mut state,
+            RuntimeCommand::Hotkey(HotkeyAction::ConvertLastSequence),
+        );
+        enqueue_runtime_command(
+            HWND::default(),
+            &mut state,
+            RuntimeCommand::AutoconvertLastWord,
+        );
+        enqueue_runtime_command(
+            HWND::default(),
+            &mut state,
+            RuntimeCommand::Hotkey(HotkeyAction::ConvertLastWord),
+        );
+
+        assert_eq!(
+            state
+                .pending_runtime_commands
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![
+                RuntimeCommand::Hotkey(HotkeyAction::ConvertLastSequence),
+                RuntimeCommand::AutoconvertLastWord,
+                RuntimeCommand::Hotkey(HotkeyAction::ConvertLastWord),
+            ]
+        );
+        assert!(!state.runtime_command_running);
+    }
+
+    #[test]
+    fn enqueue_runtime_command_keeps_items_queued_while_running() {
+        let mut state = AppState {
+            runtime_command_running: true,
+            ..Default::default()
+        };
+
+        enqueue_runtime_command(
+            HWND::default(),
+            &mut state,
+            RuntimeCommand::Hotkey(HotkeyAction::SwitchLayout),
+        );
+
+        assert_eq!(
+            state
+                .pending_runtime_commands
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![RuntimeCommand::Hotkey(HotkeyAction::SwitchLayout)]
+        );
+        assert!(state.runtime_command_running);
     }
 }
