@@ -9,6 +9,13 @@ fn test_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|e| e.into_inner())
 }
 
+fn journal_text() -> String {
+    ring_buffer::runs_snapshot()
+        .iter()
+        .map(|r| r.text.as_str())
+        .collect()
+}
+
 #[test]
 fn run_journal_merges_contiguous_same_metadata() {
     let _guard = test_lock();
@@ -133,6 +140,132 @@ fn backspace_removes_from_last_run_and_drops_empty_run() {
     ring_buffer::push_text("a");
     ring_buffer::test_backspace();
     assert!(ring_buffer::take_last_layout_run_with_suffix().is_none());
+}
+
+#[test]
+fn caret_left_keeps_last_run_before_caret_available() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("ghbdtn world");
+
+    ring_buffer::test_move_caret_left(5);
+
+    let (run, suffix) = ring_buffer::take_last_layout_run_with_suffix().expect("payload");
+    assert_eq!(run.text, "ghbdtn");
+    assert_eq!(
+        suffix.iter().map(|r| r.text.as_str()).collect::<String>(),
+        " "
+    );
+
+    ring_buffer::push_run(run);
+    ring_buffer::push_runs(suffix);
+    assert_eq!(journal_text(), "ghbdtn world");
+}
+
+#[test]
+fn caret_left_keeps_last_sequence_before_caret_available() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("ghbdtn rjynhjkm done");
+
+    ring_buffer::test_move_caret_left(4);
+
+    let (runs, suffix) = ring_buffer::take_last_layout_sequence_with_suffix().expect("payload");
+    assert_eq!(
+        runs.iter().map(|r| r.text.as_str()).collect::<String>(),
+        "ghbdtn rjynhjkm"
+    );
+    assert_eq!(
+        suffix.iter().map(|r| r.text.as_str()).collect::<String>(),
+        " "
+    );
+}
+
+#[test]
+fn caret_right_moves_back_toward_journal_end() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("one two");
+
+    ring_buffer::test_move_caret_left(5);
+    ring_buffer::test_move_caret_right(5);
+
+    let (run, suffix) = ring_buffer::take_last_layout_run_with_suffix().expect("payload");
+    assert_eq!(run.text, "two");
+    assert!(suffix.is_empty());
+}
+
+#[test]
+fn typing_after_caret_left_inserts_before_suffix() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("abef");
+
+    ring_buffer::test_move_caret_left(2);
+    ring_buffer::push_text("cd");
+
+    assert_eq!(journal_text(), "abcdef");
+}
+
+#[test]
+fn backspace_after_caret_left_removes_before_caret() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("abcdef");
+
+    ring_buffer::test_move_caret_left(2);
+    ring_buffer::test_backspace();
+
+    assert_eq!(journal_text(), "abcef");
+}
+
+#[test]
+fn caret_left_insertion_preserves_utf8_boundaries() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("привмир");
+
+    ring_buffer::test_move_caret_left(3);
+    ring_buffer::push_text("ет ");
+
+    assert_eq!(journal_text(), "привет мир");
+}
+
+#[test]
+fn excessive_caret_left_clamps_to_start() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("tail");
+
+    ring_buffer::test_move_caret_left(999);
+    ring_buffer::push_text("head ");
+
+    assert_eq!(journal_text(), "head tail");
+}
+
+#[test]
+fn replacement_after_caret_left_preserves_suffix_after_caret() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("ghbdtn world");
+
+    ring_buffer::test_move_caret_left(5);
+    let (_run, suffix) = ring_buffer::take_last_layout_run_with_suffix().expect("payload");
+    ring_buffer::push_text("привет");
+    ring_buffer::push_runs(suffix);
+
+    assert_eq!(journal_text(), "привет world");
+}
+
+#[test]
+fn autoconvert_trigger_uses_character_before_caret() {
+    let _guard = test_lock();
+    ring_buffer::invalidate();
+    ring_buffer::push_text("abc def");
+
+    ring_buffer::test_move_caret_left(3);
+
+    assert!(ring_buffer::last_char_triggers_autoconvert());
 }
 
 #[test]
