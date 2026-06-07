@@ -52,7 +52,7 @@ It is intended as onboarding documentation and as a reference for expected runti
 
 Config fields (see src/config.rs):
 
-- delay_ms: u32
+- delay_ms: u32 (legacy config field; runtime uses the fixed 100 ms replacement delay)
 - start_minimized: bool
 - theme_dark: bool
 
@@ -88,7 +88,7 @@ Default bindings (current defaults in code):
 
 Behavior:
 - Converts the last token captured by the input journal.
-- Sleeps for autoconvert_delay_ms before replacement.
+- Sleeps for the fixed 100 ms replacement delay before replacement.
 - Replaces only the final run, preserving trailing suffix text.
 
 ### Convert selection
@@ -97,7 +97,7 @@ Algorithm (src/domain/text/convert.rs and selection probes):
 - Probe selection text from the focused control using UI Automation and/or Win32 (Edit/RichEdit) APIs.
   - No synthetic input is sent.
   - Clipboard is not touched.
-- Sleep for autoconvert_delay_ms before conversion and replacement.
+- Sleep for the fixed 100 ms replacement delay before conversion and replacement.
 - Convert the probed text via mapping.
 - Replace selection by:
   - Send Delete to remove the selection
@@ -110,7 +110,7 @@ This intentionally avoids paste via Ctrl+V to reduce interference with applicati
 
 Algorithm (src/domain/text/last_word.rs):
 - Uses the input journal tokenization to determine the last sequence.
-- Sleep for autoconvert_delay_ms before conversion and replacement.
+- Sleep for the fixed 100 ms replacement delay before conversion and replacement.
 - Applies an input based replacement strategy (backspace and Unicode injection via SendInput).
 - Clipboard is not used as the primary mechanism.
 
@@ -138,8 +138,9 @@ Native Win32 UI with a single window and two group sections (custom painted fram
 
 ### Settings group
 - Autostart (checkbox)
-- Delay ms (edit box)
+- Start minimized (checkbox)
 - Theme dark (checkbox)
+- Smarter hotkeys (checkbox)
 
 ### Hotkeys group
 - Read only displays for:

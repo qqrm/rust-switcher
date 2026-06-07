@@ -13,8 +13,7 @@ use windows::{
             Controls::{BST_CHECKED, BST_UNCHECKED},
             Shell::SetCurrentProcessExplicitAppUserModelID,
             WindowsAndMessaging::{
-                BM_GETCHECK, BM_SETCHECK, GetWindowTextLengthW, GetWindowTextW, SendMessageW,
-                SetWindowTextW, WINDOW_STYLE,
+                BM_GETCHECK, BM_SETCHECK, SendMessageW, SetWindowTextW, WINDOW_STYLE,
             },
         },
     },
@@ -163,31 +162,6 @@ pub fn get_checkbox(hwnd: HWND) -> bool {
 pub fn set_edit_text(hwnd: HWND, s: &str) -> windows::core::Result<()> {
     let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe { SetWindowTextW(hwnd, PCWSTR(wide.as_ptr())) }
-}
-
-pub fn get_edit_text(hwnd: HWND) -> String {
-    let len = unsafe { GetWindowTextLengthW(hwnd) };
-    if len <= 0 {
-        return String::new();
-    }
-
-    let mut buf: Vec<u16> = vec![0; (len as usize) + 1];
-    let n = unsafe { GetWindowTextW(hwnd, &mut buf) }.max(0) as usize;
-
-    String::from_utf16_lossy(&buf[..n])
-}
-
-pub fn set_edit_u32(hwnd: HWND, value: u32) -> windows::core::Result<()> {
-    set_edit_text(hwnd, &value.to_string())
-}
-
-pub fn get_edit_u32(hwnd: HWND) -> Option<u32> {
-    let s = get_edit_text(hwnd);
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    s.parse::<u32>().ok()
 }
 
 #[cfg(debug_assertions)]

@@ -185,12 +185,10 @@ impl ConvertSelectionError {
 ///
 /// Keyboard layout switching is best effort and does not affect the result.
 fn convert_selection_from_text(
-    state: &mut AppState,
+    _state: &mut AppState,
     text: &str,
     mode: SelectionDirectionMode,
 ) -> Result<(), ConvertSelectionError> {
-    let delay_ms = crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100);
-
     if matches!(mode, SelectionDirectionMode::TextOnly) && smart::text_looks_correct(text) {
         tracing::trace!(%text, "smart selection convert skipped: text already looks correct");
         return Ok(());
@@ -207,7 +205,9 @@ fn convert_selection_from_text(
     let converted = convert_ru_en_with_direction(text, direction);
     let converted_units = converted.encode_utf16().count();
 
-    thread::sleep(Duration::from_millis(u64::from(delay_ms)));
+    thread::sleep(Duration::from_millis(u64::from(
+        crate::config::CONVERSION_DELAY_MS,
+    )));
 
     let _seq = KeySequence::new();
 

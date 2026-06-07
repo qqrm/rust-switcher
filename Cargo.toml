@@ -31,7 +31,6 @@ tracing-appender = { version = "0.2", optional = true }
 
 [features]
 default = []
-diagnostic-tools = []
 debug-tracing = ["tracing-subscriber", "tracing-appender"]
 debug-binary = []
 
@@ -43,11 +42,6 @@ path = "src/main.rs"
 name = "rust-switcher-debug"
 path = "src/main_debug.rs"
 required-features = ["debug-binary"]
-
-[[bin]]
-name = "rust-switcher-timing"
-path = "src/timing_probe.rs"
-required-features = ["diagnostic-tools"]
 
 
 [target.'cfg(windows)'.dependencies]

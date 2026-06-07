@@ -279,7 +279,6 @@ pub struct Checkboxes {
 
 #[derive(Debug, Default)]
 pub struct Edits {
-    pub delay_ms: HWND,
     pub playground_label: HWND,
     pub playground: HWND,
 }
@@ -309,7 +308,6 @@ pub struct Buttons {
 pub enum ControlId {
     Autostart = 1001,
     Tray = 1002,
-    DelayMs = 1003,
     StartMinimized = 1004,
     DarkTheme = 1005,
     SmarterHotkeys = 1006,
@@ -334,7 +332,6 @@ impl ControlId {
         match v {
             1001 => Some(Self::Autostart),
             1002 => Some(Self::Tray),
-            1003 => Some(Self::DelayMs),
             1004 => Some(Self::StartMinimized),
             1005 => Some(Self::DarkTheme),
             1006 => Some(Self::SmarterHotkeys),

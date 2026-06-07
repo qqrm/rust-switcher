@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIFT};
 
 const CONFIG_FILE: &str = "config.json";
+pub const CONVERSION_DELAY_MS: u32 = 100;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Hotkey {
@@ -126,7 +127,7 @@ fn default_smart_hotkey_convert_selection_sequence() -> Option<HotkeySequence> {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            delay_ms: 100,
+            delay_ms: CONVERSION_DELAY_MS,
             start_minimized: false,
             theme_dark: false,
 

@@ -563,8 +563,8 @@ fn foreground_window_alive() -> bool {
     let fg = unsafe { GetForegroundWindow() };
     !fg.0.is_null()
 }
-fn sleep_before_convert(state: &AppState) {
-    let delay_ms = crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100);
+fn sleep_before_convert(_state: &AppState) {
+    let delay_ms = crate::config::CONVERSION_DELAY_MS;
     tracing::trace!(delay_ms, "sleep before convert");
     thread::sleep(Duration::from_millis(u64::from(delay_ms)));
 }

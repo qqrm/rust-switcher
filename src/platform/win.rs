@@ -217,8 +217,6 @@ fn apply_config_to_ui(
     state: &mut AppState,
     cfg: &config::Config,
 ) -> windows::core::Result<()> {
-    helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms)?;
-
     refresh_autostart_checkbox(state)?;
     helpers::set_checkbox(state.checkboxes.start_minimized, cfg.start_minimized);
     helpers::set_checkbox(state.checkboxes.theme_dark, cfg.theme_dark);
@@ -283,7 +281,7 @@ fn apply_config_to_ui(
 }
 
 fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Config {
-    cfg.delay_ms = helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(cfg.delay_ms);
+    cfg.delay_ms = config::CONVERSION_DELAY_MS;
 
     cfg.start_minimized = helpers::get_checkbox(state.checkboxes.start_minimized);
     cfg.theme_dark = helpers::get_checkbox(state.checkboxes.theme_dark);
@@ -968,7 +966,7 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
     let _id = hotkey_id_from_wparam(wparam);
 
     #[cfg(debug_assertions)]
-    crate::helpers::debug_log(&format!("WM_HOTKEY id={_id}"));
+    crate::utils::helpers::debug_log(&format!("WM_HOTKEY id={_id}"));
 
     let Some(action) = hotkey_action_from_wparam(wparam) else {
         return LRESULT(0);

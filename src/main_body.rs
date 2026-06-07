@@ -9,8 +9,6 @@ mod conversion;
 #[cfg(windows)]
 mod domain;
 #[cfg(windows)]
-mod helpers;
-#[cfg(windows)]
 mod input;
 #[cfg(windows)]
 mod input_journal;

@@ -202,8 +202,7 @@ try {
     Remove-Item -LiteralPath $appData -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path (Join-Path $appData "RustSwitcherDebug") -Force | Out-Null
 
-    @"
-delay_ms = 50
+@"
 start_minimized = false
 theme_dark = false
 smarter_hotkeys_enabled = true
