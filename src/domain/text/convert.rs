@@ -17,6 +17,7 @@ use windows::Win32::{
 use super::{
     mapping,
     selection_probe::{SelectionProbe, probe_selection_uia, probe_selection_win32},
+    smart,
 };
 use crate::{
     app::AppState,
@@ -72,7 +73,15 @@ fn probe_convertible_selection(max_chars: usize) -> Option<String> {
 #[allow(dead_code)]
 #[tracing::instrument(level = "trace", skip(state))]
 pub fn convert_selection_if_any(state: &mut AppState) -> bool {
-    match convert_selection_outcome(state, MAX_SELECTION_CHARS) {
+    convert_selection_if_any_impl(state, SelectionDirectionMode::TextThenForeground)
+}
+
+pub fn smart_convert_selection_if_any(state: &mut AppState) -> bool {
+    convert_selection_if_any_impl(state, SelectionDirectionMode::TextOnly)
+}
+
+fn convert_selection_if_any_impl(state: &mut AppState, mode: SelectionDirectionMode) -> bool {
+    match convert_selection_outcome(state, MAX_SELECTION_CHARS, mode) {
         ConvertOutcome::Noop => false,
         ConvertOutcome::Ok => true,
         ConvertOutcome::Err(e) => {
@@ -83,6 +92,14 @@ pub fn convert_selection_if_any(state: &mut AppState) -> bool {
 }
 
 pub fn convert_selection(state: &mut AppState) {
+    convert_selection_impl(state, SelectionDirectionMode::TextThenForeground);
+}
+
+pub fn smart_convert_selection(state: &mut AppState) {
+    convert_selection_impl(state, SelectionDirectionMode::TextOnly);
+}
+
+fn convert_selection_impl(state: &mut AppState, mode: SelectionDirectionMode) {
     tracing::trace!("convert_selection called");
     let fg = unsafe { GetForegroundWindow() };
     if fg.0.is_null() {
@@ -95,13 +112,19 @@ pub fn convert_selection(state: &mut AppState) {
         return;
     }
 
-    match convert_selection_outcome(state, MAX_SELECTION_CHARS) {
+    match convert_selection_outcome(state, MAX_SELECTION_CHARS, mode) {
         ConvertOutcome::Noop => tracing::trace!("no selection"),
         ConvertOutcome::Ok => {}
         ConvertOutcome::Err(e) => {
             tracing::warn!(user_text = e.user_text(), error = ?e, "selection conversion failed");
         }
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+enum SelectionDirectionMode {
+    TextThenForeground,
+    TextOnly,
 }
 
 /// High level outcome of a conversion attempt.
@@ -117,12 +140,16 @@ enum ConvertOutcome {
 /// Attempts to convert selection and returns a high level outcome.
 ///
 /// This function does not perform UI safety checks.
-fn convert_selection_outcome(state: &mut AppState, max_chars: usize) -> ConvertOutcome {
+fn convert_selection_outcome(
+    state: &mut AppState,
+    max_chars: usize,
+    mode: SelectionDirectionMode,
+) -> ConvertOutcome {
     let Some(text) = probe_convertible_selection(max_chars) else {
         return ConvertOutcome::Noop;
     };
 
-    match convert_selection_from_text(state, &text) {
+    match convert_selection_from_text(state, &text, mode) {
         Ok(()) => ConvertOutcome::Ok,
         Err(e) => ConvertOutcome::Err(e),
     }
@@ -160,12 +187,23 @@ impl ConvertSelectionError {
 fn convert_selection_from_text(
     state: &mut AppState,
     text: &str,
+    mode: SelectionDirectionMode,
 ) -> Result<(), ConvertSelectionError> {
     let delay_ms = crate::helpers::get_edit_u32(state.edits.delay_ms).unwrap_or(100);
 
-    let direction = conversion_direction_for_text(text)
-        .or_else(expected_direction_for_foreground_window)
-        .unwrap_or(ConversionDirection::RuToEn);
+    if matches!(mode, SelectionDirectionMode::TextOnly) && smart::text_looks_correct(text) {
+        tracing::trace!(%text, "smart selection convert skipped: text already looks correct");
+        return Ok(());
+    }
+
+    let direction = match mode {
+        SelectionDirectionMode::TextThenForeground => conversion_direction_for_text(text)
+            .or_else(expected_direction_for_foreground_window)
+            .unwrap_or(ConversionDirection::RuToEn),
+        SelectionDirectionMode::TextOnly => {
+            conversion_direction_for_text(text).unwrap_or(ConversionDirection::RuToEn)
+        }
+    };
     let converted = convert_ru_en_with_direction(text, direction);
     let converted_units = converted.encode_utf16().count();
 

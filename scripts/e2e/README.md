@@ -18,7 +18,7 @@ From the repository root:
 
 The host script:
 
-1. Builds `rust-switcher.exe` with `debug-tracing`.
+1. Builds `rust-switcher-debug.exe` with `debug-tracing,debug-binary`.
 2. Creates a temporary bundle under `%TEMP%`.
 3. Launches Windows Sandbox with that bundle mapped to the sandbox desktop.
 4. Runs `sandbox-runner.ps1` inside the sandbox.
@@ -26,15 +26,17 @@ The host script:
 
 ## Scenario Covered
 
-The current scenario validates the cursor-regression path:
+The current scenario validates the overlapping double/triple Shift path in the
+real app UI:
 
-1. Start Rust Switcher with an isolated `%APPDATA%` and deterministic
-   `Shift+F12` convert hotkey.
-2. Open an isolated WinForms multiline `TextBox`.
-3. Type `ghbdtn world`.
-4. Press `Left` five times, putting the caret before `world`.
-5. Press `Shift+F12`.
-6. Assert the text becomes `привет world`.
+1. Start `rust-switcher-debug.exe` inside Windows Sandbox with isolated
+   `%APPDATA%`.
+2. Enable E2E-only debug flags so the app shows/focuses its own `Playground`
+   field and accepts injected input only inside the sandbox run.
+3. Type `ghbdtn` into `Playground`.
+4. Tap left Shift three times and assert `Playground` becomes `привет`.
+5. Tap left Shift two times and assert `Playground` becomes `ghbdtn` after the
+   deferred double-Shift timeout.
 
 ## Requirements
 
@@ -43,4 +45,4 @@ The current scenario validates the cursor-regression path:
 - Rust nightly/MSVC available on the host for the build step.
 
 The sandbox is shut down automatically after the run. Use `-KeepOpen` while
-debugging the sandbox desktop.
+debugging the sandbox desktop. The script does not start the app on the host.

@@ -3,6 +3,8 @@ mod capture;
 pub(crate) mod debug_timers;
 mod keydown;
 mod keyup;
+#[cfg(test)]
+pub(crate) mod isolated_env;
 pub(crate) mod mods;
 pub(crate) mod sequence;
 pub(crate) mod vk;
@@ -16,6 +18,10 @@ use windows::Win32::{
         CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, PostMessageW, SetWindowsHookExW,
         WH_KEYBOARD_LL,
     },
+};
+#[cfg(debug_assertions)]
+use windows::Win32::UI::WindowsAndMessaging::{
+    GW_OWNER, GetForegroundWindow, GetWindow, IsChild,
 };
 
 use self::vk::{is_keydown_msg, is_keyup_msg, mod_bit_for_vk, normalize_vk};
@@ -38,6 +44,49 @@ fn main_hwnd() -> Option<HWND> {
     } else {
         Some(HWND(raw as *mut _))
     }
+}
+
+#[cfg(debug_assertions)]
+fn foreground_is_owned_by_main() -> bool {
+    let Some(main) = main_hwnd() else {
+        return false;
+    };
+    let fg = unsafe { GetForegroundWindow() };
+    if fg.0.is_null() {
+        return false;
+    }
+
+    foreground_matches_owner(main, fg, |parent, child| unsafe {
+        IsChild(parent, child).as_bool()
+    }, |hwnd| unsafe { GetWindow(hwnd, GW_OWNER).ok() })
+}
+
+#[cfg(debug_assertions)]
+fn foreground_matches_owner(
+    main: HWND,
+    foreground: HWND,
+    is_child: impl Fn(HWND, HWND) -> bool,
+    owner_of: impl Fn(HWND) -> Option<HWND>,
+) -> bool {
+    if foreground == main || is_child(main, foreground) {
+        return true;
+    }
+
+    let mut current = foreground;
+    for _ in 0..16 {
+        let Some(owner) = owner_of(current) else {
+            return false;
+        };
+        if owner.0.is_null() {
+            return false;
+        }
+        if owner == main || is_child(main, owner) {
+            return true;
+        }
+        current = owner;
+    }
+
+    false
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -82,6 +131,11 @@ extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
 
     let is_keydown = is_keydown_msg(msg);
     let is_keyup = is_keyup_msg(msg);
+
+    #[cfg(debug_assertions)]
+    if !foreground_is_owned_by_main() {
+        return unsafe { CallNextHookEx(hook, code, wparam, lparam) };
+    }
 
     let decision = if is_keydown {
         handle_keydown(vk, is_mod)
@@ -150,5 +204,54 @@ pub fn install(hwnd: HWND, state: &mut crate::app::AppState) {
                 &e,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hwnd(raw: isize) -> HWND {
+        HWND(raw as *mut _)
+    }
+
+    #[test]
+    fn owner_scope_accepts_main_window() {
+        assert!(foreground_matches_owner(
+            hwnd(100),
+            hwnd(100),
+            |_, _| false,
+            |_| None,
+        ));
+    }
+
+    #[test]
+    fn owner_scope_accepts_child_window() {
+        assert!(foreground_matches_owner(
+            hwnd(100),
+            hwnd(200),
+            |parent, child| parent == hwnd(100) && child == hwnd(200),
+            |_| None,
+        ));
+    }
+
+    #[test]
+    fn owner_scope_accepts_owned_popup() {
+        assert!(foreground_matches_owner(
+            hwnd(100),
+            hwnd(300),
+            |_, _| false,
+            |window| (window == hwnd(300)).then_some(hwnd(100)),
+        ));
+    }
+
+    #[test]
+    fn owner_scope_rejects_unrelated_window() {
+        assert!(!foreground_matches_owner(
+            hwnd(100),
+            hwnd(400),
+            |_, _| false,
+            |_| None,
+        ));
     }
 }

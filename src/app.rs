@@ -35,6 +35,9 @@ pub enum HotkeySlot {
     Pause,
     Selection,
     SwitchLayout,
+    SmartLastWord,
+    SmartLastSequence,
+    SmartSelection,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -65,6 +68,9 @@ impl HotkeyValues {
             HotkeySlot::Pause => self.pause,
             HotkeySlot::Selection => self.selection,
             HotkeySlot::SwitchLayout => self.switch_layout,
+            HotkeySlot::SmartLastWord
+            | HotkeySlot::SmartLastSequence
+            | HotkeySlot::SmartSelection => None,
         }
     }
 
@@ -75,6 +81,9 @@ impl HotkeyValues {
             HotkeySlot::Pause => self.pause = hk,
             HotkeySlot::Selection => self.selection = hk,
             HotkeySlot::SwitchLayout => self.switch_layout = hk,
+            HotkeySlot::SmartLastWord
+            | HotkeySlot::SmartLastSequence
+            | HotkeySlot::SmartSelection => {}
         }
     }
 }
@@ -86,16 +95,32 @@ pub struct HotkeySequenceValues {
     pub pause: Option<config::HotkeySequence>,
     pub selection: Option<config::HotkeySequence>,
     pub switch_layout: Option<config::HotkeySequence>,
+    pub smart_last_word: Option<config::HotkeySequence>,
+    pub smart_last_sequence: Option<config::HotkeySequence>,
+    pub smart_selection: Option<config::HotkeySequence>,
 }
 
 impl HotkeySequenceValues {
     pub fn from_config(cfg: &config::Config) -> Self {
+        let mut values = Self::from_config_all(cfg);
+        if !cfg.smarter_hotkeys_enabled {
+            values.smart_last_word = None;
+            values.smart_last_sequence = None;
+            values.smart_selection = None;
+        }
+        values
+    }
+
+    pub fn from_config_all(cfg: &config::Config) -> Self {
         Self {
             last_word: cfg.hotkey_convert_last_word_sequence,
             last_sequence: cfg.hotkey_convert_last_sequence_sequence,
             pause: cfg.hotkey_pause_sequence,
             selection: cfg.hotkey_convert_selection_sequence,
             switch_layout: cfg.hotkey_switch_layout_sequence,
+            smart_last_word: cfg.smart_hotkey_convert_last_word_sequence,
+            smart_last_sequence: cfg.smart_hotkey_convert_last_sequence_sequence,
+            smart_selection: cfg.smart_hotkey_convert_selection_sequence,
         }
     }
 
@@ -106,6 +131,9 @@ impl HotkeySequenceValues {
             HotkeySlot::Pause => self.pause,
             HotkeySlot::Selection => self.selection,
             HotkeySlot::SwitchLayout => self.switch_layout,
+            HotkeySlot::SmartLastWord => self.smart_last_word,
+            HotkeySlot::SmartLastSequence => self.smart_last_sequence,
+            HotkeySlot::SmartSelection => self.smart_selection,
         }
     }
 
@@ -116,6 +144,9 @@ impl HotkeySequenceValues {
             HotkeySlot::Pause => self.pause = seq,
             HotkeySlot::Selection => self.selection = seq,
             HotkeySlot::SwitchLayout => self.switch_layout = seq,
+            HotkeySlot::SmartLastWord => self.smart_last_word = seq,
+            HotkeySlot::SmartLastSequence => self.smart_last_sequence = seq,
+            HotkeySlot::SmartSelection => self.smart_selection = seq,
         }
     }
 }
@@ -169,6 +200,12 @@ pub struct RuntimeChordCapture {
 pub struct SequenceProgress {
     pub waiting_second: bool,
     pub first_tick_ms: u64,
+    pub matched_chords: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DeferredSequenceHotkey {
+    pub slot: HotkeySlot,
 }
 
 #[derive(Debug, Default)]
@@ -178,6 +215,9 @@ pub struct HotkeySequenceProgress {
     pub pause: SequenceProgress,
     pub selection: SequenceProgress,
     pub switch_layout: SequenceProgress,
+    pub smart_last_word: SequenceProgress,
+    pub smart_last_sequence: SequenceProgress,
+    pub smart_selection: SequenceProgress,
 }
 
 /// Per-window state used throughout the application.
@@ -212,6 +252,7 @@ pub struct AppState {
 
     /// Runtime state for chord sequence progress.
     pub hotkey_sequence_progress: HotkeySequenceProgress,
+    pub deferred_sequence_hotkey: Option<DeferredSequenceHotkey>,
 
     /// Serialized runtime commands triggered by hotkeys/autoconvert.
     pub pending_runtime_commands: VecDeque<RuntimeCommand>,
@@ -233,11 +274,14 @@ pub struct Checkboxes {
     pub autostart: HWND,
     pub start_minimized: HWND,
     pub theme_dark: HWND,
+    pub smarter_hotkeys: HWND,
 }
 
 #[derive(Debug, Default)]
 pub struct Edits {
     pub delay_ms: HWND,
+    pub playground_label: HWND,
+    pub playground: HWND,
 }
 
 #[derive(Debug, Default)]
@@ -247,6 +291,9 @@ pub struct HotkeyEdits {
     pub pause: HWND,
     pub selection: HWND,
     pub switch_layout: HWND,
+    pub smart_last_word: HWND,
+    pub smart_last_sequence: HWND,
+    pub smart_selection: HWND,
 }
 
 #[derive(Debug, Default)]
@@ -265,12 +312,16 @@ pub enum ControlId {
     DelayMs = 1003,
     StartMinimized = 1004,
     DarkTheme = 1005,
+    SmarterHotkeys = 1006,
 
     HotkeyLastWord = 1201,
     HotkeyLastSequence = 1202,
     HotkeyPause = 1203,
     HotkeySelection = 1204,
     HotkeySwitchLayout = 1205,
+    HotkeySmartLastWord = 1206,
+    HotkeySmartLastSequence = 1207,
+    HotkeySmartSelection = 1208,
 
     Apply = 1101,
     Cancel = 1102,
@@ -286,12 +337,16 @@ impl ControlId {
             1003 => Some(Self::DelayMs),
             1004 => Some(Self::StartMinimized),
             1005 => Some(Self::DarkTheme),
+            1006 => Some(Self::SmarterHotkeys),
 
             1201 => Some(Self::HotkeyLastWord),
             1202 => Some(Self::HotkeyLastSequence),
             1203 => Some(Self::HotkeyPause),
             1204 => Some(Self::HotkeySelection),
             1205 => Some(Self::HotkeySwitchLayout),
+            1206 => Some(Self::HotkeySmartLastWord),
+            1207 => Some(Self::HotkeySmartLastSequence),
+            1208 => Some(Self::HotkeySmartSelection),
 
             1101 => Some(Self::Apply),
             1102 => Some(Self::Cancel),

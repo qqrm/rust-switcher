@@ -10,8 +10,9 @@ use windows::{
         System::SystemServices::SS_RIGHT,
         UI::WindowsAndMessaging::{
             BS_AUTOCHECKBOX, BS_OWNERDRAW, CreateWindowExW, ES_NUMBER, ES_READONLY, GetClientRect,
-            SetWindowTextW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_EX_CLIENTEDGE, WS_TABSTOP,
-            WS_VISIBLE,
+            SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
+            SetWindowTextW, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_EX_CLIENTEDGE,
+            WS_TABSTOP, WS_VISIBLE,
         },
     },
     core::{PCWSTR, w},
@@ -215,6 +216,18 @@ fn create_settings_group(
         },
     )?;
 
+    state.checkboxes.smarter_hotkeys = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Smarter hotkeys"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
+            rect: RectI::new(left_x + 12, top_y + 100, l.group_w_left - 24, 20),
+            menu: Some(ControlId::SmarterHotkeys.hmenu()),
+        },
+    )?;
+
     let _lbl_delay = create(
         hwnd,
         ControlSpec {
@@ -222,7 +235,7 @@ fn create_settings_group(
             class: w!("STATIC"),
             text: w!("Delay before switching:"),
             style: WS_CHILD | WS_VISIBLE,
-            rect: RectI::new(left_x + 12, top_y + 104, l.group_w_left - 24, 18),
+            rect: RectI::new(left_x + 12, top_y + 128, l.group_w_left - 24, 18),
             menu: None,
         },
     )?;
@@ -234,7 +247,7 @@ fn create_settings_group(
             class: w!("EDIT"),
             text: w!("100"),
             style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, ES_NUMBER),
-            rect: RectI::new(left_x + 12, top_y + 126, 60, 22),
+            rect: RectI::new(left_x + 12, top_y + 150, 60, 22),
             menu: Some(ControlId::DelayMs.hmenu()),
         },
     )?;
@@ -246,7 +259,7 @@ fn create_settings_group(
             class: w!("STATIC"),
             text: w!("ms"),
             style: WS_CHILD | WS_VISIBLE,
-            rect: RectI::new(left_x + 78, top_y + 129, 24, 18),
+            rect: RectI::new(left_x + 78, top_y + 153, 24, 18),
             menu: None,
         },
     )?;
@@ -327,6 +340,8 @@ fn create_hotkey_rows(
         w!("Convert last word:"),
         Some(ControlId::HotkeyLastWord.hmenu()),
     )?;
+    state.hotkeys.smart_last_word =
+        create_smart_hotkey_edit(hwnd, g, hy, Some(ControlId::HotkeySmartLastWord.hmenu()))?;
     hy += 28;
 
     state.hotkeys.last_sequence = create_hotkey_row(
@@ -337,6 +352,12 @@ fn create_hotkey_rows(
         g.w_edit,
         w!("Convert last sequence:"),
         Some(ControlId::HotkeyLastSequence.hmenu()),
+    )?;
+    state.hotkeys.smart_last_sequence = create_smart_hotkey_edit(
+        hwnd,
+        g,
+        hy,
+        Some(ControlId::HotkeySmartLastSequence.hmenu()),
     )?;
     hy += 28;
 
@@ -349,6 +370,8 @@ fn create_hotkey_rows(
         w!("Convert selection:"),
         Some(ControlId::HotkeySelection.hmenu()),
     )?;
+    state.hotkeys.smart_selection =
+        create_smart_hotkey_edit(hwnd, g, hy, Some(ControlId::HotkeySmartSelection.hmenu()))?;
     hy += 28;
 
     state.hotkeys.pause = create_hotkey_row(
@@ -371,8 +394,140 @@ fn create_hotkey_rows(
         w!("Switch keyboard layout:"),
         Some(ControlId::HotkeySwitchLayout.hmenu()),
     )?;
+    hy += 28;
+
+    create_playground_row(hwnd, state, g, hy)?;
 
     Ok(())
+}
+
+fn create_playground_row(
+    hwnd: HWND,
+    state: &mut AppState,
+    g: &HotkeysGroupLayout,
+    y: i32,
+) -> windows::core::Result<()> {
+    state.edits.playground_label = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("STATIC"),
+            text: w!("Playground:"),
+            style: WS_CHILD,
+            rect: RectI::new(g.hx, y + 3, g.w_label, 18),
+            menu: None,
+        },
+    )?;
+
+    state.edits.playground = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WS_EX_CLIENTEDGE,
+            class: w!("EDIT"),
+            text: w!(""),
+            style: WS_CHILD | WS_TABSTOP,
+            rect: RectI::new(g.hx + g.w_label + 8, y, g.w_edit, 22),
+            menu: None,
+        },
+    )?;
+
+    Ok(())
+}
+
+fn smart_hotkey_rect(g: &HotkeysGroupLayout, y: i32) -> RectI {
+    let normal_w = (g.w_edit - 8) / 2;
+    let smart_w = g.w_edit - normal_w - 8;
+    let x = g.hx + g.w_label + 8 + normal_w + 8;
+    RectI::new(x, y, smart_w, 22)
+}
+
+fn create_smart_hotkey_edit(
+    hwnd: HWND,
+    g: &HotkeysGroupLayout,
+    y: i32,
+    menu: Option<windows::Win32::UI::WindowsAndMessaging::HMENU>,
+) -> windows::core::Result<HWND> {
+    create(
+        hwnd,
+        ControlSpec {
+            ex_style: WS_EX_CLIENTEDGE,
+            class: w!("EDIT"),
+            text: w!(""),
+            style: ws_i32(WS_CHILD | WS_TABSTOP, ES_READONLY),
+            rect: smart_hotkey_rect(g, y),
+            menu,
+        },
+    )
+}
+
+pub fn sync_smarter_hotkey_controls(
+    hwnd: HWND,
+    state: &AppState,
+    enabled: bool,
+) -> windows::core::Result<()> {
+    let (client_w, _client_h) = debug_read_client_rect(hwnd);
+    let l = UiLayout::new(client_w);
+    let g = HotkeysGroupLayout::new(&l);
+    let normal_w = if enabled {
+        (g.w_edit - 8) / 2
+    } else {
+        g.w_edit
+    };
+
+    let rows = [
+        (
+            state.hotkeys.last_word,
+            state.hotkeys.smart_last_word,
+            g.hy0,
+        ),
+        (
+            state.hotkeys.last_sequence,
+            state.hotkeys.smart_last_sequence,
+            g.hy0 + 28,
+        ),
+        (
+            state.hotkeys.selection,
+            state.hotkeys.smart_selection,
+            g.hy0 + 56,
+        ),
+    ];
+
+    for (normal, smart, y) in rows {
+        unsafe {
+            SetWindowPos(
+                normal,
+                None,
+                0,
+                0,
+                normal_w,
+                22,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )?;
+
+            let rect = smart_hotkey_rect(&g, y);
+            SetWindowPos(
+                smart,
+                None,
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )?;
+
+            let _ = ShowWindow(smart, if enabled { SW_SHOW } else { SW_HIDE });
+        }
+    }
+
+    Ok(())
+}
+
+pub fn set_playground_visible(state: &AppState, visible: bool) {
+    unsafe {
+        let cmd = if visible { SW_SHOW } else { SW_HIDE };
+        let _ = ShowWindow(state.edits.playground_label, cmd);
+        let _ = ShowWindow(state.edits.playground, cmd);
+    }
 }
 
 fn create_hotkey_row(

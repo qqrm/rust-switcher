@@ -34,12 +34,16 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
         ControlId::HotkeyPause => crate::app::HotkeySlot::Pause,
         ControlId::HotkeySelection => crate::app::HotkeySlot::Selection,
         ControlId::HotkeySwitchLayout => crate::app::HotkeySlot::SwitchLayout,
+        ControlId::HotkeySmartLastWord => crate::app::HotkeySlot::SmartLastWord,
+        ControlId::HotkeySmartLastSequence => crate::app::HotkeySlot::SmartLastSequence,
+        ControlId::HotkeySmartSelection => crate::app::HotkeySlot::SmartSelection,
         _ => return None,
     };
 
     match notif {
         EN_SETFOCUS => {
             with_state_mut_do(hwnd, |state| {
+                super::touch_hotkey_settings_control(hwnd, state);
                 state.hotkey_capture.start(slot);
 
                 #[cfg(debug_assertions)]
@@ -50,6 +54,7 @@ fn handle_hotkey_capture_focus(hwnd: HWND, id: i32, notif: u32) -> Option<LRESUL
 
         EN_KILLFOCUS => {
             with_state_mut_do(hwnd, |state| {
+                super::touch_hotkey_settings_control(hwnd, state);
                 super::stop_hotkey_capture_ui(hwnd, state);
 
                 #[cfg(debug_assertions)]
@@ -70,6 +75,21 @@ fn handle_buttons(hwnd: HWND, id: i32) -> LRESULT {
     match cid {
         ControlId::Autostart => with_state_mut_do(hwnd, |state| {
             super::handle_autostart_toggle(hwnd, state);
+        }),
+
+        ControlId::SmarterHotkeys => with_state_mut_do(hwnd, |state| {
+            let enabled = helpers::get_checkbox(state.checkboxes.smarter_hotkeys);
+            if let Err(e) = crate::platform::ui::sync_smarter_hotkey_controls(hwnd, state, enabled)
+            {
+                crate::platform::ui::error_notifier::push(
+                    hwnd,
+                    state,
+                    T_UI,
+                    "Failed to update smarter hotkey fields",
+                    &e,
+                );
+                super::on_app_error(hwnd);
+            }
         }),
 
         ControlId::Apply => with_state_mut_do(hwnd, |state| {

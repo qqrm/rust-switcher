@@ -10,7 +10,6 @@ $ErrorActionPreference = "Stop"
 $logPath = Join-Path $SharedRoot "e2e.log"
 $resultPath = Join-Path $SharedRoot "result.json"
 $switcher = $null
-$form = $null
 
 function Write-Result {
     param(
@@ -30,32 +29,152 @@ function Write-Result {
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resultPath -Encoding UTF8
 }
 
-function Pump-Ui {
-    param([int]$Milliseconds)
+function Add-NativeInputTypes {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
 
-    $deadline = [DateTime]::UtcNow.AddMilliseconds($Milliseconds)
+public static class NativeInput {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT {
+        public uint type;
+        public INPUTUNION u;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct INPUTUNION {
+        [FieldOffset(0)]
+        public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    public const uint INPUT_KEYBOARD = 1;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+    public const ushort VK_LSHIFT = 0xA0;
+    public const int SW_SHOWNORMAL = 1;
+
+    public static void TapLeftShift() {
+        INPUT[] inputs = new INPUT[2];
+        inputs[0].type = INPUT_KEYBOARD;
+        inputs[0].u.ki.wVk = VK_LSHIFT;
+        inputs[1].type = INPUT_KEYBOARD;
+        inputs[1].u.ki.wVk = VK_LSHIFT;
+        inputs[1].u.ki.dwFlags = KEYEVENTF_KEYUP;
+        uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+        if (sent != inputs.Length) {
+            throw new InvalidOperationException("SendInput failed");
+        }
+    }
+}
+"@
+}
+
+function Wait-Until {
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Predicate,
+
+        [int]$TimeoutMilliseconds = 5000,
+        [int]$StepMilliseconds = 50
+    )
+
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     while ([DateTime]::UtcNow -lt $deadline) {
-        [System.Windows.Forms.Application]::DoEvents()
-        Start-Sleep -Milliseconds 25
+        if (& $Predicate) {
+            return $true
+        }
+        Start-Sleep -Milliseconds $StepMilliseconds
+    }
+    return $false
+}
+
+function Get-PlaygroundElement {
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    $windowCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        "RustSwitcher"
+    )
+    $window = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $windowCondition
+    )
+    if ($null -eq $window) {
+        return $null
+    }
+
+    $editCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit
+    )
+    $edits = $window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $editCondition
+    )
+
+    foreach ($edit in $edits) {
+        $patternObj = $null
+        if (-not $edit.TryGetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern,
+            [ref]$patternObj
+        )) {
+            continue
+        }
+
+        $pattern = [System.Windows.Automation.ValuePattern]$patternObj
+        if (-not $pattern.Current.IsReadOnly -and $pattern.Current.Value -eq "") {
+            return $edit
+        }
+    }
+
+    return $null
+}
+
+function Get-ValuePattern {
+    param([Parameter(Mandatory = $true)]$Element)
+
+    $patternObj = $null
+    if (-not $Element.TryGetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern,
+        [ref]$patternObj
+    )) {
+        throw "Focused playground does not support ValuePattern"
+    }
+    return [System.Windows.Automation.ValuePattern]$patternObj
+}
+
+function Tap-LeftShift {
+    param([int]$Count)
+
+    for ($i = 0; $i -lt $Count; $i++) {
+        [NativeInput]::TapLeftShift()
+        Start-Sleep -Milliseconds 120
     }
 }
 
-function Send-Keys-And-Pump {
+function Wait-For-PlaygroundValue {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Keys,
-
-        [int]$AfterMilliseconds = 250
-    )
-
-    [System.Windows.Forms.SendKeys]::SendWait($Keys)
-    Pump-Ui -Milliseconds $AfterMilliseconds
-}
-
-function Wait-For-Text {
-    param(
-        [Parameter(Mandatory = $true)]
-        [System.Windows.Forms.TextBox]$TextBox,
+        $Pattern,
 
         [Parameter(Mandatory = $true)]
         [string]$Expected,
@@ -63,111 +182,83 @@ function Wait-For-Text {
         [int]$TimeoutMilliseconds = 5000
     )
 
-    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        [System.Windows.Forms.Application]::DoEvents()
-        if ($TextBox.Text -eq $Expected) {
-            return $true
-        }
-        Start-Sleep -Milliseconds 50
+    Wait-Until -TimeoutMilliseconds $TimeoutMilliseconds -Predicate {
+        $Pattern.Current.Value -eq $Expected
     }
-    return $false
 }
 
 try {
     Start-Transcript -LiteralPath $logPath -Force | Out-Null
 
-    $exe = Join-Path $SharedRoot "rust-switcher.exe"
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-NativeInputTypes
+
+    $exe = Join-Path $SharedRoot "rust-switcher-debug.exe"
     if (-not (Test-Path $exe)) {
-        throw "rust-switcher.exe is missing from $SharedRoot"
+        throw "rust-switcher-debug.exe is missing from $SharedRoot"
     }
 
     $appData = "C:\rust-switcher-e2e-appdata"
     Remove-Item -LiteralPath $appData -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Path (Join-Path $appData "RustSwitcher") -Force | Out-Null
-    $env:APPDATA = $appData
-    $env:RUST_LOG = "trace"
+    New-Item -ItemType Directory -Path (Join-Path $appData "RustSwitcherDebug") -Force | Out-Null
 
-    $config = [ordered]@{
-        delay_ms = 100
-        start_minimized = $true
-        theme_dark = $false
-        hotkey_convert_last_word = $null
-        hotkey_convert_selection = $null
-        hotkey_switch_layout = $null
-        hotkey_pause = $null
-        hotkey_convert_last_word_sequence = [ordered]@{
-            first = [ordered]@{
-                mods = 4
-                mods_vks = 0
-                vk = 123
-            }
-            second = $null
-            max_gap_ms = 1000
-        }
-        hotkey_pause_sequence = $null
-        hotkey_convert_selection_sequence = $null
-        hotkey_switch_layout_sequence = $null
-    }
-    $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $appData "RustSwitcher\config.json") -Encoding UTF8
+    @"
+delay_ms = 50
+start_minimized = false
+theme_dark = false
+smarter_hotkeys_enabled = true
+"@ | Set-Content -LiteralPath (Join-Path $appData "RustSwitcherDebug\config.json") -Encoding UTF8
 
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $exe
+    $psi.WorkingDirectory = $SharedRoot
+    $psi.UseShellExecute = $false
+    $psi.Environment["APPDATA"] = $appData
+    $psi.Environment["RUST_LOG"] = "trace"
+    $psi.Environment["RUST_SWITCHER_E2E_PLAYGROUND"] = "1"
+    $psi.Environment["RUST_SWITCHER_E2E_ALLOW_INJECTED"] = "1"
+    $switcher = [System.Diagnostics.Process]::Start($psi)
 
-    $english = [System.Windows.Forms.InputLanguage]::InstalledInputLanguages |
-        Where-Object { $_.Culture.TwoLetterISOLanguageName -eq "en" } |
-        Select-Object -First 1
-    if ($null -ne $english) {
-        [System.Windows.Forms.InputLanguage]::CurrentInputLanguage = $english
+    if (-not (Wait-Until -TimeoutMilliseconds 10000 -Predicate {
+        $switcher.Refresh()
+        $switcher.MainWindowHandle -ne [IntPtr]::Zero
+    })) {
+        throw "RustSwitcher window did not appear"
     }
 
-    $switcher = Start-Process -FilePath $exe -WorkingDirectory $SharedRoot -PassThru
-    Start-Sleep -Milliseconds 1200
+    [NativeInput]::ShowWindow($switcher.MainWindowHandle, [NativeInput]::SW_SHOWNORMAL) | Out-Null
+    [NativeInput]::SetForegroundWindow($switcher.MainWindowHandle) | Out-Null
+    Start-Sleep -Milliseconds 800
 
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Rust Switcher E2E Host"
-    $form.Width = 700
-    $form.Height = 220
-    $form.StartPosition = "CenterScreen"
-    $form.TopMost = $true
+    $playground = Get-PlaygroundElement
+    if ($null -eq $playground) {
+        throw "Playground edit was not found"
+    }
+    $playground.SetFocus()
+    Start-Sleep -Milliseconds 300
+    $value = Get-ValuePattern -Element $playground
+    $value.SetValue("")
 
-    $textBox = New-Object System.Windows.Forms.TextBox
-    $textBox.Multiline = $true
-    $textBox.AcceptsReturn = $true
-    $textBox.AcceptsTab = $true
-    $textBox.Font = New-Object System.Drawing.Font("Consolas", 18)
-    $textBox.Dock = [System.Windows.Forms.DockStyle]::Fill
-    $form.Controls.Add($textBox)
-
-    $form.Show()
-    Pump-Ui -Milliseconds 500
-    $form.Activate()
-    $textBox.Focus()
-    Pump-Ui -Milliseconds 500
-
-    Send-Keys-And-Pump -Keys "ghbdtn world" -AfterMilliseconds 500
-    if ($textBox.Text -ne "ghbdtn world") {
-        throw "Initial typing failed. TextBox contains '$($textBox.Text)'"
+    [System.Windows.Forms.SendKeys]::SendWait("ghbdtn")
+    Start-Sleep -Milliseconds 500
+    if (-not (Wait-For-PlaygroundValue -Pattern $value -Expected "ghbdtn" -TimeoutMilliseconds 3000)) {
+        throw "Initial playground typing failed. Value='$($value.Current.Value)'"
     }
 
-    Send-Keys-And-Pump -Keys "{LEFT 5}" -AfterMilliseconds 300
-    if ($textBox.SelectionStart -ne 7) {
-        throw "Caret setup failed. Expected SelectionStart=7, got $($textBox.SelectionStart)"
+    Tap-LeftShift -Count 3
+    if (-not (Wait-For-PlaygroundValue -Pattern $value -Expected "привет" -TimeoutMilliseconds 6000)) {
+        throw "Triple Shift smart conversion failed. Value='$($value.Current.Value)'"
     }
 
-    Send-Keys-And-Pump -Keys "+{F12}" -AfterMilliseconds 300
-    if (-not (Wait-For-Text -TextBox $textBox -Expected "привет world" -TimeoutMilliseconds 6000)) {
-        throw "Conversion failed. Expected 'привет world', got '$($textBox.Text)'"
-    }
-
-    if ($textBox.SelectionStart -ne 7) {
-        throw "Caret position changed unexpectedly. Expected SelectionStart=7, got $($textBox.SelectionStart)"
+    Tap-LeftShift -Count 2
+    if (-not (Wait-For-PlaygroundValue -Pattern $value -Expected "ghbdtn" -TimeoutMilliseconds 6000)) {
+        throw "Deferred double Shift conversion failed. Value='$($value.Current.Value)'"
     }
 
     Write-Result -Status "passed" -Details @{
-        finalText = $textBox.Text
-        selectionStart = $textBox.SelectionStart
+        finalValue = $value.Current.Value
         appData = $appData
+        scenario = "ghbdtn -> 3 Shift -> привет -> 2 Shift -> ghbdtn"
     }
 } catch {
     Write-Result -Status "failed" -ErrorMessage $_.Exception.Message -Details @{
@@ -177,10 +268,6 @@ try {
 } finally {
     if ($null -ne $switcher -and -not $switcher.HasExited) {
         Stop-Process -Id $switcher.Id -Force -ErrorAction SilentlyContinue
-    }
-    if ($null -ne $form) {
-        $form.Close()
-        $form.Dispose()
     }
     try {
         Stop-Transcript | Out-Null

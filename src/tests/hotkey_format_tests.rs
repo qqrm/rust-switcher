@@ -2,7 +2,10 @@
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN};
 
-use crate::{config, platform::win::hotkey_format::format_hotkey};
+use crate::{
+    config::{self, MODVK_LSHIFT},
+    platform::win::hotkey_format::{format_hotkey, format_hotkey_sequence},
+};
 
 #[test]
 fn format_hotkey_none() {
@@ -32,4 +35,21 @@ fn format_hotkey_multiple_mods_fast_path() {
     assert!(s.contains("Alt"));
     assert!(s.contains("Win"));
     assert!(s.contains("9"));
+}
+
+#[test]
+fn format_hotkey_sequence_includes_third_chord() {
+    let chord = config::HotkeyChord {
+        mods: MOD_SHIFT.0,
+        mods_vks: MODVK_LSHIFT,
+        vk: None,
+    };
+    let seq = config::HotkeySequence {
+        first: chord,
+        second: Some(chord),
+        third: Some(chord),
+        max_gap_ms: 1000,
+    };
+
+    assert_eq!(format_hotkey_sequence(Some(seq)), "LShift; LShift; LShift");
 }

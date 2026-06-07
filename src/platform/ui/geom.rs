@@ -66,7 +66,7 @@ pub struct Layout {
 impl Layout {
     pub fn new(client_w: i32) -> Self {
         let margin = 12;
-        let group_h = 170;
+        let group_h = 198;
         let group_w_left = 240;
         let gap = 12;
 

@@ -1,27 +1,41 @@
 #[cfg(test)]
 use std::sync::MutexGuard;
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     sync::{Mutex, OnceLock},
 };
 
 #[cfg(windows)]
-use windows::Win32::UI::{
-    Input::KeyboardAndMouse::{
-        GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, HKL, ToUnicodeEx,
-        VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME,
-        VK_INSERT, VK_LEFT, VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_SHIFT,
-        VK_TAB, VK_UP,
-    },
-    WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
+use windows::Win32::{
+    System::SystemInformation::GetTickCount64,
+    UI::{
+        Input::KeyboardAndMouse::{
+            GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, HKL, ToUnicodeEx,
+            VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME,
+            VK_INSERT, VK_LEFT, VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT,
+            VK_SHIFT, VK_TAB, VK_UP,
+        },
+        WindowsAndMessaging::{
+            GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
+            KBDLLHOOKSTRUCT, LLKHF_INJECTED,
+        },
     },
 };
 
 static JOURNAL: OnceLock<Mutex<InputJournal>> = OnceLock::new();
+#[cfg(windows)]
+static JOURNAL_CACHE: OnceLock<Mutex<HashMap<FocusCacheKey, CachedJournal>>> = OnceLock::new();
 
 #[cfg(test)]
 static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(windows)]
+const FOREGROUND_CACHE_TTL_MS: u64 = 2 * 60 * 1000;
+
+#[cfg(windows)]
+fn allow_injected_input_for_e2e() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("RUST_SWITCHER_E2E_ALLOW_INJECTED").is_some()
+}
 
 fn journal() -> &'static Mutex<InputJournal> {
     JOURNAL.get_or_init(|| Mutex::new(InputJournal::new(100)))
@@ -45,6 +59,29 @@ fn with_journal_mut<R>(f: impl FnOnce(&mut InputJournal) -> R) -> R {
         }
     };
     f(&mut guard)
+}
+
+#[cfg(windows)]
+fn journal_cache() -> &'static Mutex<HashMap<FocusCacheKey, CachedJournal>> {
+    JOURNAL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(windows)]
+fn with_journal_cache_mut<R>(f: impl FnOnce(&mut HashMap<FocusCacheKey, CachedJournal>) -> R) -> R {
+    let mut guard = match journal_cache().lock() {
+        Ok(g) => g,
+        Err(poison) => {
+            #[cfg(debug_assertions)]
+            tracing::warn!("input journal cache mutex was poisoned; continuing with inner value");
+            poison.into_inner()
+        }
+    };
+    f(&mut guard)
+}
+
+#[cfg(windows)]
+fn prune_stale_foreground_cache(cache: &mut HashMap<FocusCacheKey, CachedJournal>, now_ms: u64) {
+    cache.retain(|_, cached| now_ms.saturating_sub(cached.updated_ms) <= FOREGROUND_CACHE_TTL_MS);
 }
 
 #[cfg(any(test, windows))]
@@ -93,7 +130,39 @@ pub struct InputRun {
     pub kind: RunKind,
 }
 
-#[derive(Debug, Default)]
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct CaretRectSignature {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct FocusCacheKey {
+    foreground_hwnd: isize,
+    focus_hwnd: isize,
+    caret_hwnd: isize,
+    caret_rect: CaretRectSignature,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Debug)]
+struct CachedJournal {
+    journal: InputJournal,
+    updated_ms: u64,
+}
+
+#[cfg(windows)]
+fn same_focus_identity(a: FocusCacheKey, b: FocusCacheKey) -> bool {
+    a.foreground_hwnd == b.foreground_hwnd
+        && a.focus_hwnd == b.focus_hwnd
+        && a.caret_hwnd == b.caret_hwnd
+}
+
+#[derive(Clone, Debug, Default)]
 struct InputJournal {
     runs: VecDeque<InputRun>,
     cap_chars: usize,
@@ -102,6 +171,8 @@ struct InputJournal {
     last_token_autoconverted: bool,
     #[cfg(windows)]
     last_fg_hwnd: isize,
+    #[cfg(windows)]
+    last_focus_key: Option<FocusCacheKey>,
 }
 
 impl InputJournal {
@@ -114,6 +185,8 @@ impl InputJournal {
             last_token_autoconverted: false,
             #[cfg(windows)]
             last_fg_hwnd: 0,
+            #[cfg(windows)]
+            last_focus_key: None,
         }
     }
 
@@ -348,21 +421,63 @@ impl InputJournal {
     fn invalidate_if_foreground_changed(&mut self) {
         let fg = unsafe { GetForegroundWindow() };
         let raw = fg.0 as isize;
-        if raw == 0 {
-            self.clear();
-            self.last_fg_hwnd = 0;
+        let key = current_focus_cache_key(fg);
+        self.switch_foreground(raw, key, unsafe { GetTickCount64() });
+    }
+
+    #[cfg(windows)]
+    fn switch_foreground(&mut self, raw: isize, key: Option<FocusCacheKey>, now_ms: u64) {
+        if raw == self.last_fg_hwnd && key == self.last_focus_key {
             return;
         }
 
-        if self.last_fg_hwnd == 0 {
-            self.last_fg_hwnd = raw;
+        if raw == self.last_fg_hwnd
+            && match (self.last_focus_key, key) {
+                (Some(prev), Some(next)) => same_focus_identity(prev, next),
+                (None, None) => true,
+                (Some(_), None) | (None, Some(_)) => true,
+            }
+        {
+            self.last_focus_key = key;
             return;
         }
 
-        if self.last_fg_hwnd != raw {
+        with_journal_cache_mut(|cache| {
+            prune_stale_foreground_cache(cache, now_ms);
+
+            if self.last_fg_hwnd != 0
+                && let Some(last_key) = self.last_focus_key
+            {
+                cache.insert(
+                    last_key,
+                    CachedJournal {
+                        journal: self.clone(),
+                        updated_ms: now_ms,
+                    },
+                );
+            }
+
+            if raw == 0 {
+                self.clear();
+                self.last_fg_hwnd = 0;
+                self.last_focus_key = None;
+                return;
+            }
+
+            if let Some(key) = key
+                && let Some(cached) = cache.remove(&key)
+            {
+                *self = cached.journal;
+                self.last_fg_hwnd = raw;
+                self.last_focus_key = Some(key);
+                self.enforce_cap_chars();
+                return;
+            }
+
             self.clear();
             self.last_fg_hwnd = raw;
-        }
+            self.last_focus_key = key;
+        });
     }
 
     #[cfg(any(test, windows))]
@@ -588,6 +703,42 @@ impl InputJournal {
 }
 
 #[cfg(windows)]
+fn current_focus_cache_key(foreground: windows::Win32::Foundation::HWND) -> Option<FocusCacheKey> {
+    if foreground.0.is_null() {
+        return None;
+    }
+
+    let tid = unsafe { GetWindowThreadProcessId(foreground, None) };
+    if tid == 0 {
+        return None;
+    }
+
+    let mut info = GUITHREADINFO {
+        cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+
+    if unsafe { GetGUIThreadInfo(tid, &mut info) }.is_err()
+        || info.hwndFocus.0.is_null()
+        || info.hwndCaret.0.is_null()
+    {
+        return None;
+    }
+
+    Some(FocusCacheKey {
+        foreground_hwnd: foreground.0 as isize,
+        focus_hwnd: info.hwndFocus.0 as isize,
+        caret_hwnd: info.hwndCaret.0 as isize,
+        caret_rect: CaretRectSignature {
+            left: info.rcCaret.left,
+            top: info.rcCaret.top,
+            right: info.rcCaret.right,
+            bottom: info.rcCaret.bottom,
+        },
+    })
+}
+
+#[cfg(windows)]
 #[derive(Debug)]
 struct DecodedText {
     text: String,
@@ -766,7 +917,7 @@ fn decode_typed_text(kb: &KBDLLHOOKSTRUCT, vk: VIRTUAL_KEY) -> Option<DecodedTex
 
 #[cfg(windows)]
 pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
-    if kb.flags.contains(LLKHF_INJECTED) {
+    if kb.flags.contains(LLKHF_INJECTED) && !allow_injected_input_for_e2e() {
         return None;
     }
 
@@ -860,7 +1011,13 @@ pub fn record_keydown(kb: &KBDLLHOOKSTRUCT, vk: u32) -> Option<String> {
 
 #[must_use]
 pub fn take_last_layout_run_with_suffix() -> Option<(InputRun, Vec<InputRun>)> {
-    with_journal_mut(|j| j.take_last_layout_run_with_suffix())
+    with_journal_mut(|j| {
+        #[cfg(windows)]
+        if j.last_fg_hwnd != 0 {
+            j.invalidate_if_foreground_changed();
+        }
+        j.take_last_layout_run_with_suffix()
+    })
 }
 
 #[cfg(test)]
@@ -877,7 +1034,13 @@ pub fn take_last_programmatic_sequence_with_suffix() -> Option<(Vec<InputRun>, V
 
 #[must_use]
 pub fn take_last_sequence_with_suffix() -> Option<(Vec<InputRun>, Vec<InputRun>)> {
-    with_journal_mut(|j| j.take_last_sequence_with_suffix())
+    with_journal_mut(|j| {
+        #[cfg(windows)]
+        if j.last_fg_hwnd != 0 {
+            j.invalidate_if_foreground_changed();
+        }
+        j.take_last_sequence_with_suffix()
+    })
 }
 
 #[cfg(test)]
@@ -923,7 +1086,79 @@ pub fn runs_snapshot() -> Vec<InputRun> {
 
 #[cfg(any(test, windows))]
 pub fn invalidate() {
-    with_journal_mut(|j| j.clear());
+    with_journal_mut(|j| {
+        j.clear();
+        #[cfg(windows)]
+        {
+            j.last_fg_hwnd = 0;
+            j.last_focus_key = None;
+        }
+    });
+    #[cfg(all(test, windows))]
+    clear_foreground_cache_for_test();
+}
+
+#[cfg(all(test, windows))]
+pub fn clear_foreground_cache_for_test() {
+    with_journal_cache_mut(HashMap::clear);
+}
+
+#[cfg(all(test, windows))]
+pub fn test_switch_foreground(raw: isize, now_ms: u64) {
+    with_journal_mut(|j| j.switch_foreground(raw, focus_key_for_test(raw, 0), now_ms));
+}
+
+#[cfg(all(test, windows))]
+fn focus_key_for_test(raw: isize, caret_left: i32) -> Option<FocusCacheKey> {
+    (raw != 0).then_some(FocusCacheKey {
+        foreground_hwnd: raw,
+        focus_hwnd: raw + 10_000,
+        caret_hwnd: raw + 20_000,
+        caret_rect: CaretRectSignature {
+            left: caret_left,
+            top: 10,
+            right: caret_left + 1,
+            bottom: 30,
+        },
+    })
+}
+
+#[cfg(all(test, windows))]
+fn test_switch_foreground_at(raw: isize, caret_left: i32, now_ms: u64) {
+    with_journal_mut(|j| j.switch_foreground(raw, focus_key_for_test(raw, caret_left), now_ms));
+}
+
+#[cfg(all(test, windows))]
+fn test_switch_foreground_control(
+    raw: isize,
+    focus_hwnd: isize,
+    caret_hwnd: isize,
+    caret_left: i32,
+    now_ms: u64,
+) {
+    let key = (raw != 0).then_some(FocusCacheKey {
+        foreground_hwnd: raw,
+        focus_hwnd,
+        caret_hwnd,
+        caret_rect: CaretRectSignature {
+            left: caret_left,
+            top: 10,
+            right: caret_left + 1,
+            bottom: 30,
+        },
+    });
+    with_journal_mut(|j| j.switch_foreground(raw, key, now_ms));
+}
+
+#[cfg(all(test, windows))]
+fn test_switch_foreground_without_signature(raw: isize, now_ms: u64) {
+    with_journal_mut(|j| j.switch_foreground(raw, None, now_ms));
+}
+
+#[cfg(all(test, windows))]
+#[must_use]
+pub fn raw_foreground_for_test() -> isize {
+    with_journal(|j| j.last_fg_hwnd)
 }
 
 #[cfg(any(test, windows))]
@@ -953,6 +1188,309 @@ pub fn last_char_triggers_autoconvert() -> bool {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    fn test_run(text: &str, layout: LayoutTag) -> InputRun {
+        InputRun {
+            text: text.to_string(),
+            layout,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Text,
+        }
+    }
+
+    fn test_space() -> InputRun {
+        InputRun {
+            text: " ".to_string(),
+            layout: LayoutTag::En,
+            origin: RunOrigin::Physical,
+            kind: RunKind::Whitespace,
+        }
+    }
+
+    fn test_programmatic_text(text: &str, layout: LayoutTag) -> InputRun {
+        InputRun {
+            text: text.to_string(),
+            layout,
+            origin: RunOrigin::Programmatic,
+            kind: RunKind::Text,
+        }
+    }
+
+    fn test_programmatic_space(layout: LayoutTag) -> InputRun {
+        InputRun {
+            text: " ".to_string(),
+            layout,
+            origin: RunOrigin::Programmatic,
+            kind: RunKind::Whitespace,
+        }
+    }
+
+    fn take_last_word_after_focus_refresh(
+        raw: isize,
+        caret_left: i32,
+        now_ms: u64,
+    ) -> Option<InputRun> {
+        with_journal_mut(|j| {
+            j.switch_foreground(raw, focus_key_for_test(raw, caret_left), now_ms);
+            j.take_last_layout_run_with_suffix().map(|(run, suffix)| {
+                j.push_runs(suffix);
+                run
+            })
+        })
+    }
+
+    fn take_last_sequence_after_focus_refresh(
+        raw: isize,
+        caret_left: i32,
+        now_ms: u64,
+    ) -> Option<Vec<InputRun>> {
+        with_journal_mut(|j| {
+            j.switch_foreground(raw, focus_key_for_test(raw, caret_left), now_ms);
+            j.take_last_sequence_with_suffix().map(|(runs, suffix)| {
+                j.push_runs(suffix);
+                runs
+            })
+        })
+    }
+
+    #[test]
+    fn foreground_switch_restores_recent_window_journal() {
+        let _guard = test_guard();
+        invalidate();
+        clear_foreground_cache_for_test();
+
+        test_switch_foreground(1001, 1_000);
+        push_run(test_run("first", LayoutTag::En));
+
+        test_switch_foreground(2002, 1_100);
+        assert!(runs_snapshot().is_empty());
+        push_run(test_run("second", LayoutTag::Ru));
+
+        test_switch_foreground(1001, 1_200);
+        assert_eq!(raw_foreground_for_test(), 1001);
+        assert_eq!(
+            runs_snapshot()
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "first"
+        );
+
+        test_switch_foreground(2002, 1_300);
+        assert_eq!(raw_foreground_for_test(), 2002);
+        assert_eq!(
+            runs_snapshot()
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "second"
+        );
+    }
+
+    #[test]
+    fn foreground_switch_drops_stale_window_journal_after_ttl() {
+        let _guard = test_guard();
+        invalidate();
+        clear_foreground_cache_for_test();
+
+        test_switch_foreground(1001, 1_000);
+        push_run(test_run("stale", LayoutTag::En));
+
+        test_switch_foreground(2002, 2_000);
+        test_switch_foreground(1001, 2_000 + FOREGROUND_CACHE_TTL_MS + 1);
+
+        assert_eq!(raw_foreground_for_test(), 1001);
+        assert!(runs_snapshot().is_empty());
+    }
+
+    #[test]
+    fn foreground_switch_requires_matching_caret_signature_to_restore() {
+        let _guard = test_guard();
+        invalidate();
+        clear_foreground_cache_for_test();
+
+        test_switch_foreground_at(1001, 10, 1_000);
+        push_run(test_run("first", LayoutTag::En));
+
+        test_switch_foreground(2002, 1_100);
+        assert!(runs_snapshot().is_empty());
+
+        test_switch_foreground_at(1001, 50, 1_200);
+        assert_eq!(raw_foreground_for_test(), 1001);
+        assert!(runs_snapshot().is_empty());
+    }
+
+    #[test]
+    fn foreground_switch_same_control_caret_movement_keeps_current_session() {
+        let _guard = test_guard();
+        invalidate();
+        clear_foreground_cache_for_test();
+
+        test_switch_foreground_at(1001, 10, 1_000);
+        push_run(test_run("first", LayoutTag::En));
+
+        test_switch_foreground_at(1001, 50, 1_100);
+        assert_eq!(
+            runs_snapshot()
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "first"
+        );
+
+        test_switch_foreground(2002, 1_200);
+        test_switch_foreground_at(1001, 50, 1_300);
+        assert_eq!(
+            runs_snapshot()
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "first"
+        );
+
+        test_switch_foreground(2002, 1_400);
+        test_switch_foreground_at(1001, 10, 1_500);
+        assert!(runs_snapshot().is_empty());
+    }
+
+    #[test]
+    fn foreground_switch_restores_distinct_controls_in_same_window() {
+        let _guard = test_guard();
+        invalidate();
+        clear_foreground_cache_for_test();
+
+        test_switch_foreground_control(1001, 11, 21, 10, 1_000);
+        push_run(test_run("first", LayoutTag::En));
+
+        test_switch_foreground_control(1001, 12, 22, 10, 1_100);
+        assert!(runs_snapshot().is_empty());
+        push_run(test_run("second", LayoutTag::Ru));
+
+        test_switch_foreground_control(1001, 11, 21, 10, 1_200);
+        assert_eq!(
+            runs_snapshot()
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "first"
+        );
+
+        test_switch_foreground_control(1001, 12, 22, 10, 1_300);
+        assert_eq!(
+            runs_snapshot()
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "second"
+        );
+    }
+
+    #[test]
+    fn foreground_switch_without_signature_keeps_current_session_but_does_not_restore() {
+        let _guard = test_guard();
+        invalidate();
+        clear_foreground_cache_for_test();
+
+        test_switch_foreground_without_signature(1001, 1_000);
+        push_run(test_run("unsupported", LayoutTag::En));
+
+        test_switch_foreground_without_signature(1001, 1_100);
+        assert_eq!(
+            runs_snapshot()
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "unsupported"
+        );
+
+        test_switch_foreground(2002, 1_200);
+        assert!(runs_snapshot().is_empty());
+
+        test_switch_foreground_without_signature(1001, 1_300);
+        assert_eq!(raw_foreground_for_test(), 1001);
+        assert!(runs_snapshot().is_empty());
+    }
+
+    #[test]
+    fn command_style_last_word_replacement_survives_same_control_caret_signature_change() {
+        let _guard = test_guard();
+        invalidate();
+        clear_foreground_cache_for_test();
+
+        test_switch_foreground_at(1001, 10, 1_000);
+        push_runs([
+            test_run("ghbdtn", LayoutTag::En),
+            test_space(),
+            test_run("rfr", LayoutTag::En),
+            test_space(),
+            test_run("ltkf", LayoutTag::En),
+        ]);
+
+        let word = take_last_word_after_focus_refresh(1001, 50, 1_100)
+            .expect("last word should survive caret movement");
+        assert_eq!(word.text, "ltkf");
+
+        push_run(test_programmatic_text("дела", LayoutTag::Ru));
+
+        let sequence = take_last_sequence_after_focus_refresh(1001, 70, 1_200)
+            .expect("sequence should remain available after replacement");
+        assert_eq!(
+            sequence
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "ghbdtn rfr дела"
+        );
+    }
+
+    #[test]
+    fn command_style_sequence_replacement_keeps_word_and_sequence_commands_available() {
+        let _guard = test_guard();
+        invalidate();
+        clear_foreground_cache_for_test();
+
+        test_switch_foreground_at(1001, 10, 1_000);
+        push_runs([
+            test_run("ghbdtn", LayoutTag::En),
+            test_space(),
+            test_run("rfr", LayoutTag::En),
+            test_space(),
+            test_run("ltkf", LayoutTag::En),
+        ]);
+
+        let sequence = take_last_sequence_after_focus_refresh(1001, 50, 1_100)
+            .expect("sequence should survive caret movement");
+        assert_eq!(
+            sequence
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "ghbdtn rfr ltkf"
+        );
+
+        push_runs([
+            test_programmatic_text("привет", LayoutTag::Ru),
+            test_programmatic_space(LayoutTag::Ru),
+            test_programmatic_text("как", LayoutTag::Ru),
+            test_programmatic_space(LayoutTag::Ru),
+            test_programmatic_text("дела", LayoutTag::Ru),
+        ]);
+
+        let word = take_last_word_after_focus_refresh(1001, 80, 1_200)
+            .expect("last word should remain available after sequence replacement");
+        assert_eq!(word.text, "дела");
+        push_run(word);
+
+        let sequence = take_last_sequence_after_focus_refresh(1001, 90, 1_300)
+            .expect("sequence should remain available after sequence replacement");
+        assert_eq!(
+            sequence
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>(),
+            "привет как дела"
+        );
+    }
 
     #[test]
     fn ctrl_or_alt_combo_preserves_modifier_only_layout_switch_chords() {

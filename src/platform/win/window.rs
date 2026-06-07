@@ -36,7 +36,7 @@ pub(crate) fn register_main_class(class_name: PCWSTR, hinstance: HINSTANCE) -> R
 
 pub(crate) fn compute_window_size(style: WINDOW_STYLE) -> Result<(i32, i32)> {
     const CLIENT_W: i32 = 760;
-    const CLIENT_H: i32 = 230;
+    const CLIENT_H: i32 = 260;
 
     let mut rect = RECT {
         left: 0,

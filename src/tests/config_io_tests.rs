@@ -27,6 +27,7 @@ fn seq_ctrl_a() -> HotkeySequence {
             vk: Some(u32::from(b'A')),
         },
         second: None,
+        third: None,
         max_gap_ms: 1000,
     }
 }
@@ -105,6 +106,7 @@ fn default_hotkey_sequences_keep_last_word_on_double_left_shift() {
     assert_eq!(seq.first.mods_vks, MODVK_LSHIFT);
     assert_eq!(seq.first.vk, None);
     assert_eq!(seq.second, Some(seq.first));
+    assert_eq!(seq.third, None);
 }
 
 #[test]
@@ -118,6 +120,7 @@ fn default_hotkey_sequences_use_double_left_alt_for_last_sequence() {
     assert_eq!(seq.first.mods_vks, MODVK_LALT);
     assert_eq!(seq.first.vk, None);
     assert_eq!(seq.second, Some(seq.first));
+    assert_eq!(seq.third, None);
 }
 
 #[test]
@@ -131,6 +134,7 @@ fn default_hotkey_sequences_keep_switch_layout_on_capslock() {
     assert_eq!(seq.first.mods_vks, 0);
     assert_eq!(seq.first.vk, Some(20));
     assert_eq!(seq.second, None);
+    assert_eq!(seq.third, None);
 }
 
 #[test]
@@ -142,6 +146,7 @@ fn default_hotkey_sequences_use_double_right_ctrl_for_pause() {
     assert_eq!(seq.first.mods_vks, MODVK_RCTRL);
     assert_eq!(seq.first.vk, None);
     assert_eq!(seq.second, Some(seq.first));
+    assert_eq!(seq.third, None);
 }
 
 #[test]
@@ -155,4 +160,35 @@ fn default_hotkey_sequences_keep_convert_selection_on_double_left_shift() {
     assert_eq!(seq.first.mods_vks, MODVK_LSHIFT);
     assert_eq!(seq.first.vk, None);
     assert_eq!(seq.second, Some(seq.first));
+    assert_eq!(seq.third, None);
+}
+
+#[test]
+fn default_smart_hotkeys_are_disabled_but_keep_triple_tap_defaults() {
+    let cfg = Config::default();
+    assert!(!cfg.smarter_hotkeys_enabled);
+
+    let word = cfg
+        .smart_hotkey_convert_last_word_sequence
+        .expect("default smart last-word hotkey");
+    assert_eq!(word.first.mods, MOD_SHIFT.0);
+    assert_eq!(word.first.mods_vks, MODVK_LSHIFT);
+    assert_eq!(word.second, Some(word.first));
+    assert_eq!(word.third, Some(word.first));
+
+    let sequence = cfg
+        .smart_hotkey_convert_last_sequence_sequence
+        .expect("default smart last-sequence hotkey");
+    assert_eq!(sequence.first.mods, MOD_ALT.0);
+    assert_eq!(sequence.first.mods_vks, MODVK_LALT);
+    assert_eq!(sequence.second, Some(sequence.first));
+    assert_eq!(sequence.third, Some(sequence.first));
+
+    let selection = cfg
+        .smart_hotkey_convert_selection_sequence
+        .expect("default smart selection hotkey");
+    assert_eq!(selection.first.mods, MOD_SHIFT.0);
+    assert_eq!(selection.first.mods_vks, MODVK_LSHIFT);
+    assert_eq!(selection.second, Some(selection.first));
+    assert_eq!(selection.third, Some(selection.first));
 }

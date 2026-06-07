@@ -42,6 +42,11 @@ $env:RUST_LOG="trace"
 cargo +nightly run -F debug-tracing
 ```
 
+## Communication
+
+- Use English for progress updates, implementation notes, code comments, test names, and technical reasoning summaries.
+- Use Russian for final user-facing responses.
+
 ## Code Style Requirements
 
 ### Strict Clippy Lints

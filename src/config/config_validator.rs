@@ -3,12 +3,14 @@ use std::fmt::Write as _;
 use crate::config::{
     Config,
     constants::{
-        CONVERT_LAST_SEQUENCE, CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT,
+        CONVERT_LAST_SEQUENCE, CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE,
+        SMART_CONVERT_LAST_SEQUENCE, SMART_CONVERT_LAST_WORD, SMART_CONVERT_SELECTION,
+        SWITCH_LAYOUT,
     },
 };
 
 pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
-    let sequences = [
+    let mut sequences = vec![
         (CONVERT_LAST_WORD, &config.hotkey_convert_last_word_sequence),
         (
             CONVERT_LAST_SEQUENCE,
@@ -19,9 +21,28 @@ pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
         (SWITCH_LAYOUT, &config.hotkey_switch_layout_sequence),
     ];
 
+    if config.smarter_hotkeys_enabled {
+        sequences.extend([
+            (
+                SMART_CONVERT_LAST_WORD,
+                &config.smart_hotkey_convert_last_word_sequence,
+            ),
+            (
+                SMART_CONVERT_LAST_SEQUENCE,
+                &config.smart_hotkey_convert_last_sequence_sequence,
+            ),
+            (
+                SMART_CONVERT_SELECTION,
+                &config.smart_hotkey_convert_selection_sequence,
+            ),
+        ]);
+    }
+
     let is_allowed_duplicate = |a: &str, b: &str| {
         (a == CONVERT_LAST_WORD && b == CONVERT_SELECTION)
             || (a == CONVERT_SELECTION && b == CONVERT_LAST_WORD)
+            || (a == SMART_CONVERT_LAST_WORD && b == SMART_CONVERT_SELECTION)
+            || (a == SMART_CONVERT_SELECTION && b == SMART_CONVERT_LAST_WORD)
     };
 
     let duplicates: Vec<_> = sequences

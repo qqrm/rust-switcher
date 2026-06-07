@@ -3,7 +3,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIF
 use crate::config::{
     Config, HotkeyChord, HotkeySequence,
     constants::{
-        CONVERT_LAST_SEQUENCE, CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE, SWITCH_LAYOUT,
+        CONVERT_LAST_SEQUENCE, CONVERT_LAST_WORD, CONVERT_SELECTION, PAUSE,
+        SMART_CONVERT_LAST_SEQUENCE, SMART_CONVERT_LAST_WORD, SMART_CONVERT_SELECTION,
+        SWITCH_LAYOUT,
     },
 };
 
@@ -19,6 +21,7 @@ fn seq1(mods: u32, vk: u32) -> HotkeySequence {
     HotkeySequence {
         first: chord(mods, 0, vk),
         second: None,
+        third: None,
         max_gap_ms: 250,
     }
 }
@@ -27,6 +30,7 @@ fn seq1_gap(mods: u32, vk: u32, max_gap_ms: u32) -> HotkeySequence {
     HotkeySequence {
         first: chord(mods, 0, vk),
         second: None,
+        third: None,
         max_gap_ms,
     }
 }
@@ -35,6 +39,7 @@ fn seq1_modsvks(mods: u32, mods_vks: u32, vk: u32) -> HotkeySequence {
     HotkeySequence {
         first: chord(mods, mods_vks, vk),
         second: None,
+        third: None,
         max_gap_ms: 250,
     }
 }
@@ -43,6 +48,24 @@ fn seq2(mods1: u32, vk1: u32, mods2: u32, vk2: u32, max_gap_ms: u32) -> HotkeySe
     HotkeySequence {
         first: chord(mods1, 0, vk1),
         second: Some(chord(mods2, 0, vk2)),
+        third: None,
+        max_gap_ms,
+    }
+}
+
+fn seq3(
+    mods1: u32,
+    vk1: u32,
+    mods2: u32,
+    vk2: u32,
+    mods3: u32,
+    vk3: u32,
+    max_gap_ms: u32,
+) -> HotkeySequence {
+    HotkeySequence {
+        first: chord(mods1, 0, vk1),
+        second: Some(chord(mods2, 0, vk2)),
+        third: Some(chord(mods3, 0, vk3)),
         max_gap_ms,
     }
 }
@@ -125,6 +148,94 @@ fn allowed_duplicate_last_word_and_selection_ok() {
         Some(seq1(MOD_CONTROL.0, u32::from(b'X'))),
         Some(seq1(MOD_WIN.0, u32::from(b'D'))),
     ));
+}
+
+#[test]
+fn disabled_smart_sequences_are_ignored_for_duplicates() {
+    let dup = seq3(
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        1000,
+    );
+
+    let cfg = Config {
+        smarter_hotkeys_enabled: false,
+        smart_hotkey_convert_last_word_sequence: Some(dup),
+        smart_hotkey_convert_last_sequence_sequence: Some(dup),
+        ..Default::default()
+    };
+
+    assert_ok(cfg);
+}
+
+#[test]
+fn enabled_smart_duplicate_last_word_and_selection_is_allowed() {
+    let same = seq3(
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        1000,
+    );
+
+    let cfg = Config {
+        smarter_hotkeys_enabled: true,
+        smart_hotkey_convert_last_word_sequence: Some(same),
+        smart_hotkey_convert_selection_sequence: Some(same),
+        smart_hotkey_convert_last_sequence_sequence: Some(seq3(
+            MOD_ALT.0,
+            u32::from(b'B'),
+            MOD_ALT.0,
+            u32::from(b'B'),
+            MOD_ALT.0,
+            u32::from(b'B'),
+            1000,
+        )),
+        ..Default::default()
+    };
+
+    assert_ok(cfg);
+}
+
+#[test]
+fn enabled_smart_duplicate_last_word_and_last_sequence_err() {
+    let dup = seq3(
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        MOD_SHIFT.0,
+        u32::from(b'A'),
+        1000,
+    );
+
+    let cfg = Config {
+        smarter_hotkeys_enabled: true,
+        smart_hotkey_convert_last_word_sequence: Some(dup),
+        smart_hotkey_convert_last_sequence_sequence: Some(dup),
+        smart_hotkey_convert_selection_sequence: Some(seq3(
+            MOD_ALT.0,
+            u32::from(b'B'),
+            MOD_ALT.0,
+            u32::from(b'B'),
+            MOD_ALT.0,
+            u32::from(b'B'),
+            1000,
+        )),
+        ..Default::default()
+    };
+
+    let err = assert_err(cfg);
+    assert_has_common_error_shape(&err);
+    assert!(err.contains(SMART_CONVERT_LAST_WORD), "{err}");
+    assert!(err.contains(SMART_CONVERT_LAST_SEQUENCE), "{err}");
+    assert!(!err.contains(SMART_CONVERT_SELECTION), "{err}");
 }
 
 #[test]

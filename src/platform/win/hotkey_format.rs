@@ -27,6 +27,7 @@ pub(crate) fn format_hotkey_sequence(seq: Option<config::HotkeySequence>) -> Str
 
     std::iter::once(seq.first)
         .chain(seq.second)
+        .chain(seq.third)
         .map(format_hotkey_chord)
         .collect::<Vec<_>>()
         .join("; ")

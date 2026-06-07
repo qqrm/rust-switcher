@@ -7,7 +7,7 @@ use std::{
 };
 
 use super::env_lock::lock_env;
-use crate::config;
+use crate::{app_identity, config};
 
 fn restore_appdata(old: Option<std::ffi::OsString>) {
     match old {
@@ -51,7 +51,7 @@ fn config_path_uses_app_dir_and_filename() {
     let s = p.to_string_lossy().to_string();
 
     assert!(s.contains(&*dir.to_string_lossy()));
-    assert!(s.ends_with(r"\RustSwitcher\config.json"));
+    assert!(s.ends_with(&format!(r"\{}\config.json", app_identity::APP_DIR)));
 
     restore_appdata(old);
     let _ = fs::remove_dir_all(dir);

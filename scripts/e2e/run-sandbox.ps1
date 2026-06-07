@@ -18,12 +18,12 @@ if (-not (Test-Path $sandboxExe)) {
 Push-Location $root
 try {
     $env:CARGO_TARGET_DIR = ".target"
-    & cargo +nightly build --features debug-tracing
+    & cargo +nightly build --bin rust-switcher-debug --features debug-tracing,debug-binary
     if ($LASTEXITCODE -ne 0) {
         throw "cargo build failed with exit code $LASTEXITCODE"
     }
 
-    $exe = Join-Path $root ".target\debug\rust-switcher.exe"
+    $exe = Join-Path $root ".target\debug\rust-switcher-debug.exe"
     if (-not (Test-Path $exe)) {
         throw "Built executable was not found at $exe"
     }
@@ -32,7 +32,7 @@ try {
     $bundle = Join-Path ([System.IO.Path]::GetTempPath()) "rust-switcher-e2e-$stamp"
     New-Item -ItemType Directory -Path $bundle -Force | Out-Null
 
-    Copy-Item -LiteralPath $exe -Destination (Join-Path $bundle "rust-switcher.exe") -Force
+    Copy-Item -LiteralPath $exe -Destination (Join-Path $bundle "rust-switcher-debug.exe") -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "sandbox-runner.ps1") -Destination $bundle -Force
 
     $leaf = Split-Path $bundle -Leaf

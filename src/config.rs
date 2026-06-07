@@ -9,7 +9,6 @@ use std::{
 use serde::{Deserialize, Serialize};
 use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_SHIFT};
 
-const APP_DIR: &str = "RustSwitcher";
 const CONFIG_FILE: &str = "config.json";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -41,6 +40,8 @@ pub struct HotkeyChord {
 pub struct HotkeySequence {
     pub first: HotkeyChord,
     pub second: Option<HotkeyChord>,
+    #[serde(default)]
+    pub third: Option<HotkeyChord>,
     pub max_gap_ms: u32,
 }
 
@@ -69,6 +70,15 @@ pub struct Config {
     pub hotkey_convert_selection_sequence: Option<HotkeySequence>,
     #[serde(default)]
     pub hotkey_switch_layout_sequence: Option<HotkeySequence>,
+
+    #[serde(default)]
+    pub smarter_hotkeys_enabled: bool,
+    #[serde(default = "default_smart_hotkey_convert_last_word_sequence")]
+    pub smart_hotkey_convert_last_word_sequence: Option<HotkeySequence>,
+    #[serde(default = "default_smart_hotkey_convert_last_sequence_sequence")]
+    pub smart_hotkey_convert_last_sequence_sequence: Option<HotkeySequence>,
+    #[serde(default = "default_smart_hotkey_convert_selection_sequence")]
+    pub smart_hotkey_convert_selection_sequence: Option<HotkeySequence>,
 }
 
 fn modifier_only_chord(mods: u32, mods_vks: u32) -> HotkeyChord {
@@ -83,6 +93,16 @@ fn double_modifier_sequence(mods: u32, mods_vks: u32) -> HotkeySequence {
     HotkeySequence {
         first: modifier_only_chord(mods, mods_vks),
         second: Some(modifier_only_chord(mods, mods_vks)),
+        third: None,
+        max_gap_ms: 1000,
+    }
+}
+
+fn triple_modifier_sequence(mods: u32, mods_vks: u32) -> HotkeySequence {
+    HotkeySequence {
+        first: modifier_only_chord(mods, mods_vks),
+        second: Some(modifier_only_chord(mods, mods_vks)),
+        third: Some(modifier_only_chord(mods, mods_vks)),
         max_gap_ms: 1000,
     }
 }
@@ -90,6 +110,19 @@ fn double_modifier_sequence(mods: u32, mods_vks: u32) -> HotkeySequence {
 fn default_hotkey_convert_last_sequence_sequence() -> Option<HotkeySequence> {
     Some(double_modifier_sequence(MOD_ALT.0, MODVK_LALT))
 }
+
+fn default_smart_hotkey_convert_last_word_sequence() -> Option<HotkeySequence> {
+    Some(triple_modifier_sequence(MOD_SHIFT.0, MODVK_LSHIFT))
+}
+
+fn default_smart_hotkey_convert_last_sequence_sequence() -> Option<HotkeySequence> {
+    Some(triple_modifier_sequence(MOD_ALT.0, MODVK_LALT))
+}
+
+fn default_smart_hotkey_convert_selection_sequence() -> Option<HotkeySequence> {
+    Some(triple_modifier_sequence(MOD_SHIFT.0, MODVK_LSHIFT))
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -121,8 +154,17 @@ impl Default for Config {
                     vk: Some(20),
                 },
                 second: None,
+                third: None,
                 max_gap_ms: 1000,
             }),
+
+            smarter_hotkeys_enabled: false,
+            smart_hotkey_convert_last_word_sequence:
+                default_smart_hotkey_convert_last_word_sequence(),
+            smart_hotkey_convert_last_sequence_sequence:
+                default_smart_hotkey_convert_last_sequence_sequence(),
+            smart_hotkey_convert_selection_sequence:
+                default_smart_hotkey_convert_selection_sequence(),
         }
     }
 }
@@ -131,7 +173,9 @@ pub fn config_path() -> io::Result<PathBuf> {
     let appdata = std::env::var_os("APPDATA")
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "APPDATA is not set"))?;
 
-    Ok(PathBuf::from(appdata).join(APP_DIR).join(CONFIG_FILE))
+    Ok(PathBuf::from(appdata)
+        .join(crate::app_identity::APP_DIR)
+        .join(CONFIG_FILE))
 }
 
 fn ensure_parent_dir(path: &Path) -> io::Result<()> {

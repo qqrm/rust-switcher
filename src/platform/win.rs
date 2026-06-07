@@ -29,17 +29,17 @@ use windows::{
             Input::KeyboardAndMouse::SetFocus,
             WindowsAndMessaging::{
                 DefWindowProcW, FindWindowW, GWLP_USERDATA, GetWindowLongPtrW, IsWindow,
-                IsWindowVisible, PostMessageW, PostQuitMessage, RegisterWindowMessageW, SC_CLOSE,
-                SC_MINIMIZE, SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL,
-                SetForegroundWindow, SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE, WM_COMMAND,
-                WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC, WM_DESTROY,
-                WM_DRAWITEM, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_PAINT, WM_PARENTNOTIFY,
-                WM_RBUTTONDOWN, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX,
+                IsWindowVisible, KillTimer, PostMessageW, PostQuitMessage, RegisterWindowMessageW,
+                SC_CLOSE, SC_MINIMIZE, SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL,
+                SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE,
+                WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC,
+                WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_PAINT,
+                WM_PARENTNOTIFY, WM_RBUTTONDOWN, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_MAXIMIZEBOX,
                 WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
             },
         },
     },
-    core::{PCWSTR, Result, w},
+    core::{PCWSTR, Result},
 };
 
 use self::{
@@ -54,7 +54,7 @@ use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLOREDIT, WM_ERASEBKGND};
 
 use crate::{
     app::{AppState, RuntimeCommand},
-    config,
+    app_identity, config,
     domain::text::{last_word::autoconvert_last_word, switch_keyboard_layout},
     input::hotkeys::{HotkeyAction, action_from_id},
     platform::{
@@ -69,12 +69,13 @@ use crate::{
             tray_dispatch::handle_tray_timer,
         },
     },
-    ui_call, ui_try,
     utils::helpers,
 };
 
 const WM_APP_APPLY_THEME: u32 = WM_APP + 1;
 const WM_APP_RUN_RUNTIME_COMMAND: u32 = WM_APP + 2;
+const PLAYGROUND_HIDE_TIMER_ID: usize = 0x5300;
+const PLAYGROUND_VISIBLE_MS: u32 = 5 * 60 * 1000;
 
 #[rustfmt::skip]
 #[cfg(debug_assertions)]
@@ -83,6 +84,47 @@ use crate::platform::win::keyboard::debug_timers::handle_timer;
 fn set_hwnd_text(hwnd: HWND, s: &str) -> windows::core::Result<()> {
     helpers::set_edit_text(hwnd, s)
 }
+
+pub(crate) fn touch_hotkey_settings_control(hwnd: HWND, state: &crate::app::AppState) {
+    crate::platform::ui::set_playground_visible(state, true);
+    unsafe {
+        let _ = KillTimer(Some(hwnd), PLAYGROUND_HIDE_TIMER_ID);
+        let _ = SetTimer(
+            Some(hwnd),
+            PLAYGROUND_HIDE_TIMER_ID,
+            PLAYGROUND_VISIBLE_MS,
+            None,
+        );
+    }
+}
+
+fn hide_playground(hwnd: HWND, state: &crate::app::AppState) {
+    unsafe {
+        let _ = KillTimer(Some(hwnd), PLAYGROUND_HIDE_TIMER_ID);
+    }
+    crate::platform::ui::set_playground_visible(state, false);
+}
+
+#[cfg(debug_assertions)]
+fn init_e2e_playground(hwnd: HWND, state: &crate::app::AppState) {
+    if std::env::var_os("RUST_SWITCHER_E2E_PLAYGROUND").is_none() {
+        return;
+    }
+
+    crate::platform::ui::set_playground_visible(state, true);
+    unsafe {
+        let _ = SetFocus(Some(state.edits.playground));
+        let _ = SetTimer(
+            Some(hwnd),
+            PLAYGROUND_HIDE_TIMER_ID,
+            PLAYGROUND_VISIBLE_MS,
+            None,
+        );
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn init_e2e_playground(_hwnd: HWND, _state: &crate::app::AppState) {}
 
 pub(crate) fn apply_theme_from_tray(hwnd: HWND, dark: bool) {
     // Apply visuals immediately.
@@ -170,15 +212,23 @@ pub fn refresh_autostart_checkbox(state: &mut AppState) -> windows::core::Result
     Ok(())
 }
 
-fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::core::Result<()> {
+fn apply_config_to_ui(
+    hwnd: HWND,
+    state: &mut AppState,
+    cfg: &config::Config,
+) -> windows::core::Result<()> {
     helpers::set_edit_u32(state.edits.delay_ms, cfg.delay_ms)?;
 
     refresh_autostart_checkbox(state)?;
     helpers::set_checkbox(state.checkboxes.start_minimized, cfg.start_minimized);
     helpers::set_checkbox(state.checkboxes.theme_dark, cfg.theme_dark);
+    helpers::set_checkbox(
+        state.checkboxes.smarter_hotkeys,
+        cfg.smarter_hotkeys_enabled,
+    );
 
     state.hotkey_values = crate::app::HotkeyValues::from_config(cfg);
-    state.hotkey_sequence_values = crate::app::HotkeySequenceValues::from_config(cfg);
+    state.hotkey_sequence_values = crate::app::HotkeySequenceValues::from_config_all(cfg);
 
     let last_word_text = if cfg.hotkey_convert_last_word_sequence.is_some() {
         format_hotkey_sequence(cfg.hotkey_convert_last_word_sequence)
@@ -215,6 +265,20 @@ fn apply_config_to_ui(state: &mut AppState, cfg: &config::Config) -> windows::co
     };
     set_hwnd_text(state.hotkeys.switch_layout, &switch_layout_text)?;
 
+    set_hwnd_text(
+        state.hotkeys.smart_last_word,
+        &format_hotkey_sequence(cfg.smart_hotkey_convert_last_word_sequence),
+    )?;
+    set_hwnd_text(
+        state.hotkeys.smart_last_sequence,
+        &format_hotkey_sequence(cfg.smart_hotkey_convert_last_sequence_sequence),
+    )?;
+    set_hwnd_text(
+        state.hotkeys.smart_selection,
+        &format_hotkey_sequence(cfg.smart_hotkey_convert_selection_sequence),
+    )?;
+    crate::platform::ui::sync_smarter_hotkey_controls(hwnd, state, cfg.smarter_hotkeys_enabled)?;
+
     Ok(())
 }
 
@@ -223,12 +287,17 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
 
     cfg.start_minimized = helpers::get_checkbox(state.checkboxes.start_minimized);
     cfg.theme_dark = helpers::get_checkbox(state.checkboxes.theme_dark);
+    cfg.smarter_hotkeys_enabled = helpers::get_checkbox(state.checkboxes.smarter_hotkeys);
 
     cfg.hotkey_convert_last_word_sequence = state.hotkey_sequence_values.last_word;
     cfg.hotkey_convert_last_sequence_sequence = state.hotkey_sequence_values.last_sequence;
     cfg.hotkey_pause_sequence = state.hotkey_sequence_values.pause;
     cfg.hotkey_convert_selection_sequence = state.hotkey_sequence_values.selection;
     cfg.hotkey_switch_layout_sequence = state.hotkey_sequence_values.switch_layout;
+    cfg.smart_hotkey_convert_last_word_sequence = state.hotkey_sequence_values.smart_last_word;
+    cfg.smart_hotkey_convert_last_sequence_sequence =
+        state.hotkey_sequence_values.smart_last_sequence;
+    cfg.smart_hotkey_convert_selection_sequence = state.hotkey_sequence_values.smart_selection;
 
     fn hk_or_none_if_double(
         seq: Option<config::HotkeySequence>,
@@ -277,12 +346,12 @@ fn apply_config_runtime(
     state.switch_layout_waiting_second = false;
     state.switch_layout_first_tick_ms = 0;
 
-    ui_try!(
+    ui::error_notifier::report_unit(
         hwnd,
         state,
         T_CONFIG,
         "Failed to register hotkeys",
-        crate::input::hotkeys::register_from_config(hwnd, cfg)
+        crate::input::hotkeys::register_from_config(hwnd, cfg),
     );
 
     // ВАЖНО: зафиксировать тему в state до любых WM_CTLCOLOR*.
@@ -410,7 +479,7 @@ fn on_create(hwnd: HWND) -> LRESULT {
         hwnd,
         &mut state,
         "Failed to apply config to UI",
-        apply_config_to_ui(state.as_mut(), &cfg)
+        apply_config_to_ui(hwnd, state.as_mut(), &cfg)
     );
     startup_or_return0!(
         hwnd,
@@ -429,6 +498,7 @@ fn on_create(hwnd: HWND) -> LRESULT {
     mouse::install();
 
     init_font_and_visuals(hwnd, &mut state);
+    init_e2e_playground(hwnd, state.as_ref());
 
     if let Err(e) = crate::platform::win::tray::ensure_icon(hwnd) {
         tracing::warn!(error = ?e, "tray ensure_icon failed");
@@ -453,7 +523,11 @@ fn on_create(hwnd: HWND) -> LRESULT {
 pub fn run(start_hidden: bool) -> Result<()> {
     unsafe {
         visuals::init_visuals();
-        let class_name = w!("RustSwitcherMainWindow");
+        let class_name_w: Vec<u16> = app_identity::MAIN_WINDOW_CLASS
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let class_name = PCWSTR(class_name_w.as_ptr());
         let hinstance = GetModuleHandleW(PCWSTR::null())?.into();
 
         register_main_class(class_name, hinstance)?;
@@ -531,6 +605,7 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
         WM_CTLCOLORBTN => on_ctlcolor(hwnd, wparam, lparam),
         WM_SIZE => {
             if wparam.0 == SIZE_MINIMIZED as usize {
+                with_state_mut_do(hwnd, |state| hide_playground(hwnd, state));
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
                 return LRESULT(0);
             }
@@ -540,6 +615,7 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
             let cmd = wparam.0 & 0xFFF0usize;
 
             if cmd == SC_CLOSE as usize || cmd == SC_MINIMIZE as usize {
+                with_state_mut_do(hwnd, |state| hide_playground(hwnd, state));
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
                 return LRESULT(0);
             }
@@ -547,6 +623,7 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
         WM_CLOSE => {
+            with_state_mut_do(hwnd, |state| hide_playground(hwnd, state));
             let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
             LRESULT(0)
         }
@@ -664,51 +741,65 @@ fn handle_apply(hwnd: HWND, state: &mut AppState) {
         }
     };
 
-    ui_call!(
+    let apply_runtime = apply_config_runtime(hwnd, state, &cfg);
+    ui::error_notifier::report_unit(
         hwnd,
         state,
         T_CONFIG,
         "Failed to apply config at runtime",
-        apply_config_runtime(hwnd, state, &cfg)
+        apply_runtime,
     );
 
-    ui_call!(
+    let apply_ui = apply_config_to_ui(hwnd, state, &cfg);
+    ui::error_notifier::report_unit(
         hwnd,
         state,
         T_UI,
         "Failed to update UI from config",
-        apply_config_to_ui(state, &cfg)
+        apply_ui,
     );
 }
 
 fn handle_cancel(hwnd: HWND, state: &mut AppState) {
     let cfg = config::load().unwrap_or_default();
 
-    ui_call!(
+    let apply_runtime = apply_config_runtime(hwnd, state, &cfg);
+    ui::error_notifier::report_unit(
         hwnd,
         state,
         T_CONFIG,
         "Failed to apply config at runtime",
-        apply_config_runtime(hwnd, state, &cfg)
+        apply_runtime,
     );
 
-    ui_call!(
+    let apply_ui = apply_config_to_ui(hwnd, state, &cfg);
+    ui::error_notifier::report_unit(
         hwnd,
         state,
         T_UI,
         "Failed to update UI from config",
-        apply_config_to_ui(state, &cfg)
+        apply_ui,
     );
 }
 
 fn show_window_message_id() -> u32 {
     static ID: OnceLock<u32> = OnceLock::new();
-    *ID.get_or_init(|| unsafe { RegisterWindowMessageW(w!("RustSwitcher.ShowMainWindow")) })
+    *ID.get_or_init(|| {
+        let name: Vec<u16> = app_identity::SHOW_MAIN_WINDOW_MESSAGE
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        unsafe { RegisterWindowMessageW(PCWSTR(name.as_ptr())) }
+    })
 }
 
 pub fn activate_running_instance() -> windows::core::Result<bool> {
     unsafe {
-        let hwnd = FindWindowW(w!("RustSwitcherMainWindow"), PCWSTR::null()).unwrap_or_default();
+        let class_name: Vec<u16> = app_identity::MAIN_WINDOW_CLASS
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let hwnd = FindWindowW(PCWSTR(class_name.as_ptr()), PCWSTR::null()).unwrap_or_default();
         if hwnd.0.is_null() {
             return Ok(false);
         }
@@ -774,6 +865,12 @@ fn last_word_hotkey_should_try_selection_first(state: &AppState) -> bool {
     last_word.is_some() && last_word == selection
 }
 
+fn smart_last_word_hotkey_should_try_selection_first(state: &AppState) -> bool {
+    let last_word = state.active_hotkey_sequences.smart_last_word;
+    let selection = state.active_hotkey_sequences.smart_selection;
+    last_word.is_some() && last_word == selection
+}
+
 fn handle_convert_last_word_hotkey(state: &mut AppState) {
     if last_word_hotkey_should_try_selection_first(state)
         && crate::domain::text::convert::convert_selection_if_any(state)
@@ -782,6 +879,16 @@ fn handle_convert_last_word_hotkey(state: &mut AppState) {
     }
 
     crate::conversion::convert_last_word(state);
+}
+
+fn handle_smart_convert_last_word_hotkey(state: &mut AppState) {
+    if smart_last_word_hotkey_should_try_selection_first(state)
+        && crate::domain::text::convert::smart_convert_selection_if_any(state)
+    {
+        return;
+    }
+
+    crate::conversion::smart_convert_last_word(state);
 }
 
 fn execute_runtime_command(hwnd: HWND, state: &mut AppState, command: RuntimeCommand) {
@@ -799,6 +906,13 @@ fn execute_runtime_command(hwnd: HWND, state: &mut AppState, command: RuntimeCom
             HotkeyAction::ConvertLastWord => handle_convert_last_word_hotkey(state),
             HotkeyAction::ConvertLastSequence => crate::conversion::convert_last_sequence(state),
             HotkeyAction::ConvertSelection => crate::conversion::convert_selection(state),
+            HotkeyAction::SmartConvertLastWord => handle_smart_convert_last_word_hotkey(state),
+            HotkeyAction::SmartConvertLastSequence => {
+                crate::conversion::smart_convert_last_sequence(state);
+            }
+            HotkeyAction::SmartConvertSelection => {
+                crate::conversion::smart_convert_selection(state)
+            }
             HotkeyAction::SwitchLayout => {
                 let _ = switch_keyboard_layout();
             }
@@ -879,6 +993,28 @@ fn on_app_error(hwnd: HWND) -> LRESULT {
 }
 
 fn on_timer(hwnd: HWND, wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
+    if wparam.0 == PLAYGROUND_HIDE_TIMER_ID {
+        with_state_mut_do(hwnd, |state| hide_playground(hwnd, state));
+        return LRESULT(0);
+    }
+
+    if wparam.0 == crate::platform::win::keyboard::sequence::DEFERRED_SEQUENCE_TIMER_ID {
+        with_state_mut_do(hwnd, |state| {
+            if let Err(e) =
+                crate::platform::win::keyboard::sequence::handle_deferred_sequence_timer(hwnd, state)
+            {
+                crate::platform::ui::error_notifier::push(
+                    hwnd,
+                    state,
+                    crate::platform::ui::error_notifier::T_UI,
+                    "Hotkey handling failed",
+                    &e,
+                );
+            }
+        });
+        return LRESULT(0);
+    }
+
     let _ = handle_tray_timer(hwnd, wparam);
     #[cfg(debug_assertions)]
     let _ = handle_timer(hwnd, wparam.0);
@@ -889,6 +1025,7 @@ fn toggle_window_visibility_from_tray(hwnd: HWND) {
     unsafe {
         let visible = IsWindowVisible(hwnd).as_bool();
         if visible {
+            with_state_mut_do(hwnd, |state| hide_playground(hwnd, state));
             let _ = ShowWindow(hwnd, SW_HIDE);
         } else {
             let _ = ShowWindow(hwnd, SW_SHOW);
@@ -946,6 +1083,7 @@ mod tests {
                 vk: Some(vk),
             },
             second: None,
+            third: None,
             max_gap_ms: 250,
         }
     }

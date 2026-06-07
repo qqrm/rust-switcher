@@ -64,6 +64,7 @@ pub(crate) fn handle_keydown_capture(
     };
 
     if is_mod {
+        crate::platform::win::touch_hotkey_settings_control(hwnd, state);
         state.hotkey_capture.pending_mods = chord.mods;
         state.hotkey_capture.pending_mods_vks = chord.mods_vks;
         state.hotkey_capture.pending_mods_valid = true;
@@ -73,6 +74,7 @@ pub(crate) fn handle_keydown_capture(
 
     state.hotkey_capture.saw_non_mod = true;
     state.hotkey_capture.pending_mods_valid = false;
+    crate::platform::win::touch_hotkey_settings_control(hwnd, state);
 
     let prev = state.hotkey_sequence_values.get(slot);
     let seq = push_chord_capture(

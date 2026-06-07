@@ -16,11 +16,11 @@ pub(crate) fn push_chord_capture(
     last_input_tick_ms: &mut u64,
 ) -> config::HotkeySequence {
     const DEFAULT_GAP_MS: u32 = 1000;
-    const RESET_AFTER_MS: u64 = 2000;
+    const RESET_AFTER_MS: u64 = 1000;
 
     let existing = match (*last_input_tick_ms, existing) {
         (0, _) => None,
-        (prev, _) if now_ms.saturating_sub(prev) > RESET_AFTER_MS => None,
+        (prev, _) if now_ms.saturating_sub(prev) >= RESET_AFTER_MS => None,
         (_, s) => s,
     };
 
@@ -28,6 +28,7 @@ pub(crate) fn push_chord_capture(
         None => config::HotkeySequence {
             first: chord,
             second: None,
+            third: None,
             max_gap_ms: DEFAULT_GAP_MS,
         },
         Some(mut s) => match s.second {
@@ -35,11 +36,19 @@ pub(crate) fn push_chord_capture(
                 s.second = Some(chord);
                 s
             }
-            Some(prev_second) => {
-                s.first = prev_second;
-                s.second = Some(chord);
+            Some(_) if s.third.is_none() => {
+                s.third = Some(chord);
                 s
             }
+            Some(prev_second) => match s.third {
+                Some(prev_third) => {
+                    s.first = prev_second;
+                    s.second = Some(prev_third);
+                    s.third = Some(chord);
+                    s
+                }
+                None => s,
+            },
         },
     };
 
@@ -70,5 +79,8 @@ pub(crate) fn ui_hotkey_target(state: &crate::app::AppState, slot: crate::app::H
         crate::app::HotkeySlot::Pause => state.hotkeys.pause,
         crate::app::HotkeySlot::Selection => state.hotkeys.selection,
         crate::app::HotkeySlot::SwitchLayout => state.hotkeys.switch_layout,
+        crate::app::HotkeySlot::SmartLastWord => state.hotkeys.smart_last_word,
+        crate::app::HotkeySlot::SmartLastSequence => state.hotkeys.smart_last_sequence,
+        crate::app::HotkeySlot::SmartSelection => state.hotkeys.smart_selection,
     }
 }

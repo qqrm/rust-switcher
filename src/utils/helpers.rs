@@ -18,8 +18,10 @@ use windows::{
             },
         },
     },
-    core::{Error, HRESULT, PCWSTR, Result, w},
+    core::{Error, HRESULT, PCWSTR, Result},
 };
+
+use crate::app_identity;
 
 /// Combine a base `WINDOW_STYLE` with an additional integer flag.
 ///
@@ -62,7 +64,10 @@ impl Drop for SingleInstanceGuard {
 
 pub fn single_instance_guard() -> Result<Option<SingleInstanceGuard>> {
     unsafe {
-        let name = w!("Global\\RustSwitcher_SingleInstance");
+        let name: Vec<u16> = app_identity::SINGLE_INSTANCE_MUTEX
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let h = CreateMutexW(None, false, PCWSTR(name.as_ptr()))?;
 
         if GetLastError() == ERROR_ALREADY_EXISTS {
@@ -192,7 +197,11 @@ pub const DEBUG_TIMER_ID_STARTUP_ERROR: usize = 0xC001;
 pub const DEBUG_TIMER_ID_STARTUP_INFO: usize = 0xC002;
 
 pub fn init_app_user_model_id() -> windows::core::Result<()> {
-    unsafe { SetCurrentProcessExplicitAppUserModelID(w!("RustSwitcher")) }
+    let id: Vec<u16> = app_identity::APP_USER_MODEL_ID
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe { SetCurrentProcessExplicitAppUserModelID(PCWSTR(id.as_ptr())) }
 }
 
 #[cfg(debug_assertions)]

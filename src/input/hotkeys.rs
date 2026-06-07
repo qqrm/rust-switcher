@@ -15,6 +15,9 @@ pub enum HotkeyAction {
     PauseToggle,
     ConvertSelection,
     SwitchLayout,
+    SmartConvertLastWord,
+    SmartConvertLastSequence,
+    SmartConvertSelection,
 }
 
 // Диапазон 20000+ чтобы не пересекаться с control ids в WM_COMMAND
@@ -25,6 +28,9 @@ pub const HK_CONVERT_LAST_SEQUENCE_ID: i32 = HK_ID_BASE + 2;
 pub const HK_PAUSE_TOGGLE_ID: i32 = HK_ID_BASE + 3;
 pub const HK_CONVERT_SELECTION_ID: i32 = HK_ID_BASE + 4;
 pub const HK_SWITCH_LAYOUT_ID: i32 = HK_ID_BASE + 5;
+pub const HK_SMART_CONVERT_LAST_WORD_ID: i32 = HK_ID_BASE + 6;
+pub const HK_SMART_CONVERT_LAST_SEQUENCE_ID: i32 = HK_ID_BASE + 7;
+pub const HK_SMART_CONVERT_SELECTION_ID: i32 = HK_ID_BASE + 8;
 
 pub fn action_from_id(id: i32) -> Option<HotkeyAction> {
     match id {
@@ -33,6 +39,9 @@ pub fn action_from_id(id: i32) -> Option<HotkeyAction> {
         HK_PAUSE_TOGGLE_ID => Some(HotkeyAction::PauseToggle),
         HK_CONVERT_SELECTION_ID => Some(HotkeyAction::ConvertSelection),
         HK_SWITCH_LAYOUT_ID => Some(HotkeyAction::SwitchLayout),
+        HK_SMART_CONVERT_LAST_WORD_ID => Some(HotkeyAction::SmartConvertLastWord),
+        HK_SMART_CONVERT_LAST_SEQUENCE_ID => Some(HotkeyAction::SmartConvertLastSequence),
+        HK_SMART_CONVERT_SELECTION_ID => Some(HotkeyAction::SmartConvertSelection),
         _ => None,
     }
 }
@@ -53,6 +62,9 @@ pub fn unregister_all(hwnd: HWND) -> windows::core::Result<()> {
         HK_PAUSE_TOGGLE_ID,
         HK_CONVERT_SELECTION_ID,
         HK_SWITCH_LAYOUT_ID,
+        HK_SMART_CONVERT_LAST_WORD_ID,
+        HK_SMART_CONVERT_LAST_SEQUENCE_ID,
+        HK_SMART_CONVERT_SELECTION_ID,
     ] {
         unregister_one_quiet(hwnd, id)?;
     }
