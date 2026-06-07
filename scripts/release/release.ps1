@@ -8,6 +8,7 @@ param(
 Assert-Tool git
 Assert-Tool cargo
 Assert-Tool gh
+Assert-Tool rustc
 
 $repoRoot = Get-RepoRoot
 Push-Location $repoRoot
@@ -98,7 +99,22 @@ try {
   if (-not (Test-Path $exe)) {
     throw "Expected build artifact not found: $exe"
   }
+
+  $rustcVersion = (Invoke-Checked rustc @('-vV') -Quiet).Output
+  $hostLine = $rustcVersion.Split("`n") |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -match '^host:\s+' } |
+    Select-Object -First 1
+  if (-not $hostLine) {
+    throw "Could not determine rustc host target from rustc -vV output."
+  }
+  $releaseTarget = ($hostLine -replace '^host:\s+', '').Trim()
+  $zip = Join-Path $repoRoot ("target\release\rust-switcher-{0}-{1}.zip" -f $target, $releaseTarget)
+  Remove-Item -Force $zip -ErrorAction SilentlyContinue
+  Compress-Archive -Path $exe -DestinationPath $zip -CompressionLevel Optimal
+
   $assets = @($exe)
+  $assets += $zip
   $pdb = Join-Path $repoRoot 'target\release\rust-switcher.pdb'
   if (Test-Path $pdb) { $assets += $pdb }
 
