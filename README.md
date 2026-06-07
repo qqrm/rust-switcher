@@ -71,6 +71,18 @@ $env:RUST_LOG="trace"
 cargo +nightly run -F debug-tracing
 ```
 
+## Hotkey timing probe (development only)
+
+Use the diagnostic binary to measure real double/triple Shift tap timing before
+tuning sequence windows:
+
+```powershell
+cargo +nightly run --features diagnostic-tools --bin rust-switcher-timing
+```
+
+The probe writes `target\timing-probe\latest.txt` and
+`target\timing-probe\latest.json`.
+
 ## License
 
 MIT

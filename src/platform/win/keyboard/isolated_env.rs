@@ -4,7 +4,8 @@ use crate::{
     app::{AppState, HotkeySequenceValues, HotkeySlot},
     config::{HotkeyChord, HotkeySequence, MODVK_LALT, MODVK_LSHIFT, MODVK_RCTRL},
     platform::win::keyboard::sequence::{
-        SequenceMatch, take_deferred_sequence_disambiguated_by_chord, try_match_any_sequence_slot,
+        DEFERRED_SEQUENCE_DISAMBIGUATION_MS, SequenceMatch,
+        take_deferred_sequence_disambiguated_by_chord, try_match_any_sequence_slot,
     },
 };
 
@@ -107,7 +108,7 @@ mod tests {
         assert_eq!(env.tap_left_shift(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_shift(200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(env.fired(), &[]);
         assert_eq!(
@@ -126,7 +127,7 @@ mod tests {
         assert_eq!(env.tap_left_shift(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_shift(200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
 
         assert_eq!(env.fire_deferred_timeout(), Some(HotkeySlot::LastWord));
@@ -140,7 +141,10 @@ mod tests {
         assert_eq!(env.tap_left_alt(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_alt(200),
-            SequenceMatch::Pending(HotkeySlot::LastSequence, 1000)
+            SequenceMatch::Pending(
+                HotkeySlot::LastSequence,
+                DEFERRED_SEQUENCE_DISAMBIGUATION_MS
+            )
         );
         assert_eq!(
             env.tap_left_alt(300),
@@ -172,7 +176,7 @@ mod tests {
         assert_eq!(env.tap_left_shift(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_shift(200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             env.tap_left_shift(300),
@@ -182,7 +186,10 @@ mod tests {
         assert_eq!(env.tap_left_alt(1_500), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_alt(1_600),
-            SequenceMatch::Pending(HotkeySlot::LastSequence, 1000)
+            SequenceMatch::Pending(
+                HotkeySlot::LastSequence,
+                DEFERRED_SEQUENCE_DISAMBIGUATION_MS
+            )
         );
         assert_eq!(
             env.tap_left_alt(1_700),
@@ -212,7 +219,7 @@ mod tests {
         assert_eq!(env.tap_left_shift(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_shift(200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(env.fired(), &[]);
 
@@ -220,7 +227,10 @@ mod tests {
         assert_eq!(env.fired(), &[HotkeySlot::LastWord]);
         assert_eq!(
             env.tap_left_alt(400),
-            SequenceMatch::Pending(HotkeySlot::LastSequence, 1000)
+            SequenceMatch::Pending(
+                HotkeySlot::LastSequence,
+                DEFERRED_SEQUENCE_DISAMBIGUATION_MS
+            )
         );
         assert_eq!(
             env.fire_deferred_timeout(),
@@ -240,7 +250,7 @@ mod tests {
         assert_eq!(env.tap_left_shift(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_shift(200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             env.tap_left_shift(300),
@@ -258,13 +268,16 @@ mod tests {
         assert_eq!(env.tap_left_alt(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_alt(200),
-            SequenceMatch::Pending(HotkeySlot::LastSequence, 1000)
+            SequenceMatch::Pending(
+                HotkeySlot::LastSequence,
+                DEFERRED_SEQUENCE_DISAMBIGUATION_MS
+            )
         );
         assert_eq!(env.tap_left_shift(300), SequenceMatch::Consumed);
         assert_eq!(env.fired(), &[HotkeySlot::LastSequence]);
         assert_eq!(
             env.tap_left_shift(400),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(env.fire_deferred_timeout(), Some(HotkeySlot::LastWord));
 
@@ -281,7 +294,7 @@ mod tests {
         assert_eq!(env.tap_left_shift(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_shift(200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(env.tap_right_ctrl(300), SequenceMatch::Consumed);
         assert_eq!(env.fired(), &[HotkeySlot::LastWord]);
@@ -300,7 +313,7 @@ mod tests {
         assert_eq!(env.tap_left_shift(100), SequenceMatch::Consumed);
         assert_eq!(
             env.tap_left_shift(200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(env.fire_deferred_timeout(), Some(HotkeySlot::LastWord));
         assert_eq!(env.tap_left_shift(1_500), SequenceMatch::Consumed);

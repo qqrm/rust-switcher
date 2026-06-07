@@ -22,6 +22,7 @@ pub(crate) enum SequenceMatch {
 }
 
 pub(crate) const DEFERRED_SEQUENCE_TIMER_ID: usize = 0x5301;
+pub(crate) const DEFERRED_SEQUENCE_DISAMBIGUATION_MS: u32 = 325;
 
 const SLOT_ORDER: [HotkeySlot; 8] = [
     HotkeySlot::SwitchLayout,
@@ -94,6 +95,10 @@ pub(crate) fn hotkey_id_for_slot(slot: crate::app::HotkeySlot) -> i32 {
 
 pub(crate) fn effective_gap_ms(_slot: crate::app::HotkeySlot, seq: config::HotkeySequence) -> u64 {
     u64::from(seq.max_gap_ms)
+}
+
+fn deferred_sequence_delay_ms(seq: config::HotkeySequence) -> u32 {
+    seq.max_gap_ms.min(DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
 }
 
 fn sequence_chord_count(seq: config::HotkeySequence) -> usize {
@@ -346,7 +351,7 @@ pub(crate) fn try_match_any_sequence_slot(
         });
 
         if has_longer_waiting_prefix {
-            let delay_ms = triggered_seq.max_gap_ms;
+            let delay_ms = deferred_sequence_delay_ms(triggered_seq);
             state.deferred_sequence_hotkey = Some(DeferredSequenceHotkey { slot: triggered });
             return SequenceMatch::Pending(triggered, delay_ms);
         }
@@ -624,7 +629,7 @@ mod tests {
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, chord, 300),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, chord, 500),
@@ -677,11 +682,32 @@ mod tests {
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, chord, 200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             state.deferred_sequence_hotkey.map(|deferred| deferred.slot),
             Some(HotkeySlot::LastWord)
+        );
+    }
+
+    #[test]
+    fn deferred_double_shift_respects_shorter_custom_gap() {
+        let mut last_word = double_modifier_sequence(MOD_SHIFT.0, MODVK_LSHIFT);
+        last_word.max_gap_ms = 250;
+        let mut state = state_with_sequences(HotkeySequenceValues {
+            last_word: Some(last_word),
+            smart_last_word: Some(triple_modifier_sequence(MOD_SHIFT.0, MODVK_LSHIFT)),
+            ..Default::default()
+        });
+        let chord = modifier_only_chord(MOD_SHIFT.0, MODVK_LSHIFT);
+
+        assert_eq!(
+            try_match_any_sequence_slot(&mut state, chord, 100),
+            SequenceMatch::Consumed
+        );
+        assert_eq!(
+            try_match_any_sequence_slot(&mut state, chord, 200),
+            SequenceMatch::Pending(HotkeySlot::LastWord, 250)
         );
     }
 
@@ -700,7 +726,7 @@ mod tests {
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, chord, 200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, chord, 300),
@@ -727,7 +753,7 @@ mod tests {
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, chord, 200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, chord, 300),
@@ -757,7 +783,7 @@ mod tests {
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, left_shift, 200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             take_deferred_sequence_disambiguated_by_chord(&mut state, left_alt, 300),
@@ -784,7 +810,7 @@ mod tests {
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, chord, 200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             take_deferred_sequence_disambiguated_by_chord(&mut state, chord, 300),
@@ -819,7 +845,7 @@ mod tests {
         );
         assert_eq!(
             try_match_any_sequence_slot(&mut state, left_shift, 200),
-            SequenceMatch::Pending(HotkeySlot::LastWord, 1000)
+            SequenceMatch::Pending(HotkeySlot::LastWord, DEFERRED_SEQUENCE_DISAMBIGUATION_MS)
         );
         assert_eq!(
             take_deferred_sequence_disambiguated_by_chord(&mut state, letter_a, 300),

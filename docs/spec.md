@@ -78,6 +78,8 @@ Default bindings (current defaults in code):
 - Convert last sequence: double tap Left Alt within 1000 ms
 - Convert selection: double tap Left Shift within 1000 ms
 - Autoconvert toggle: double tap Right Ctrl within 1000 ms
+- When a double-tap sequence is also a prefix of an enabled triple-tap sequence,
+  the double-tap action is deferred for at most 325 ms after the second tap.
 - Switch keyboard layout: CapsLock
 
 ## Actions and behavior
