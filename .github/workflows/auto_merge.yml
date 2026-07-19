@@ -148,8 +148,7 @@ jobs:
 
             echo "Attempting to enable auto-merge for PR #$pr ($title)"
             if [ "$merge_state" = "BEHIND" ]; then
-              echo "PR #$pr is behind dev; updating branch first."
-              gh pr update-branch "$pr" --repo "$GH_REPO"
+              echo "PR #$pr is behind dev; leaving branch updates to Dependabot."
             fi
 
             if merge_output="$(gh pr merge "$pr" --repo "$GH_REPO" --auto --squash --delete-branch 2>&1)"; then
