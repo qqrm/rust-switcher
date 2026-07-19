@@ -1,7 +1,9 @@
+#[cfg(windows)]
+use std::collections::HashMap;
 #[cfg(test)]
 use std::sync::MutexGuard;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     sync::{Mutex, OnceLock},
 };
 
