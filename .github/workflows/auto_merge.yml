@@ -160,7 +160,11 @@ jobs:
             echo "PR #$pr is not ready for auto-merge yet; leaving it open for the next trigger."
           }
 
-          mapfile -t prs < <(collect_prs)
+          prs_output="$(collect_prs)"
+          prs=()
+          if [ -n "$prs_output" ]; then
+            mapfile -t prs <<<"$prs_output"
+          fi
 
           if [ "${#prs[@]}" -eq 0 ]; then
             echo "No candidate Dependabot PRs found for event $GITHUB_EVENT_NAME."
