@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain (nightly)
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: nightly
           components: rustfmt
@@ -41,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain (nightly)
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: nightly
           components: clippy
@@ -59,7 +59,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain (nightly)
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: nightly
       - name: Rust cache
@@ -76,7 +76,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain (nightly)
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: nightly
           components: rustfmt, clippy
