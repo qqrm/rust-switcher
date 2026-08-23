@@ -81,6 +81,18 @@ fn config_save_and_load_roundtrip_via_appdata() {
 }
 
 #[test]
+fn config_loads_missing_autoconvert_feature_flag_as_enabled() {
+    let _env = AppDataOverride::new("appdata-legacy-autoconvert");
+    let path = config::config_path().unwrap();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, "delay_ms = 100\n").unwrap();
+
+    let loaded = config::load().unwrap();
+
+    assert!(loaded.autoconvert_feature_enabled);
+}
+
+#[test]
 fn config_save_rejects_invalid_sequences() {
     let _env = AppDataOverride::new("appdata-invalid");
 
@@ -140,6 +152,7 @@ fn default_hotkey_sequences_keep_switch_layout_on_capslock() {
 #[test]
 fn default_hotkey_sequences_use_double_right_ctrl_for_pause() {
     let cfg = Config::default();
+    assert!(cfg.autoconvert_feature_enabled);
     let seq = cfg.hotkey_pause_sequence.expect("default pause hotkey");
 
     assert_eq!(seq.first.mods, MOD_CONTROL.0);

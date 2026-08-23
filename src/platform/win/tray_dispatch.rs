@@ -185,6 +185,9 @@ pub fn handle_tray_message(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             let _ = unsafe { KillTimer(Some(hwnd), TRAY_SINGLE_CLICK_TIMER_ID) };
 
             with_state_mut_do(hwnd, |state| {
+                if !state.autoconvert_feature_enabled {
+                    return;
+                }
                 let next = !state.autoconvert_enabled;
                 super::set_autoconvert_enabled_from_tray(hwnd, state, next, false);
             });
@@ -204,11 +207,15 @@ pub fn handle_tray_message(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                     hwnd,
                     window_visible,
                     state.autoconvert_enabled,
+                    state.autoconvert_feature_enabled,
                     state.current_theme_dark,
                 ) {
                     Ok(action) => match action {
                         super::tray::TrayMenuAction::None => {}
                         super::tray::TrayMenuAction::ToggleAutoConvert => {
+                            if !state.autoconvert_feature_enabled {
+                                return;
+                            }
                             let next = !state.autoconvert_enabled;
                             super::set_autoconvert_enabled_from_tray(hwnd, state, next, false);
                         }

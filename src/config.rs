@@ -74,6 +74,8 @@ pub struct Config {
 
     #[serde(default)]
     pub smarter_hotkeys_enabled: bool,
+    #[serde(default = "default_autoconvert_feature_enabled")]
+    pub autoconvert_feature_enabled: bool,
     #[serde(default = "default_smart_hotkey_convert_last_word_sequence")]
     pub smart_hotkey_convert_last_word_sequence: Option<HotkeySequence>,
     #[serde(default = "default_smart_hotkey_convert_last_sequence_sequence")]
@@ -110,6 +112,10 @@ fn triple_modifier_sequence(mods: u32, mods_vks: u32) -> HotkeySequence {
 
 fn default_hotkey_convert_last_sequence_sequence() -> Option<HotkeySequence> {
     Some(double_modifier_sequence(MOD_ALT.0, MODVK_LALT))
+}
+
+const fn default_autoconvert_feature_enabled() -> bool {
+    true
 }
 
 fn default_smart_hotkey_convert_last_word_sequence() -> Option<HotkeySequence> {
@@ -160,6 +166,7 @@ impl Default for Config {
             }),
 
             smarter_hotkeys_enabled: false,
+            autoconvert_feature_enabled: default_autoconvert_feature_enabled(),
             smart_hotkey_convert_last_word_sequence:
                 default_smart_hotkey_convert_last_word_sequence(),
             smart_hotkey_convert_last_sequence_sequence:

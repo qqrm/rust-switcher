@@ -30,7 +30,7 @@ use windows::{
             WindowsAndMessaging::{
                 DefWindowProcW, FindWindowW, GWLP_USERDATA, GetWindowLongPtrW, IsWindow,
                 IsWindowVisible, KillTimer, PostMessageW, PostQuitMessage, RegisterWindowMessageW,
-                SC_CLOSE, SC_MINIMIZE, SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL,
+                SC_CLOSE, SC_MINIMIZE, SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL,
                 SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow, WM_APP, WM_CLOSE,
                 WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC,
                 WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_PAINT,
@@ -167,14 +167,21 @@ fn tray_toggle_hotkey_text(state: &AppState) -> String {
 }
 
 fn refresh_tray_tooltip(hwnd: HWND, state: &AppState) {
-    let status = if state.autoconvert_enabled {
+    let status = if !state.autoconvert_feature_enabled {
+        "DISABLED"
+    } else if state.autoconvert_enabled {
         "ON"
     } else {
         "OFF"
     };
+    let hotkey = if state.autoconvert_feature_enabled {
+        tray_toggle_hotkey_text(state)
+    } else {
+        "disabled".to_string()
+    };
     let tooltip = format!(
         "AutoConvert: {status}\r\nToggle hotkey: {}\r\nClick: show/hide",
-        tray_toggle_hotkey_text(state)
+        hotkey
     );
 
     if let Err(e) = crate::platform::win::tray::set_tooltip(hwnd, &tooltip) {
@@ -223,6 +230,10 @@ fn apply_config_to_ui(
     helpers::set_checkbox(
         state.checkboxes.smarter_hotkeys,
         cfg.smarter_hotkeys_enabled,
+    );
+    helpers::set_checkbox(
+        state.checkboxes.autoconvert_feature,
+        cfg.autoconvert_feature_enabled,
     );
 
     state.hotkey_values = crate::app::HotkeyValues::from_config(cfg);
@@ -276,6 +287,7 @@ fn apply_config_to_ui(
         &format_hotkey_sequence(cfg.smart_hotkey_convert_selection_sequence),
     )?;
     crate::platform::ui::sync_smarter_hotkey_controls(hwnd, state, cfg.smarter_hotkeys_enabled)?;
+    crate::platform::ui::sync_autoconvert_controls(state, cfg.autoconvert_feature_enabled);
 
     Ok(())
 }
@@ -286,6 +298,8 @@ fn read_ui_to_config(state: &AppState, mut cfg: config::Config) -> config::Confi
     cfg.start_minimized = helpers::get_checkbox(state.checkboxes.start_minimized);
     cfg.theme_dark = helpers::get_checkbox(state.checkboxes.theme_dark);
     cfg.smarter_hotkeys_enabled = helpers::get_checkbox(state.checkboxes.smarter_hotkeys);
+    cfg.autoconvert_feature_enabled =
+        helpers::get_checkbox(state.checkboxes.autoconvert_feature);
 
     cfg.hotkey_convert_last_word_sequence = state.hotkey_sequence_values.last_word;
     cfg.hotkey_convert_last_sequence_sequence = state.hotkey_sequence_values.last_sequence;
@@ -334,6 +348,7 @@ fn apply_config_runtime(
     cfg: &config::Config,
 ) -> windows::core::Result<()> {
     state.autoconvert_enabled = false;
+    state.autoconvert_feature_enabled = cfg.autoconvert_feature_enabled;
 
     state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(cfg);
 
@@ -372,6 +387,10 @@ fn apply_config_runtime(
     }
 
     refresh_tray_tooltip(hwnd, state);
+
+    if let Err(e) = crate::platform::win::tray::switch_tray_icon(hwnd, false) {
+        tracing::warn!(error = ?e, "switch_tray_icon failed while applying config");
+    }
 
     Ok(())
 }
@@ -853,6 +872,9 @@ pub fn hotkey_id_from_wparam(wparam: WPARAM) -> i32 {
 }
 
 fn handle_pause_toggle(hwnd: HWND, state: &mut AppState) {
+    if !state.autoconvert_feature_enabled {
+        return;
+    }
     let enabled = !state.autoconvert_enabled;
     set_autoconvert_enabled_from_tray(hwnd, state, enabled, true);
 }
@@ -916,12 +938,15 @@ fn handle_switch_layout_hotkey(state: &mut AppState) {
 fn execute_runtime_command(hwnd: HWND, state: &mut AppState, command: RuntimeCommand) {
     match command {
         RuntimeCommand::AutoconvertLastWord => {
-            if state.autoconvert_enabled {
+            if state.autoconvert_feature_enabled && state.autoconvert_enabled {
                 autoconvert_last_word(state);
             }
         }
         RuntimeCommand::Hotkey(action) => match action {
             HotkeyAction::PauseToggle => {
+                if !state.autoconvert_feature_enabled {
+                    return;
+                }
                 tracing::warn!(msg = "autoconvert_toggle", source = "hotkey_pause_toggle");
                 handle_pause_toggle(hwnd, state);
             }
@@ -1048,7 +1073,8 @@ fn toggle_window_visibility_from_tray(hwnd: HWND) {
             with_state_mut_do(hwnd, |state| hide_playground(hwnd, state));
             let _ = ShowWindow(hwnd, SW_HIDE);
         } else {
-            let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = SetForegroundWindow(hwnd);
         }
     }
 }
@@ -1059,6 +1085,9 @@ fn set_autoconvert_enabled_from_tray(
     enabled: bool,
     show_balloon: bool,
 ) {
+    if enabled && !state.autoconvert_feature_enabled {
+        return;
+    }
     if state.autoconvert_enabled == enabled {
         return;
     }

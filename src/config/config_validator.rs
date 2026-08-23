@@ -16,10 +16,13 @@ pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
             CONVERT_LAST_SEQUENCE,
             &config.hotkey_convert_last_sequence_sequence,
         ),
-        (PAUSE, &config.hotkey_pause_sequence),
         (CONVERT_SELECTION, &config.hotkey_convert_selection_sequence),
         (SWITCH_LAYOUT, &config.hotkey_switch_layout_sequence),
     ];
+
+    if config.autoconvert_feature_enabled {
+        sequences.push((PAUSE, &config.hotkey_pause_sequence));
+    }
 
     if config.smarter_hotkeys_enabled {
         sequences.extend([

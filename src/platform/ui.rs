@@ -8,11 +8,14 @@ use windows::{
     Win32::{
         Foundation::{HWND, RECT},
         System::SystemServices::SS_RIGHT,
-        UI::WindowsAndMessaging::{
-            BS_AUTOCHECKBOX, BS_OWNERDRAW, CreateWindowExW, ES_READONLY, GetClientRect,
+        UI::{
+            Input::KeyboardAndMouse::EnableWindow,
+            WindowsAndMessaging::{
+                BS_AUTOCHECKBOX, BS_OWNERDRAW, CreateWindowExW, ES_READONLY, GetClientRect,
             SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
             SetWindowTextW, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_EX_CLIENTEDGE,
             WS_TABSTOP, WS_VISIBLE,
+            },
         },
     },
     core::{PCWSTR, w},
@@ -225,6 +228,18 @@ fn create_settings_group(
             style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
             rect: RectI::new(left_x + 12, top_y + 100, l.group_w_left - 24, 20),
             menu: Some(ControlId::SmarterHotkeys.hmenu()),
+        },
+    )?;
+
+    state.checkboxes.autoconvert_feature = create(
+        hwnd,
+        ControlSpec {
+            ex_style: WINDOW_EX_STYLE(0),
+            class: w!("BUTTON"),
+            text: w!("Enable AutoConvert"),
+            style: ws_i32(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
+            rect: RectI::new(left_x + 12, top_y + 124, l.group_w_left - 24, 20),
+            menu: Some(ControlId::AutoconvertFeature.hmenu()),
         },
     )?;
 
@@ -484,6 +499,12 @@ pub fn sync_smarter_hotkey_controls(
     }
 
     Ok(())
+}
+
+pub fn sync_autoconvert_controls(state: &AppState, enabled: bool) {
+    unsafe {
+        let _ = EnableWindow(state.hotkeys.pause, enabled);
+    }
 }
 
 pub fn set_playground_visible(state: &AppState, visible: bool) {

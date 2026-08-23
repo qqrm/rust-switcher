@@ -5,7 +5,7 @@ use crate::{
     platform::win::{
         keyboard::{
             HookDecision,
-            capture::{push_chord_capture, store_captured_hotkey},
+            capture::{clear_captured_hotkey, push_chord_capture, store_captured_hotkey},
             main_hwnd,
             mods::{chord_from_vk, update_mods_down_press},
             now_tick_ms,
@@ -62,6 +62,13 @@ pub(crate) fn handle_keydown_capture(
     let Some(slot) = state.hotkey_capture.slot else {
         return Ok(HookDecision::Pass);
     };
+
+    if matches!(vk, 0x08 | 0x2E) {
+        let target = clear_captured_hotkey(state, slot);
+        crate::utils::helpers::set_edit_text(target, "None")?;
+        crate::platform::win::stop_hotkey_capture_ui(hwnd, state);
+        return Ok(HookDecision::Swallow);
+    }
 
     if is_mod {
         crate::platform::win::touch_hotkey_settings_control(hwnd, state);

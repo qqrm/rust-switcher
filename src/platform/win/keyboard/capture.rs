@@ -72,6 +72,15 @@ pub(crate) fn store_captured_hotkey(
     Ok(())
 }
 
+pub(crate) fn clear_captured_hotkey(
+    state: &mut crate::app::AppState,
+    slot: crate::app::HotkeySlot,
+) -> HWND {
+    state.hotkey_sequence_values.set(slot, None);
+    state.hotkey_values.set(slot, None);
+    ui_hotkey_target(state, slot)
+}
+
 pub(crate) fn ui_hotkey_target(state: &crate::app::AppState, slot: crate::app::HotkeySlot) -> HWND {
     match slot {
         crate::app::HotkeySlot::LastWord => state.hotkeys.last_word,
@@ -82,5 +91,38 @@ pub(crate) fn ui_hotkey_target(state: &crate::app::AppState, slot: crate::app::H
         crate::app::HotkeySlot::SmartLastWord => state.hotkeys.smart_last_word,
         crate::app::HotkeySlot::SmartLastSequence => state.hotkeys.smart_last_sequence,
         crate::app::HotkeySlot::SmartSelection => state.hotkeys.smart_selection,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::HotkeySlot;
+
+    #[test]
+    fn clear_captured_hotkey_removes_both_sequence_and_legacy_binding() {
+        let mut state = crate::app::AppState::default();
+        let chord = config::HotkeyChord {
+            mods: 0,
+            mods_vks: 0,
+            vk: Some(u32::from(b'A')),
+        };
+        let sequence = config::HotkeySequence {
+            first: chord,
+            second: None,
+            third: None,
+            max_gap_ms: 1000,
+        };
+        state.hotkey_sequence_values.set(HotkeySlot::Pause, Some(sequence));
+        state.hotkey_values.set(
+            HotkeySlot::Pause,
+            Some(config::Hotkey { vk: u32::from(b'A'), mods: 0 }),
+        );
+
+        let target = clear_captured_hotkey(&mut state, HotkeySlot::Pause);
+
+        assert!(target.0.is_null());
+        assert_eq!(state.hotkey_sequence_values.pause, None);
+        assert!(state.hotkey_values.pause.is_none());
     }
 }
