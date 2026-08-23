@@ -151,6 +151,18 @@ fn allowed_duplicate_last_word_and_selection_ok() {
 }
 
 #[test]
+fn allowed_duplicate_layout_and_text_conversion_actions_ok() {
+    let same = seq1(MOD_CONTROL.0, u32::from(b'X'));
+    assert_ok(mk_cfg(
+        Some(same),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
+        Some(same),
+        Some(same),
+    ));
+}
+
+#[test]
 fn disabled_smart_sequences_are_ignored_for_duplicates() {
     let dup = seq3(
         MOD_SHIFT.0,
@@ -305,15 +317,15 @@ fn two_independent_duplicate_pairs_err_lists_both_in_stable_order() {
     let err = assert_err(mk_cfg(
         Some(a),
         Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
-        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
         Some(b),
-        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
+        Some(b),
+        Some(seq1(MOD_SHIFT.0, u32::from(b'C'))),
     ));
 
     assert_has_common_error_shape(&err);
 
     let expected = format!(
-        "Duplicate hotkey sequences found:\n\n• '{CONVERT_LAST_WORD}' and '{CONVERT_LAST_SEQUENCE}'\n• '{CONVERT_SELECTION}' and '{SWITCH_LAYOUT}'\n\nEach action must have a unique hotkey sequence."
+        "Duplicate hotkey sequences found:\n\n• '{CONVERT_LAST_WORD}' and '{CONVERT_LAST_SEQUENCE}'\n• '{PAUSE}' and '{CONVERT_SELECTION}'\n\nEach action must have a unique hotkey sequence."
     );
 
     assert_eq!(err, expected);
@@ -326,14 +338,14 @@ fn duplicates_across_non_adjacent_actions_err() {
     let err = assert_err(mk_cfg(
         Some(dup),
         None,
-        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
-        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
         Some(seq1(MOD_SHIFT.0, u32::from(b'Z'))),
+        Some(seq1(MOD_ALT.0, u32::from(b'B'))),
+        Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),
     ));
 
     assert_has_common_error_shape(&err);
     assert!(
-        err.contains(&format!("• '{CONVERT_LAST_WORD}' and '{SWITCH_LAYOUT}'\n")),
+        err.contains(&format!("• '{CONVERT_LAST_WORD}' and '{PAUSE}'\n")),
         "{err}"
     );
 }

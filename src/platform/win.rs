@@ -869,6 +869,14 @@ fn smart_last_word_hotkey_should_try_selection_first(state: &AppState) -> bool {
     last_word.is_some() && last_word == selection
 }
 
+fn layout_hotkey_shares_sequence_with(
+    state: &AppState,
+    sequence: Option<crate::config::HotkeySequence>,
+) -> bool {
+    let layout = state.active_hotkey_sequences.switch_layout;
+    layout.is_some() && layout == sequence
+}
+
 fn handle_convert_last_word_hotkey(state: &mut AppState) {
     if last_word_hotkey_should_try_selection_first(state)
         && crate::domain::text::convert::convert_selection_if_any(state)
@@ -887,6 +895,22 @@ fn handle_smart_convert_last_word_hotkey(state: &mut AppState) {
     }
 
     crate::conversion::smart_convert_last_word(state);
+}
+
+fn handle_switch_layout_hotkey(state: &mut AppState) {
+    if layout_hotkey_shares_sequence_with(state, state.active_hotkey_sequences.selection)
+        && crate::domain::text::convert::convert_selection_if_any(state)
+    {
+        return;
+    }
+
+    if layout_hotkey_shares_sequence_with(state, state.active_hotkey_sequences.last_word)
+        && crate::conversion::convert_last_word_if_any(state)
+    {
+        return;
+    }
+
+    let _ = switch_keyboard_layout();
 }
 
 fn execute_runtime_command(hwnd: HWND, state: &mut AppState, command: RuntimeCommand) {
@@ -911,9 +935,7 @@ fn execute_runtime_command(hwnd: HWND, state: &mut AppState, command: RuntimeCom
             HotkeyAction::SmartConvertSelection => {
                 crate::conversion::smart_convert_selection(state)
             }
-            HotkeyAction::SwitchLayout => {
-                let _ = switch_keyboard_layout();
-            }
+            HotkeyAction::SwitchLayout => handle_switch_layout_hotkey(state),
         },
     }
 }

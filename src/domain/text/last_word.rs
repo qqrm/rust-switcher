@@ -74,7 +74,16 @@ fn convert_sequence_runs(runs: &[InputRun], mode: DirectionMode) -> String {
     out
 }
 pub fn convert_last_word(state: &mut AppState) {
-    convert_last_word_impl(state, true, DirectionMode::LayoutFirst);
+    let _ = convert_last_word_if_any(state);
+}
+
+/// Converts the last word when a current-line word is available.
+///
+/// Returns `true` when a conversion was attempted or deliberately rejected.
+/// Returns `false` only when no word is available at the caret, allowing a
+/// shared layout-switch hotkey to fall back to switching the input layout.
+pub fn convert_last_word_if_any(state: &mut AppState) -> bool {
+    convert_last_word_impl(state, true, DirectionMode::LayoutFirst)
 }
 
 pub fn convert_last_sequence(state: &mut AppState) {
@@ -82,7 +91,7 @@ pub fn convert_last_sequence(state: &mut AppState) {
 }
 
 pub fn smart_convert_last_word(state: &mut AppState) {
-    convert_last_word_impl(state, true, DirectionMode::TextFirst);
+    let _ = convert_last_word_impl(state, true, DirectionMode::TextFirst);
 }
 
 pub fn smart_convert_last_sequence(state: &mut AppState) {
@@ -480,28 +489,28 @@ fn apply_last_word_replacement(p: &LastRunPayload, converted: &str) -> Result<()
 }
 
 #[tracing::instrument(level = "trace", skip(state))]
-fn convert_last_word_impl(state: &mut AppState, switch_layout: bool, mode: DirectionMode) {
+fn convert_last_word_impl(state: &mut AppState, switch_layout: bool, mode: DirectionMode) -> bool {
     if !foreground_window_alive() {
         tracing::warn!("foreground window is null");
-        return;
+        return true;
     }
     if switch_layout && !wait_shift_released(150) {
         tracing::info!("wait_shift_released returned false");
-        return;
+        return true;
     }
     sleep_before_convert(state);
     let Some(payload) = take_last_word_payload() else {
         tracing::info!("journal: no last word");
-        return;
+        return false;
     };
     let mut restore = JournalRestore::new(&payload);
     if payload.suffix_has_newline {
         tracing::trace!("newline present, skipping convert_last_word");
-        return;
+        return false;
     }
     if matches!(mode, DirectionMode::TextFirst) && smart::text_looks_correct(&payload.run.text) {
         tracing::trace!(text = %payload.run.text, "smart convert skipped: text already looks correct");
-        return;
+        return true;
     }
     let converted = convert_with_mode(&payload.run.text, &payload.run.layout, mode);
     tracing::trace!(%converted, "converted");
@@ -517,6 +526,8 @@ fn convert_last_word_impl(state: &mut AppState, switch_layout: bool, mode: Direc
     } else {
         tracing::warn!("convert apply failed");
     }
+
+    true
 }
 
 #[tracing::instrument(level = "trace", skip(state))]

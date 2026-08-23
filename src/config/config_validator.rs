@@ -41,6 +41,10 @@ pub fn find_duplicate_hotkey_sequences(config: &Config) -> Option<String> {
     let is_allowed_duplicate = |a: &str, b: &str| {
         (a == CONVERT_LAST_WORD && b == CONVERT_SELECTION)
             || (a == CONVERT_SELECTION && b == CONVERT_LAST_WORD)
+            || (a == CONVERT_LAST_WORD && b == SWITCH_LAYOUT)
+            || (a == SWITCH_LAYOUT && b == CONVERT_LAST_WORD)
+            || (a == CONVERT_SELECTION && b == SWITCH_LAYOUT)
+            || (a == SWITCH_LAYOUT && b == CONVERT_SELECTION)
             || (a == SMART_CONVERT_LAST_WORD && b == SMART_CONVERT_SELECTION)
             || (a == SMART_CONVERT_SELECTION && b == SMART_CONVERT_LAST_WORD)
     };
