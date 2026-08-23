@@ -118,6 +118,11 @@ Algorithm (src/domain/text/last_word.rs):
 
 Switches keyboard layout (Windows) for the current thread using the platform API.
 
+`Switch keyboard layout` may use the same sequence as `Convert last word` and
+`Convert selection`. For a shared sequence, Rust Switcher handles the actions
+in this order: selected text, then a word on the current line, then a plain
+layout switch when there is no text to convert.
+
 ### Autoconvert
 
 - The low level keyboard hook maintains a ring buffer of recent tokens.

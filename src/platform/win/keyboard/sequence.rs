@@ -539,6 +539,27 @@ mod tests {
     }
 
     #[test]
+    fn shared_double_left_shift_prioritizes_layout_fallback_route() {
+        let shared = double_modifier_sequence(MOD_SHIFT.0, MODVK_LSHIFT);
+        let mut state = state_with_sequences(HotkeySequenceValues {
+            last_word: Some(shared),
+            selection: Some(shared),
+            switch_layout: Some(shared),
+            ..Default::default()
+        });
+        let chord = modifier_only_chord(MOD_SHIFT.0, MODVK_LSHIFT);
+
+        assert_eq!(
+            try_match_any_sequence_slot(&mut state, chord, 100),
+            SequenceMatch::Consumed
+        );
+        assert_eq!(
+            try_match_any_sequence_slot(&mut state, chord, 250),
+            SequenceMatch::Triggered(HotkeySlot::SwitchLayout)
+        );
+    }
+
+    #[test]
     fn shared_double_left_shift_clears_lower_priority_selection_progress_after_trigger() {
         let shared = double_modifier_sequence(MOD_SHIFT.0, MODVK_LSHIFT);
         let mut state = state_with_sequences(HotkeySequenceValues {
