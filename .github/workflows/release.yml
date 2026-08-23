@@ -28,6 +28,7 @@ jobs:
     env:
       CARGO_TERM_PROGRESS_WHEN: never
       GH_TOKEN: ${{ github.token }}
+      RELEASE_PUSH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
     steps:
       - name: Checkout dev
@@ -91,7 +92,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if [[ -z "${RELEASE_PUSH_TOKEN}" ]]; then
+            echo "RELEASE_TOKEN must be configured in the release environment to push the version bump."
+            exit 1
+          fi
+          git remote set-url origin "https://x-access-token:${RELEASE_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Reattach local dev branch
         if: steps.release_context.outputs.should_release == 'true'
