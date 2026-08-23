@@ -521,7 +521,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rust-switcher"
-version = "1.0.14"
+version = "1.0.15"
 dependencies = [
  "confy",
  "embed-resource",
@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "rust-switcher-core"
-version = "1.0.14"
+version = "1.0.15"
 
 [[package]]
 name = "rustc_version"
