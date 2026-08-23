@@ -92,6 +92,14 @@ fn handle_buttons(hwnd: HWND, id: i32) -> LRESULT {
             }
         }),
 
+        ControlId::AutoconvertFeature => with_state_mut_do(hwnd, |state| {
+            let enabled = helpers::get_checkbox(state.checkboxes.autoconvert_feature);
+            if !enabled && state.hotkey_capture.slot == Some(crate::app::HotkeySlot::Pause) {
+                super::stop_hotkey_capture_ui(hwnd, state);
+            }
+            crate::platform::ui::sync_autoconvert_controls(state, enabled);
+        }),
+
         ControlId::Apply => with_state_mut_do(hwnd, |state| {
             super::handle_apply(hwnd, state);
         }),

@@ -103,6 +103,9 @@ pub struct HotkeySequenceValues {
 impl HotkeySequenceValues {
     pub fn from_config(cfg: &config::Config) -> Self {
         let mut values = Self::from_config_all(cfg);
+        if !cfg.autoconvert_feature_enabled {
+            values.pause = None;
+        }
         if !cfg.smarter_hotkeys_enabled {
             values.smart_last_word = None;
             values.smart_last_sequence = None;
@@ -148,6 +151,23 @@ impl HotkeySequenceValues {
             HotkeySlot::SmartLastSequence => self.smart_last_sequence = seq,
             HotkeySlot::SmartSelection => self.smart_selection = seq,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HotkeySequenceValues;
+    use crate::config::Config;
+
+    #[test]
+    fn disabled_autoconvert_feature_removes_pause_from_runtime_sequences() {
+        let cfg = Config {
+            autoconvert_feature_enabled: false,
+            ..Default::default()
+        };
+
+        assert!(HotkeySequenceValues::from_config(&cfg).pause.is_none());
+        assert!(HotkeySequenceValues::from_config_all(&cfg).pause.is_some());
     }
 }
 
@@ -234,6 +254,8 @@ pub struct AppState {
     pub buttons: Buttons,
 
     pub autoconvert_enabled: bool,
+    /// Whether the AutoConvert feature and its pause hotkey are available.
+    pub autoconvert_feature_enabled: bool,
     pub errors: VecDeque<UiError>,
 
     /// Temporary hotkeys currently shown in UI. Committed on Apply.
@@ -275,6 +297,7 @@ pub struct Checkboxes {
     pub start_minimized: HWND,
     pub theme_dark: HWND,
     pub smarter_hotkeys: HWND,
+    pub autoconvert_feature: HWND,
 }
 
 #[derive(Debug, Default)]
@@ -311,6 +334,7 @@ pub enum ControlId {
     StartMinimized = 1004,
     DarkTheme = 1005,
     SmarterHotkeys = 1006,
+    AutoconvertFeature = 1007,
 
     HotkeyLastWord = 1201,
     HotkeyLastSequence = 1202,
@@ -335,6 +359,7 @@ impl ControlId {
             1004 => Some(Self::StartMinimized),
             1005 => Some(Self::DarkTheme),
             1006 => Some(Self::SmarterHotkeys),
+            1007 => Some(Self::AutoconvertFeature),
 
             1201 => Some(Self::HotkeyLastWord),
             1202 => Some(Self::HotkeyLastSequence),

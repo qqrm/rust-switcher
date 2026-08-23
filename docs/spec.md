@@ -55,6 +55,7 @@ Config fields (see src/config.rs):
 - delay_ms: u32 (legacy config field; runtime uses the fixed 100 ms replacement delay)
 - start_minimized: bool
 - theme_dark: bool
+- autoconvert_feature_enabled: bool (defaults to true; enables automatic conversion and its pause hotkey)
 
 Hotkeys (legacy single chord, optional):
 - hotkey_convert_last_word
@@ -69,8 +70,8 @@ Hotkey sequences (preferred, optional):
 - hotkey_switch_layout_sequence
 
 Notes:
-- Autoconvert enabled is runtime only and is not stored in config.
-- Hotkey fields are shown in read-only edits, but user interaction updates pending sequence values that are applied on Apply.
+- Autoconvert active/paused state is runtime only and is not stored in config. The feature itself can be disabled persistently with `autoconvert_feature_enabled`.
+- Hotkey fields are shown in read-only edits, but user interaction updates pending sequence values that are applied on Apply. Press Backspace or Delete while a field is focused to clear that binding.
 - Hotkey sequences are validated on save.
 
 Default bindings (current defaults in code):
@@ -133,6 +134,7 @@ layout switch when there is no text to convert.
 ### Autoconvert toggle
 
 - The toggle hotkey flips runtime Autoconvert enabled.
+- Disabling AutoConvert makes its pause hotkey unavailable and prevents automatic conversions until it is enabled again.
 - Autoconvert enabled default is disabled on app start.
 - Toggling shows an informational tray balloon.
 - Tray double click triggers the same toggle.
@@ -146,6 +148,7 @@ Native Win32 UI with a single window and two group sections (custom painted fram
 - Start minimized (checkbox)
 - Theme dark (checkbox)
 - Smarter hotkeys (checkbox)
+- Enable AutoConvert (checkbox; disables the Autoconvert pause field when off)
 
 ### Hotkeys group
 - Read only displays for:

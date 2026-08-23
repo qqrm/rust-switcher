@@ -399,12 +399,18 @@ pub fn show_tray_context_menu(
     hwnd: HWND,
     window_visible: bool,
     autoconvert_enabled: bool,
+    autoconvert_feature_enabled: bool,
     current_theme_dark: bool,
 ) -> Result<TrayMenuAction> {
     unsafe {
         crate::platform::win::menu_theme::set_tray_menu_preferred_theme(current_theme_dark);
 
-        let hmenu = build_tray_menu(window_visible, autoconvert_enabled, current_theme_dark)?;
+        let hmenu = build_tray_menu(
+            window_visible,
+            autoconvert_enabled,
+            autoconvert_feature_enabled,
+            current_theme_dark,
+        )?;
 
         crate::platform::win::menu_theme::flush_tray_menu_theme();
 
@@ -414,6 +420,7 @@ pub fn show_tray_context_menu(
             hwnd,
             window_visible,
             autoconvert_enabled,
+            autoconvert_feature_enabled,
             current_theme_dark,
             cmd,
         )
@@ -423,11 +430,14 @@ pub fn show_tray_context_menu(
 fn build_tray_menu(
     window_visible: bool,
     autoconvert_enabled: bool,
+    autoconvert_feature_enabled: bool,
     current_theme_dark: bool,
 ) -> Result<HMENU> {
     let hmenu = unsafe { CreatePopupMenu() }?;
 
-    unsafe { append_autoconvert_toggle_item(hmenu, autoconvert_enabled) }?;
+    unsafe {
+        append_autoconvert_toggle_item(hmenu, autoconvert_enabled, autoconvert_feature_enabled)
+    }?;
     unsafe { AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null()) }?;
 
     unsafe { append_show_hide_item(hmenu, window_visible) }?;
@@ -441,9 +451,13 @@ fn build_tray_menu(
     Ok(hmenu)
 }
 
-unsafe fn append_autoconvert_toggle_item(hmenu: HMENU, autoconvert_enabled: bool) -> Result<()> {
+unsafe fn append_autoconvert_toggle_item(
+    hmenu: HMENU,
+    autoconvert_enabled: bool,
+    autoconvert_feature_enabled: bool,
+) -> Result<()> {
     use windows::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, MF_CHECKED, MF_STRING, MF_UNCHECKED,
+        AppendMenuW, MF_CHECKED, MF_GRAYED, MF_STRING, MF_UNCHECKED,
     };
 
     let text = "AutoConvert\0";
@@ -458,7 +472,13 @@ unsafe fn append_autoconvert_toggle_item(hmenu: HMENU, autoconvert_enabled: bool
     (unsafe {
         AppendMenuW(
             hmenu,
-            MF_STRING | check,
+            MF_STRING
+                | check
+                | if autoconvert_feature_enabled {
+                    windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0)
+                } else {
+                    MF_GRAYED
+                },
             ID_AUTOCONVERT_TOGGLE as usize,
             PCWSTR(wide.as_ptr()),
         )
@@ -522,11 +542,12 @@ unsafe fn handle_tray_menu_cmd(
     hwnd: HWND,
     window_visible: bool,
     _autoconvert_enabled: bool,
+    autoconvert_feature_enabled: bool,
     current_theme_dark: bool,
     cmd: u32,
 ) -> Result<TrayMenuAction> {
     match cmd {
-        ID_AUTOCONVERT_TOGGLE => Ok(TrayMenuAction::ToggleAutoConvert),
+        ID_AUTOCONVERT_TOGGLE if autoconvert_feature_enabled => Ok(TrayMenuAction::ToggleAutoConvert),
 
         ID_SHOW_HIDE => {
             unsafe { toggle_window_visibility(hwnd, window_visible) };

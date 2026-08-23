@@ -117,6 +117,19 @@ fn no_sequences_ok() {
 }
 
 #[test]
+fn disabled_autoconvert_pause_sequence_is_ignored_for_duplicates() {
+    let duplicate = seq1(MOD_CONTROL.0, u32::from(b'A'));
+    let cfg = Config {
+        autoconvert_feature_enabled: false,
+        hotkey_convert_last_sequence_sequence: Some(duplicate),
+        hotkey_pause_sequence: Some(duplicate),
+        ..Default::default()
+    };
+
+    assert_ok(cfg);
+}
+
+#[test]
 fn only_one_sequence_ok() {
     assert_ok(mk_cfg(
         Some(seq1(MOD_CONTROL.0, u32::from(b'A'))),

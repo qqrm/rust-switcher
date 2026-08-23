@@ -8,7 +8,7 @@ Rust Switcher is a Windows 11 utility that helps convert text between RU and EN 
 
 - Convert selected text (RU↔EN)
 - Convert the last typed sequence via a hotkey ("smart" conversion also handles selection)
-- Auto-convert the last word while typing (runtime toggle, starts paused)
+- Auto-convert the last word while typing (can be disabled in Settings; runtime toggle starts paused)
 - Tray icon and quick actions menu
 - Light and dark UI themes
 - Settings are saved to a config file
@@ -45,6 +45,8 @@ Default hotkey sequences:
 * Convert selection: double tap Left Shift
 * Autoconvert toggle: double tap Right Ctrl
 * Switch layout: CapsLock
+
+To remove a binding, focus its hotkey field and press Backspace or Delete.
 
 ## Development
 
