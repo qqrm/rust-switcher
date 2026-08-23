@@ -78,6 +78,12 @@ try {
     Assert-CleanWorktree
 
     $head = (Invoke-Checked git @('rev-parse', 'HEAD') -Quiet).Output.Trim()
+
+    # Publish the release commit before creating an immutable tag. This keeps
+    # the dev branch, tag, GitHub Release, and crates.io version on one source commit.
+    Write-Host "`n>> git push origin dev"
+    Invoke-Checked git @('push', 'origin', 'dev')
+
     $created = Ensure-Tag-Immutable -Tag $tag -ExpectedSha $head
 
     Write-Host "`n>> git push origin $tag"
