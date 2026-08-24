@@ -156,8 +156,8 @@ impl HotkeySequenceValues {
 
 #[cfg(test)]
 mod tests {
-    use super::HotkeySequenceValues;
-    use crate::config::Config;
+    use super::*;
+    use crate::{config::Config, input::hotkeys::HotkeyAction};
 
     #[test]
     fn disabled_autoconvert_feature_removes_pause_from_runtime_sequences() {
@@ -168,6 +168,69 @@ mod tests {
 
         assert!(HotkeySequenceValues::from_config(&cfg).pause.is_none());
         assert!(HotkeySequenceValues::from_config_all(&cfg).pause.is_some());
+    }
+
+    #[test]
+    fn disabling_autoconvert_removes_every_pending_pause_entry_point() {
+        let cfg = Config::default();
+        let pause_sequence = cfg.hotkey_pause_sequence.expect("default pause sequence");
+        let last_word_sequence = cfg
+            .hotkey_convert_last_word_sequence
+            .expect("default last-word sequence");
+        let mut state = AppState {
+            autoconvert_enabled: true,
+            autoconvert_feature_enabled: true,
+            active_hotkey_sequences: HotkeySequenceValues {
+                last_word: Some(last_word_sequence),
+                pause: Some(pause_sequence),
+                ..Default::default()
+            },
+            active_pause_hotkey: cfg.hotkey_pause,
+            active_pause_hotkey_sequence: Some(pause_sequence),
+            hotkey_sequence_progress: HotkeySequenceProgress {
+                pause: SequenceProgress {
+                    waiting_second: true,
+                    first_tick_ms: 42,
+                    matched_chords: 1,
+                },
+                ..Default::default()
+            },
+            deferred_sequence_hotkey: Some(DeferredSequenceHotkey {
+                slot: HotkeySlot::Pause,
+            }),
+            pending_runtime_commands: [
+                RuntimeCommand::AutoconvertLastWord,
+                RuntimeCommand::Hotkey(HotkeyAction::PauseToggle),
+                RuntimeCommand::Hotkey(HotkeyAction::ConvertLastWord),
+            ]
+            .into(),
+            ..Default::default()
+        };
+
+        assert!(state.set_autoconvert_feature_enabled(false));
+        assert!(!state.autoconvert_feature_enabled);
+        assert!(!state.autoconvert_enabled);
+        assert!(state.active_hotkey_sequences.pause.is_none());
+        assert_eq!(
+            state.active_hotkey_sequences.last_word,
+            Some(last_word_sequence),
+            "disabling AutoConvert must not disable unrelated hotkeys"
+        );
+        assert_eq!(state.hotkey_sequence_progress.pause.matched_chords, 0);
+        assert!(state.deferred_sequence_hotkey.is_none());
+        assert_eq!(
+            state
+                .pending_runtime_commands
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![RuntimeCommand::Hotkey(HotkeyAction::ConvertLastWord)]
+        );
+
+        assert!(!state.set_autoconvert_feature_enabled(true));
+        assert!(state.autoconvert_feature_enabled);
+        assert!(!state.autoconvert_enabled);
+        assert_eq!(state.active_hotkey_sequences.pause, Some(pause_sequence));
     }
 }
 
@@ -269,6 +332,12 @@ pub struct AppState {
     /// This must NOT be tied to temporary edits in the UI.
     pub active_hotkey_sequences: HotkeySequenceValues,
 
+    /// The already applied pause hotkeys. These are kept separately from the
+    /// editable values so toggling AutoConvert in the UI never activates an
+    /// un-applied hotkey change.
+    pub active_pause_hotkey: Option<config::Hotkey>,
+    pub active_pause_hotkey_sequence: Option<config::HotkeySequence>,
+
     /// Runtime state for modifier-only chord detection.
     pub runtime_chord_capture: RuntimeChordCapture,
 
@@ -289,6 +358,42 @@ pub struct AppState {
     pub dark_brush_window_bg: HBRUSH,
     pub dark_brush_control_bg: HBRUSH,
     pub dark_brush_edit_bg: HBRUSH,
+}
+
+impl AppState {
+    /// Applies the AutoConvert availability gate immediately, without saving
+    /// the Settings form. `Cancel` restores the persisted configuration.
+    ///
+    /// Returns whether a deferred pause sequence was cancelled and its timer
+    /// therefore needs to be stopped by the window layer.
+    pub fn set_autoconvert_feature_enabled(&mut self, enabled: bool) -> bool {
+        let cancelled_deferred_pause = self
+            .deferred_sequence_hotkey
+            .is_some_and(|deferred| deferred.slot == HotkeySlot::Pause);
+
+        self.autoconvert_feature_enabled = enabled;
+        self.autoconvert_enabled = false;
+        self.active_hotkey_sequences.pause = if enabled {
+            self.active_pause_hotkey_sequence
+        } else {
+            None
+        };
+        self.hotkey_sequence_progress.pause = SequenceProgress::default();
+
+        if cancelled_deferred_pause {
+            self.deferred_sequence_hotkey = None;
+        }
+
+        self.pending_runtime_commands.retain(|command| {
+            !matches!(
+                command,
+                RuntimeCommand::AutoconvertLastWord
+                    | RuntimeCommand::Hotkey(HotkeyAction::PauseToggle)
+            )
+        });
+
+        cancelled_deferred_pause
+    }
 }
 
 #[derive(Debug, Default)]
