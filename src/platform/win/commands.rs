@@ -98,6 +98,7 @@ fn handle_buttons(hwnd: HWND, id: i32) -> LRESULT {
                 super::stop_hotkey_capture_ui(hwnd, state);
             }
             crate::platform::ui::sync_autoconvert_controls(state, enabled);
+            super::set_autoconvert_feature_enabled_from_ui(hwnd, state, enabled);
         }),
 
         ControlId::Apply => with_state_mut_do(hwnd, |state| {

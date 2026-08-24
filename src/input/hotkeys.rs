@@ -123,3 +123,13 @@ pub fn register_from_config(hwnd: HWND, cfg: &config::Config) -> windows::core::
 
     Ok(())
 }
+
+/// Replaces only the system-registered pause hotkey. Sequence hotkeys are
+/// handled by the low-level hook and are gated in `AppState` separately.
+pub fn register_pause_hotkey(
+    hwnd: HWND,
+    hotkey: Option<config::Hotkey>,
+) -> windows::core::Result<()> {
+    unregister_one_quiet(hwnd, HK_PAUSE_TOGGLE_ID)?;
+    register_one(hwnd, HK_PAUSE_TOGGLE_ID, hotkey)
+}

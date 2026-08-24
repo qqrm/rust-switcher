@@ -24,6 +24,10 @@ enum TrayEvent {
     Unknown,
 }
 
+fn next_autoconvert_state(feature_enabled: bool, autoconvert_enabled: bool) -> Option<bool> {
+    feature_enabled.then_some(!autoconvert_enabled)
+}
+
 fn tray_event_from_lparam(raw: u32) -> TrayEvent {
     let msg = raw & 0xFFFF;
 
@@ -185,11 +189,12 @@ pub fn handle_tray_message(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             let _ = unsafe { KillTimer(Some(hwnd), TRAY_SINGLE_CLICK_TIMER_ID) };
 
             with_state_mut_do(hwnd, |state| {
-                if !state.autoconvert_feature_enabled {
-                    return;
+                if let Some(next) = next_autoconvert_state(
+                    state.autoconvert_feature_enabled,
+                    state.autoconvert_enabled,
+                ) {
+                    super::set_autoconvert_enabled_from_tray(hwnd, state, next, false);
                 }
-                let next = !state.autoconvert_enabled;
-                super::set_autoconvert_enabled_from_tray(hwnd, state, next, false);
             });
 
             LRESULT(0)
@@ -213,11 +218,14 @@ pub fn handle_tray_message(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                     Ok(action) => match action {
                         super::tray::TrayMenuAction::None => {}
                         super::tray::TrayMenuAction::ToggleAutoConvert => {
-                            if !state.autoconvert_feature_enabled {
-                                return;
+                            if let Some(next) = next_autoconvert_state(
+                                state.autoconvert_feature_enabled,
+                                state.autoconvert_enabled,
+                            ) {
+                                super::set_autoconvert_enabled_from_tray(
+                                    hwnd, state, next, false,
+                                );
                             }
-                            let next = !state.autoconvert_enabled;
-                            super::set_autoconvert_enabled_from_tray(hwnd, state, next, false);
                         }
                     },
                     Err(e) => tracing::warn!(error = ?e, "tray menu failed"),
@@ -228,5 +236,22 @@ pub fn handle_tray_message(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESUL
         }
 
         TrayEvent::Unknown => LRESULT(0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_autoconvert_state;
+
+    #[test]
+    fn double_click_and_menu_cannot_toggle_a_disabled_autoconvert_feature() {
+        assert_eq!(next_autoconvert_state(false, false), None);
+        assert_eq!(next_autoconvert_state(false, true), None);
+    }
+
+    #[test]
+    fn tray_toggle_inverts_only_an_enabled_autoconvert_feature() {
+        assert_eq!(next_autoconvert_state(true, false), Some(true));
+        assert_eq!(next_autoconvert_state(true, true), Some(false));
     }
 }

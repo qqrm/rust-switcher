@@ -153,10 +153,10 @@ pub(crate) fn apply_theme_from_tray(hwnd: HWND, dark: bool) {
 }
 
 fn tray_toggle_hotkey_text(state: &AppState) -> String {
-    let hotkey = if state.hotkey_sequence_values.pause.is_some() {
-        format_hotkey_sequence(state.hotkey_sequence_values.pause)
+    let hotkey = if state.active_pause_hotkey_sequence.is_some() {
+        format_hotkey_sequence(state.active_pause_hotkey_sequence)
     } else {
-        format_hotkey(state.hotkey_values.pause)
+        format_hotkey(state.active_pause_hotkey)
     };
 
     if hotkey == "None" {
@@ -347,10 +347,19 @@ fn apply_config_runtime(
     state: &mut AppState,
     cfg: &config::Config,
 ) -> windows::core::Result<()> {
-    state.autoconvert_enabled = false;
-    state.autoconvert_feature_enabled = cfg.autoconvert_feature_enabled;
-
     state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(cfg);
+    state.active_pause_hotkey = cfg.hotkey_pause;
+    state.active_pause_hotkey_sequence = cfg.hotkey_pause_sequence;
+    let cancelled_deferred_pause =
+        state.set_autoconvert_feature_enabled(cfg.autoconvert_feature_enabled);
+    if cancelled_deferred_pause {
+        unsafe {
+            let _ = KillTimer(
+                Some(hwnd),
+                crate::platform::win::keyboard::sequence::DEFERRED_SEQUENCE_TIMER_ID,
+            );
+        }
+    }
 
     state.runtime_chord_capture = crate::app::RuntimeChordCapture::default();
     state.hotkey_sequence_progress = crate::app::HotkeySequenceProgress::default();
@@ -393,6 +402,38 @@ fn apply_config_runtime(
     }
 
     Ok(())
+}
+
+/// Makes the AutoConvert checkbox effective immediately, including every
+/// runtime entry point. The persisted value is still changed only by Apply.
+pub(crate) fn set_autoconvert_feature_enabled_from_ui(
+    hwnd: HWND,
+    state: &mut AppState,
+    enabled: bool,
+) {
+    let cancelled_deferred_pause = state.set_autoconvert_feature_enabled(enabled);
+    if cancelled_deferred_pause {
+        unsafe {
+            let _ = KillTimer(
+                Some(hwnd),
+                crate::platform::win::keyboard::sequence::DEFERRED_SEQUENCE_TIMER_ID,
+            );
+        }
+    }
+
+    let hotkey = enabled.then_some(state.active_pause_hotkey).flatten();
+    ui::error_notifier::report_unit(
+        hwnd,
+        state,
+        T_CONFIG,
+        "Failed to update AutoConvert hotkey",
+        crate::input::hotkeys::register_pause_hotkey(hwnd, hotkey),
+    );
+
+    refresh_tray_tooltip(hwnd, state);
+    if let Err(e) = crate::platform::win::tray::switch_tray_icon(hwnd, false) {
+        tracing::warn!(error = ?e, "switch_tray_icon failed while toggling AutoConvert feature");
+    }
 }
 
 fn init_font_and_visuals(hwnd: HWND, state: &mut AppState) {
@@ -668,7 +709,9 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
             }
 
             with_state_mut_do(hwnd, |state| {
-                enqueue_runtime_command(hwnd, state, RuntimeCommand::AutoconvertLastWord);
+                if state.autoconvert_feature_enabled && state.autoconvert_enabled {
+                    enqueue_runtime_command(hwnd, state, RuntimeCommand::AutoconvertLastWord);
+                }
             });
 
             LRESULT(0)
@@ -1020,6 +1063,9 @@ fn on_hotkey(hwnd: HWND, wparam: WPARAM) -> LRESULT {
     };
 
     with_state_mut(hwnd, |state| {
+        if action == HotkeyAction::PauseToggle && !state.autoconvert_feature_enabled {
+            return;
+        }
         enqueue_runtime_command(hwnd, state, RuntimeCommand::Hotkey(action));
     });
 
@@ -1085,7 +1131,7 @@ fn set_autoconvert_enabled_from_tray(
     enabled: bool,
     show_balloon: bool,
 ) {
-    if enabled && !state.autoconvert_feature_enabled {
+    if !state.autoconvert_feature_enabled {
         return;
     }
     if state.autoconvert_enabled == enabled {
