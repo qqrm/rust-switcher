@@ -58,6 +58,7 @@ windows = { version = "0.62", features = [
     "Win32_UI_Controls",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
+    "Win32_System_Registry",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Com",
     "Win32_UI_Accessibility",
@@ -90,7 +91,6 @@ tracing-test = "0.2.6"
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.zip"
 pkg-fmt = "zip"
 bin-dir = "{ bin }{ binary-ext }"
-
 
 
 
