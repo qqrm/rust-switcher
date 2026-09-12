@@ -43,7 +43,7 @@ It is intended as onboarding documentation and as a reference for expected runti
     - RegisterHotKey for legacy single-chord bindings
     - WH_KEYBOARD_LL + sequence matcher for hotkey sequences
   - Keyboard layout switching
-  - Autostart shortcut in Startup folder
+  - Per-user Registry Run autostart entry
   - Notifications (tray balloon, MessageBox fallback)
 - Persistence:
   - Config stored under %APPDATA%\RustSwitcher\config.json via confy
@@ -185,14 +185,15 @@ Theme behavior:
 
 ## Autostart
 
-- Implemented by creating a shortcut RustSwitcher.lnk in the user Startup folder.
-- The shortcut points to the current executable path.
-- Moving or deleting the executable breaks autostart.
+- Implemented through the per-user `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+  registry key.
+- The `RustSwitcher` value starts the current executable with `--autostart`.
+- A legacy Startup-folder shortcut is migrated on first launch of this version.
 
 Persistence note:
 - Autostart is NOT stored in config.json.
-- The UI checkbox reflects the current system autostart shortcut presence.
-- Toggling the checkbox creates or deletes the shortcut immediately.
+- The UI checkbox reflects the current Registry Run value.
+- Toggling the checkbox creates or deletes the Registry value immediately.
 
 ## Notifications and errors
 
@@ -214,4 +215,5 @@ How it is gated:
 
 ## Known issues (current behavior)
 
-- Autostart depends on a shortcut pointing to the current exe path, so relocating the exe breaks autostart.
+- Autostart depends on the Registry value pointing to the current executable path,
+  so relocating the executable breaks autostart until it is re-enabled in the UI.

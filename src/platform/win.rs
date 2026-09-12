@@ -470,7 +470,7 @@ macro_rules! startup_or_return0 {
 pub fn handle_autostart_toggle(hwnd: HWND, state: &mut AppState) {
     let desired = crate::utils::helpers::get_checkbox(state.checkboxes.autostart);
 
-    if let Err(e) = crate::platform::win::autostart::apply_startup_shortcut(desired) {
+    if let Err(e) = crate::platform::win::autostart::set_enabled(desired) {
         crate::platform::ui::error_notifier::push(
             hwnd,
             state,
@@ -529,6 +529,13 @@ fn on_create(hwnd: HWND) -> LRESULT {
     #[rustfmt::skip]
     startup_or_return0!(hwnd, &mut state, "Failed to create UI controls", ui::create_controls(hwnd, &mut state));
     let cfg = load_config_or_default(hwnd, state.as_mut());
+
+    startup_or_return0!(
+        hwnd,
+        &mut state,
+        "Failed to migrate autostart setting",
+        autostart::migrate_legacy_shortcut()
+    );
 
     state.hotkey_values = crate::app::HotkeyValues::from_config(&cfg);
     state.active_hotkey_sequences = crate::app::HotkeySequenceValues::from_config(&cfg);
