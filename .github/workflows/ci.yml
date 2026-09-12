@@ -64,8 +64,13 @@ jobs:
           toolchain: nightly
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        with:
+          tool: cargo-nextest
+          fallback: none
       - name: Cargo test (core lib/tests only)
-        run: cargo +nightly test --lib --tests --locked
+        run: cargo +nightly nextest run --lib --tests --locked
 
   windows-full:
     name: windows-full
@@ -88,5 +93,33 @@ jobs:
         run: cargo +nightly clippy --all-targets --all-features -- -D warnings
       - name: Cargo build (debug-tracing)
         run: cargo +nightly build --features debug-tracing
-      - name: Cargo test --locked
-        run: cargo +nightly test --locked
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        with:
+          tool: cargo-nextest
+          fallback: none
+      - name: Cargo nextest --locked
+        run: cargo +nightly nextest run --locked
+
+  dependency-security:
+    name: dependency-security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install dependency tooling
+        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        with:
+          tool: |
+            cargo-audit@0.22.2
+            cargo-deny@0.20.2
+            cargo-machete@0.9.2
+          fallback: none
+      - name: Audit dependencies
+        run: cargo audit
+      - name: Check dependency advisories and sources
+        run: cargo deny check advisories bans sources
+      - name: Check unused dependencies
+        run: cargo machete
