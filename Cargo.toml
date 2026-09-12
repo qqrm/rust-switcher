@@ -27,11 +27,10 @@ tracing-subscriber = { version = "0.3", features = [
     "fmt",
     "env-filter",
 ], optional = true }
-tracing-appender = { version = "0.2", optional = true }
 
 [features]
 default = []
-debug-tracing = ["tracing-subscriber", "tracing-appender"]
+debug-tracing = ["tracing-subscriber"]
 debug-binary = []
 
 [[bin]]
@@ -91,7 +90,6 @@ tracing-test = "0.2.6"
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.zip"
 pkg-fmt = "zip"
 bin-dir = "{ bin }{ binary-ext }"
-
 
 
 
